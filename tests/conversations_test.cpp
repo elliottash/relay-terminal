@@ -738,68 +738,78 @@ private slots:
         }
     }
 
-    void paneInfoPopoverCopiesAndKeepsTheInfoClick() {
+    // Card #7EWF: the overlay's summary keeps what identifies and sizes the conversation and
+    // drops the cost, the usage table and the history.
+    void infoSummaryLeavesOutCostAndHistory() {
+        const QDateTime now = QDateTime::currentDateTime();
+        const QJsonObject info{{QStringLiteral("kind"), QStringLiteral("session")},
+                               {QStringLiteral("title"), QStringLiteral("Chrome row")},
+                               {QStringLiteral("live"), true},
+                               {QStringLiteral("model"), QStringLiteral("glm-5")},
+                               {QStringLiteral("session_id"), QStringLiteral("7ewf0a1b2c3d")},
+                               {QStringLiteral("context"), QJsonObject{{QStringLiteral("used_tokens"), 41200},
+                                                                      {QStringLiteral("window"), 200000},
+                                                                      {QStringLiteral("percent"), 20.6}}},
+                               {QStringLiteral("usage"), QJsonObject{{QStringLiteral("prompt_tokens"), 1200},
+                                                                    {QStringLiteral("total_tokens"), 1500},
+                                                                    {QStringLiteral("requests"), 2},
+                                                                    {QStringLiteral("cost_estimate"), 0.25}}},
+                               {QStringLiteral("turns"), 3},
+                               {QStringLiteral("turns_usage"), QJsonArray{QJsonObject{{QStringLiteral("turn"), 1}}}},
+                               {QStringLiteral("history"), QJsonArray{QJsonObject{{QStringLiteral("turn"), 1},
+                                                                                  {QStringLiteral("prompt"), QStringLiteral("old prompt")}}}}};
+        const QString html = relay::sessioninfo::renderSummary(info, QStringLiteral("a1b2c3d4"), now);
+        for (const char *row : {"Model", "Context", "Tokens", "Session", "Started", "Turns", "Instructions"})
+            QVERIFY2(html.contains(QStringLiteral("<td class=k>%1</td>").arg(QLatin1String(row))), row);
+        QVERIFY(html.contains(QStringLiteral("relay-info:copy?text=7ewf0a1b2c3d")));
+        QVERIFY(html.contains(QStringLiteral("pane a1b2c3d4")));
+        QVERIFY(!html.contains(QStringLiteral("Cost")));
+        QVERIFY(!html.contains(QStringLiteral("Usage by turn")));
+        QVERIFY(!html.contains(QStringLiteral("History")));
+        QVERIFY(!html.contains(QStringLiteral("old prompt")));
+        // The info pane still has all of it.
+        const QString full = relay::sessioninfo::renderInfo(info, now);
+        QVERIFY(full.contains(QStringLiteral("Cost")));
+        QVERIFY(full.contains(QStringLiteral("History")));
+    }
+
+    void infoOverlayCopiesAndCloses() {
         using namespace relay::sessioninfo;
         QWidget pane;
-        pane.resize(320, 180);
+        pane.resize(520, 360);
         InfoButton info(&pane);
-        info.setObjectName(QStringLiteral("paneInfoAnchor"));
-        info.move(280, 4);
-        info.show();
-        PaneInfoPopover popover(&pane, &info, QStringLiteral("a1b2c3d4"));
-        int infoClicks = 0, dimClicks = 0;
-        connect(&info, &QToolButton::clicked, &pane, [&] { ++infoClicks; });
-        popover.onToggleDim = [&] { ++dimClicks; };
+        info.move(480, 4);
         pane.show();
-
-        // Hover opens it, and the delayed close is cancelled when the pointer crosses from the
-        // circle-i onto the popover. This is what makes its buttons genuinely reachable.
-        QEvent enter(QEvent::Enter);
-        QApplication::sendEvent(&info, &enter);
-        QVERIFY(popover.isVisible());
-        QEvent leave(QEvent::Leave);
-        QApplication::sendEvent(&info, &leave);
-        QEvent enterPopover(QEvent::Enter);
-        QApplication::sendEvent(&popover, &enterPopover);
-        QTest::qWait(260);
-        QVERIFY(popover.isVisible());
-
-        auto buttons = popover.findChildren<QToolButton *>();
-        QToolButton *copy = nullptr, *dim = nullptr;
-        for (QToolButton *button : buttons) {
-            if (button->accessibleName() == QStringLiteral("Copy pane ID")) copy = button;
-            if (button->accessibleName() == QStringLiteral("Dim pane")) dim = button;
-        }
-        QVERIFY(copy);
-        QVERIFY(dim);
-        QTest::mouseClick(copy, Qt::LeftButton);
-        QCOMPARE(QApplication::clipboard()->text(), QStringLiteral("a1b2c3d4"));
-        QCOMPARE(copy->text(), QStringLiteral("Copied"));
-        QTest::mouseClick(dim, Qt::LeftButton);
-        QCOMPARE(dimClicks, 1);
-
-        // Dimming state changes the low-frequency action in place; it never adds a header button.
-        popover.setDimState(90, true);
-        QVERIFY(dim->isChecked());
-        QVERIFY(dim->text().contains(QStringLiteral("Restore automatic")));
-        // Hovering the dim button names the toggle's key, read from the live keymap so a
-        // rebinding reads correctly (nothing is appended when the action is unbound).
-        const QString dimKeys = Keymap::instance().shortcutText(
-            QStringLiteral("pane.dimToggle"));
-        QVERIFY(!dimKeys.isEmpty());
-        QVERIFY2(dim->toolTip().contains(QStringLiteral("(%1)").arg(dimKeys)),
-                 qPrintable(dim->toolTip()));
-        QVERIFY(dim->toolTip().contains(QStringLiteral("Alt+wheel")));
-        popover.setDimState(0, false);
-        QVERIFY(dim->toolTip().contains(QStringLiteral("(%1)").arg(dimKeys)));
-        QTest::mouseClick(&info, Qt::LeftButton);
-        QCOMPARE(infoClicks, 1);   // the circle-i's original Conversation info action is intact
-
-        info.clearFocus();
-        QApplication::processEvents();
-        popover.hide();
-        info.setFocus(Qt::TabFocusReason);
-        QTRY_VERIFY(popover.isVisible());   // keyboard users get the same surface as hover
+        InfoOverlay overlay(&pane, &info, QStringLiteral("a1b2c3d4"));
+        QList<QJsonObject> asked;
+        overlay.onRequest = [&asked](const QJsonObject &request) { asked << request; };
+        int closed = 0;
+        overlay.onClosed = [&closed] { ++closed; };
+        overlay.open();
+        QCOMPARE(asked.size(), 1);
+        const QString id = asked.last().value(QStringLiteral("id")).toString();
+        QVERIFY(overlay.owns(id));
+        overlay.setInfo({{QStringLiteral("id"), QStringLiteral("someone-else")}, {QStringLiteral("title"), QStringLiteral("Not mine")}});
+        QVERIFY(!overlay.html().contains(QStringLiteral("Not mine")));
+        overlay.setInfo({{QStringLiteral("id"), id}, {QStringLiteral("kind"), QStringLiteral("session")},
+                         {QStringLiteral("title"), QStringLiteral("Mine")}, {QStringLiteral("session_id"), QStringLiteral("7ewf0a1b2c3d")}});
+        QVERIFY(overlay.html().contains(QStringLiteral("Mine")));
+        QVERIFY(!overlay.owns(id));
+        auto *body = overlay.findChild<QLabel *>(QStringLiteral("paneInfoBody"));
+        QVERIFY(body);
+        emit body->linkActivated(QStringLiteral("relay-info:copy?text=7ewf0a1b2c3d&what=session%20id"));
+        QCOMPARE(QApplication::clipboard()->text(), QStringLiteral("7ewf0a1b2c3d"));
+        QTest::keyClick(&overlay, Qt::Key_Escape);
+        QVERIFY(!overlay.isVisible());
+        QCOMPARE(closed, 1);
+        overlay.toggle();
+        QVERIFY(overlay.isVisible());
+        QCOMPARE(asked.size(), 2);   // every opening asks again
+        overlay.setError(asked.last().value(QStringLiteral("id")).toString(), QStringLiteral("No agent yet"));
+        QVERIFY(overlay.html().contains(QStringLiteral("No agent yet")));
+        overlay.toggle();
+        QVERIFY(!overlay.isVisible());
+        QCOMPARE(closed, 2);
     }
 
     void infoViewNavigatesAndGoesBack() {

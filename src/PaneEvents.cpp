@@ -840,6 +840,7 @@ void Pane::handle(const QJsonObject &event) {
             stopTurnClock();
             m_turnSaw429 = false; m_failoverTarget.clear();
             if (m_infoView) m_infoView->refreshIfLive();   // the ⓘ pane follows the turns it lists
+            if (m_infoOverlay) m_infoOverlay->refreshIfOpen();
             if (type == QStringLiteral("cancelled")) {
                 ensureLineStart(); printInline(QStringLiteral("Stopped. Actions that already ran are not rolled back.\n"), Ink::Error);
             }

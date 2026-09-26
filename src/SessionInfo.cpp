@@ -23,6 +23,7 @@
 #include <QTextBrowser>
 #include <QTextCursor>
 #include <QTimer>
+#include <QToolTip>
 #include <QUrl>
 #include <QVBoxLayout>
 
@@ -221,6 +222,50 @@ QString threadLine(const QJsonObject &thread, const QString &dir, int depth) {
     return html;
 }
 
+// The cells both the info pane and the overlay show (card #7EWF), so the two say the same thing.
+QString modelCell(const QJsonObject &info) {
+    const QString named = modelNameOf(info);
+    QString model = esc(named);
+    const QString provider = providerBeside(info.value(QStringLiteral("provider")).toString(), named);
+    if (!provider.isEmpty()) model += QStringLiteral(" <span class=m>· %1</span>").arg(esc(provider));
+    const QString effort = info.value(QStringLiteral("effort")).toString();
+    const QString mode = info.value(QStringLiteral("mode")).toString();
+    if (!effort.isEmpty()) model += QStringLiteral(" <span class=m>· effort %1</span>").arg(esc(effort));
+    if (mode == QLatin1String("plan")) model += QStringLiteral(" <span class=m>· plan mode</span>");
+    // Which prompt profile the pane is sending (#GMCF decision 7): only worth a word when it is
+    // the short one, which is a different agent — 16 rules and 8 tools, no Switchboard, no todos.
+    if (info.value(QStringLiteral("prompt_profile")).toString() == QLatin1String("short"))
+        model += QStringLiteral(" <span class=m>· short prompt</span>");
+    return model;
+}
+
+// Empty when the worker reported no context figures.
+QString contextCell(const QJsonObject &info) {
+    const QJsonObject context = info.value(QStringLiteral("context")).toObject();
+    if (context.isEmpty()) return QString();
+    return QStringLiteral("%1 / %2 tokens <span class=m>· %3%%4</span>")
+        .arg(compactNumber(context.value(QStringLiteral("used_tokens")).toVariant().toLongLong()),
+             compactNumber(context.value(QStringLiteral("window")).toVariant().toLongLong()))
+        .arg(context.value(QStringLiteral("percent")).toDouble(), 0, 'f', 1)
+        .arg(context.value(QStringLiteral("estimated")).toBool() ? QStringLiteral(" · estimated") : QString());
+}
+
+QString turnsCell(const QJsonObject &info) {
+    const int threads = info.value(QStringLiteral("thread_count")).toInt();
+    return QStringLiteral("%1%2").arg(info.value(QStringLiteral("turns")).toInt())
+        .arg(threads > 0 ? QStringLiteral(" <span class=m>· %1 subagent thread%2</span>").arg(threads)
+                               .arg(threads == 1 ? QString() : QStringLiteral("s")) : QString());
+}
+
+QString instructionsCell(const QJsonObject &info) {
+    QStringList instructions;
+    for (const auto &value : info.value(QStringLiteral("instructions")).toArray()) {
+        const QString path = value.toString();
+        instructions << link(QStringLiteral("file"), {{QStringLiteral("path"), path}}, esc(QFileInfo(path).fileName().isEmpty() ? path : QFileInfo(path).fileName()));
+    }
+    return instructions.isEmpty() ? QStringLiteral("<span class=m>none loaded</span>") : instructions.join(QStringLiteral(", "));
+}
+
 QString style() {
     const QPalette palette = QApplication::palette();
     const QString muted = palette.color(QPalette::PlaceholderText).name();
@@ -243,30 +288,10 @@ QString sessionHtml(const QJsonObject &info, const QDateTime &now) {
     if (!info.value(QStringLiteral("live")).toBool())
         html += QStringLiteral("<p class=m><span class=m>A saved session, not the one in this pane.</span></p>");
     html += QStringLiteral("<table>");
-    const QString named = modelNameOf(info);
-    QString model = esc(named);
-    const QString provider = providerBeside(info.value(QStringLiteral("provider")).toString(), named);
-    if (!provider.isEmpty()) model += QStringLiteral(" <span class=m>· %1</span>").arg(esc(provider));
-    const QString effort = info.value(QStringLiteral("effort")).toString();
-    const QString mode = info.value(QStringLiteral("mode")).toString();
-    if (!effort.isEmpty()) model += QStringLiteral(" <span class=m>· effort %1</span>").arg(esc(effort));
-    if (mode == QLatin1String("plan")) model += QStringLiteral(" <span class=m>· plan mode</span>");
-    // Which prompt profile the pane is sending (#GMCF decision 7): only worth a word when it is
-    // the short one, which is a different agent — 16 rules and 8 tools, no Switchboard, no todos.
-    if (info.value(QStringLiteral("prompt_profile")).toString() == QLatin1String("short"))
-        model += QStringLiteral(" <span class=m>· short prompt</span>");
-    html += row(QStringLiteral("Model"), model);
+    html += row(QStringLiteral("Model"), modelCell(info));
     const QStringList models = modelNames(info);
     if (models.size() > 1) html += row(QStringLiteral("Models used"), esc(models.join(QStringLiteral(", "))));
-    const QJsonObject context = info.value(QStringLiteral("context")).toObject();
-    if (!context.isEmpty()) {
-        html += row(QStringLiteral("Context"),
-                    QStringLiteral("%1 / %2 tokens <span class=m>· %3%%4</span>")
-                        .arg(compactNumber(context.value(QStringLiteral("used_tokens")).toVariant().toLongLong()),
-                             compactNumber(context.value(QStringLiteral("window")).toVariant().toLongLong()))
-                        .arg(context.value(QStringLiteral("percent")).toDouble(), 0, 'f', 1)
-                        .arg(context.value(QStringLiteral("estimated")).toBool() ? QStringLiteral(" · estimated") : QString()));
-    }
+    if (const QString context = contextCell(info); !context.isEmpty()) html += row(QStringLiteral("Context"), context);
     const QJsonObject usage = info.value(QStringLiteral("usage")).toObject();
     html += row(QStringLiteral("Tokens"), usageHtml(usage));
     html += row(QStringLiteral("Cost"), costHtml(usage));
@@ -306,17 +331,8 @@ QString sessionHtml(const QJsonObject &info, const QDateTime &now) {
     }
     html += row(QStringLiteral("Started"), esc(when(info.value(QStringLiteral("created")).toDouble(), now)));
     html += row(QStringLiteral("Updated"), esc(when(info.value(QStringLiteral("updated")).toDouble(), now)));
-    const int threads = info.value(QStringLiteral("thread_count")).toInt();
-    html += row(QStringLiteral("Turns"), QStringLiteral("%1%2").arg(info.value(QStringLiteral("turns")).toInt())
-                .arg(threads > 0 ? QStringLiteral(" <span class=m>· %1 subagent thread%2</span>").arg(threads)
-                                       .arg(threads == 1 ? QString() : QStringLiteral("s")) : QString()));
-    QStringList instructions;
-    for (const auto &value : info.value(QStringLiteral("instructions")).toArray()) {
-        const QString path = value.toString();
-        instructions << link(QStringLiteral("file"), {{QStringLiteral("path"), path}}, esc(QFileInfo(path).fileName().isEmpty() ? path : QFileInfo(path).fileName()));
-    }
-    html += row(QStringLiteral("Instructions"), instructions.isEmpty() ? QStringLiteral("<span class=m>none loaded</span>")
-                                                                        : instructions.join(QStringLiteral(", ")));
+    html += row(QStringLiteral("Turns"), turnsCell(info));
+    html += row(QStringLiteral("Instructions"), instructionsCell(info));
     const QString forked = info.value(QStringLiteral("forked_from")).toString();
     if (!forked.isEmpty())
         html += row(QStringLiteral("Forked from"), link(QStringLiteral("session"), {{QStringLiteral("id"), forked}, {QStringLiteral("dir"), dir}},
@@ -452,6 +468,26 @@ QString renderInfo(const QJsonObject &info, const QDateTime &now) {
     return style() + body;
 }
 
+QString renderSummary(const QJsonObject &info, const QString &paneId, const QDateTime &now) {
+    QString title = info.value(QStringLiteral("title")).toString();
+    if (title.isEmpty()) title = QStringLiteral("Untitled session");
+    QString html = QStringLiteral("<p><b>%1</b></p><table>").arg(esc(title));
+    html += row(QStringLiteral("Model"), modelCell(info));
+    if (const QString context = contextCell(info); !context.isEmpty()) html += row(QStringLiteral("Context"), context);
+    html += row(QStringLiteral("Tokens"), usageHtml(info.value(QStringLiteral("usage")).toObject()));
+    // The session ID is the one Board links and relay://session/ name; the pane's short ID is
+    // what logs and land.py claims say ("pane a1b2c3d4"), kept small beside it so the two can be
+    // matched (owner, 2026-09-25).
+    QString session = copyableId(info.value(QStringLiteral("session_id")).toString(), QStringLiteral("session id"));
+    if (session.isEmpty()) session = QStringLiteral("<span class=m>not saved yet</span>");
+    if (!paneId.isEmpty()) session += QStringLiteral("<br><span class=m>pane %1</span>").arg(esc(paneId));
+    html += row(QStringLiteral("Session"), session);
+    html += row(QStringLiteral("Started"), esc(when(info.value(QStringLiteral("created")).toDouble(), now)));
+    html += row(QStringLiteral("Turns"), turnsCell(info));
+    html += row(QStringLiteral("Instructions"), instructionsCell(info));
+    return style() + html + QStringLiteral("</table>");
+}
+
 // ----- the painted button ------------------------------------------------------------------------
 
 InfoButton::InfoButton(QWidget *parent) : QToolButton(parent) {
@@ -490,111 +526,132 @@ void InfoButton::paintEvent(QPaintEvent *) {
     painter.drawRoundedRect(QRectF(cx - stemWidth / 2.0, circle.top() + side * 0.43, stemWidth, side * 0.36), 0.6, 0.6);
 }
 
-PaneInfoPopover::PaneInfoPopover(QWidget *pane, QWidget *anchor, const QString &paneId)
+InfoOverlay::InfoOverlay(QWidget *pane, QWidget *anchor, const QString &paneId)
     : QFrame(pane), m_anchor(anchor), m_paneId(paneId) {
-    setObjectName(QStringLiteral("paneInfoPopover"));
+    setObjectName(QStringLiteral("paneInfoOverlay"));
     setAttribute(Qt::WA_StyledBackground);
-    setFocusPolicy(Qt::NoFocus);
+    // Opaque whatever the stylesheet says: it sits over the terminal's text.
+    setAutoFillBackground(true);
+    setBackgroundRole(QPalette::Window);
+    setFrameShape(QFrame::StyledPanel);
+    setFocusPolicy(Qt::StrongFocus);
     hide();
-
     auto *layout = new QVBoxLayout(this);
-    layout->setContentsMargins(10, 8, 10, 8);
-    layout->setSpacing(6);
-    auto *idRow = new QHBoxLayout;
-    idRow->setContentsMargins(0, 0, 0, 0);
-    idRow->setSpacing(6);
-    auto *label = new QLabel(QStringLiteral("Pane ID"));
-    label->setObjectName(QStringLiteral("paneInfoLabel"));
-    idRow->addWidget(label);
-    m_id = new QLabel(m_paneId);
-    m_id->setObjectName(QStringLiteral("paneInfoId"));
-    m_id->setTextInteractionFlags(Qt::TextSelectableByMouse);
-    idRow->addWidget(m_id, 1);
-    m_copy = new QToolButton;
-    m_copy->setObjectName(QStringLiteral("popupTextButton"));
-    m_copy->setText(QStringLiteral("Copy"));
-    m_copy->setAccessibleName(QStringLiteral("Copy pane ID"));
-    idRow->addWidget(m_copy);
-    layout->addLayout(idRow);
-
-    m_dim = new QToolButton;
-    m_dim->setObjectName(QStringLiteral("popupTextButton"));
-    m_dim->setText(QStringLiteral("◐  Dim pane"));
-    m_dim->setCheckable(true);
-    m_dim->setToolButtonStyle(Qt::ToolButtonTextOnly);
-    m_dim->setAccessibleName(QStringLiteral("Dim pane"));
-    layout->addWidget(m_dim, 0, Qt::AlignLeft);
-
-    m_closeTimer = new QTimer(this);
-    m_closeTimer->setSingleShot(true);
-    m_closeTimer->setInterval(220);
-    connect(m_closeTimer, &QTimer::timeout, this, [this] {
-        if (!pointerOrFocusInside()) hide();
-    });
-    m_copyTimer = new QTimer(this);
-    m_copyTimer->setSingleShot(true);
-    m_copyTimer->setInterval(1200);
-    connect(m_copyTimer, &QTimer::timeout, this, [this] { m_copy->setText(QStringLiteral("Copy")); });
-    connect(m_copy, &QToolButton::clicked, this, [this] {
-        QApplication::clipboard()->setText(m_paneId);
-        m_copy->setText(QStringLiteral("Copied"));
-        m_copyTimer->start();
-    });
-    connect(m_dim, &QToolButton::clicked, this, [this] { if (onToggleDim) onToggleDim(); });
-
-    if (m_anchor) m_anchor->installEventFilter(this);
+    layout->setContentsMargins(12, 10, 12, 10);
+    m_body = new QLabel;
+    m_body->setObjectName(QStringLiteral("paneInfoBody"));
+    m_body->setTextFormat(Qt::RichText);
+    m_body->setWordWrap(true);
+    m_body->setTextInteractionFlags(Qt::TextBrowserInteraction);
+    m_body->setOpenExternalLinks(false);
+    m_body->setMaximumWidth(440);
+    connect(m_body, &QLabel::linkActivated, this, [this](const QString &href) { linkActivated(href); });
+    layout->addWidget(m_body);
     if (pane) pane->installEventFilter(this);
-    installEventFilter(this);
 }
 
-void PaneInfoPopover::setDimState(int amount, bool manual) {
-    m_dim->setChecked(manual);
-    m_dim->setText(manual ? QStringLiteral("◐  Restore automatic dimming")
-                          : QStringLiteral("◐  Dim pane"));
-    // The toggle's key is read from the keymap, in the house "… (keys)" style, so a rebinding
-    // reads correctly here too. Nothing is appended while the action is unbound.
-    const QString keys = Keymap::instance().shortcutText(QStringLiteral("pane.dimToggle"));
-    QString tooltip = QStringLiteral("%1% dimmed · Alt+wheel adjusts this pane").arg(amount);
-    if (!keys.isEmpty()) tooltip += QStringLiteral(" · toggle (%1)").arg(keys);
-    m_dim->setToolTip(tooltip);
+void InfoOverlay::open() {
+    if (m_current.isEmpty()) m_body->setText(QStringLiteral("<p>Loading…</p>"));
+    place();
+    show();
+    raise();
+    setFocus(Qt::PopupFocusReason);
+    // A click anywhere outside closes it, the way a popup would, without it being one.
+    qApp->installEventFilter(this);
+    request();
 }
 
-bool PaneInfoPopover::eventFilter(QObject *object, QEvent *event) {
-    if (object == m_anchor) {
-        if (event->type() == QEvent::Enter || event->type() == QEvent::FocusIn) showAtAnchor();
-        else if (event->type() == QEvent::Leave || event->type() == QEvent::FocusOut) scheduleClose();
-    } else if (object == this) {
-        if (event->type() == QEvent::Enter || event->type() == QEvent::FocusIn) m_closeTimer->stop();
-        else if (event->type() == QEvent::Leave || event->type() == QEvent::FocusOut) scheduleClose();
-    } else if (object == parentWidget() && event->type() == QEvent::Resize && isVisible()) {
-        showAtAnchor();
+void InfoOverlay::close() {
+    if (!isVisible()) return;
+    qApp->removeEventFilter(this);
+    m_pendingId.clear();
+    hide();
+    if (onClosed) onClosed();
+}
+
+void InfoOverlay::refreshIfOpen() {
+    if (isVisible()) request();
+}
+
+void InfoOverlay::request() {
+    m_pendingId = QStringLiteral("info-overlay-%1").arg(++m_counter);
+    if (onRequest) onRequest({{QStringLiteral("id"), m_pendingId}});
+}
+
+void InfoOverlay::setInfo(const QJsonObject &event) {
+    if (!owns(event.value(QStringLiteral("id")).toString())) return;
+    m_pendingId.clear();
+    m_current = event;
+    m_body->setText(renderSummary(event, m_paneId, QDateTime::currentDateTime()));
+    if (isVisible()) place();
+}
+
+void InfoOverlay::setError(const QString &requestId, const QString &text) {
+    if (!owns(requestId)) return;
+    m_pendingId.clear();
+    m_current = QJsonObject();
+    m_body->setText(QStringLiteral("<p>%1</p>").arg(esc(text)));
+    if (isVisible()) place();
+}
+
+QString InfoOverlay::html() const { return m_body->text(); }
+
+void InfoOverlay::place() {
+    QWidget *pane = parentWidget();
+    if (!pane) return;
+    adjustSize();
+    const int margin = 6;
+    const int w = std::min(width(), std::max(120, pane->width() - 2 * margin));
+    resize(w, heightForWidth(w) > 0 ? heightForWidth(w) : height());
+    QPoint at(pane->width() - width() - margin, margin + 28);
+    if (m_anchor && m_anchor->isVisible()) {
+        const QPoint below = m_anchor->mapTo(pane, QPoint(m_anchor->width(), m_anchor->height() + 4));
+        at = {below.x() - width(), below.y()};
+    }
+    at.setX(std::clamp(at.x(), margin, std::max(margin, pane->width() - width() - margin)));
+    at.setY(std::clamp(at.y(), margin, std::max(margin, pane->height() - height() - margin)));
+    move(at);
+}
+
+void InfoOverlay::linkActivated(const QString &href) {
+    const QUrl url(href);
+    if (url.scheme() != QLatin1String(kScheme)) return;
+    const QHash<QString, QString> values = linkQuery(url);
+    if (url.path() == QLatin1String("file")) {
+        if (onOpenFile) onOpenFile(values.value(QStringLiteral("path")));
+        close();
+    } else if (url.path() == QLatin1String("copy")) {
+        QClipboard *clipboard = QApplication::clipboard();
+        if (clipboard->supportsSelection()) clipboard->setText(values.value(QStringLiteral("text")), QClipboard::Selection);
+        clipboard->setText(values.value(QStringLiteral("text")));
+        QToolTip::showText(QCursor::pos(), QStringLiteral("Copied %1").arg(values.value(QStringLiteral("what"), QStringLiteral("to the clipboard"))), this);
+    }
+}
+
+void InfoOverlay::keyPressEvent(QKeyEvent *event) {
+    if (event->key() == Qt::Key_Escape) { close(); return; }
+    QFrame::keyPressEvent(event);
+}
+
+bool InfoOverlay::eventFilter(QObject *object, QEvent *event) {
+    if (object == parentWidget() && event->type() == QEvent::Resize && isVisible()) place();
+    if (isVisible() && event->type() == QEvent::MouseButtonPress) {
+        auto *widget = qobject_cast<QWidget *>(object);
+        // The ⓘ itself is left alone: its click toggles, and closing here first would reopen it.
+        const bool inside = widget && (widget == this || isAncestorOf(widget)
+                                       || (m_anchor && (widget == m_anchor || m_anchor->isAncestorOf(widget))));
+        if (widget && !inside) close();
+    }
+    if (isVisible() && event->type() == QEvent::KeyPress && static_cast<QKeyEvent *>(event)->key() == Qt::Key_Escape
+        && object != this) {
+        // Esc closes it even after focus went back into the pane (a click on its body).
+        auto *widget = qobject_cast<QWidget *>(object);
+        if (widget && parentWidget() && (widget == parentWidget() || parentWidget()->isAncestorOf(widget))) {
+            close();
+            return true;
+        }
     }
     return QFrame::eventFilter(object, event);
-}
-
-void PaneInfoPopover::showAtAnchor() {
-    if (!m_anchor || !parentWidget()) return;
-    m_closeTimer->stop();
-    adjustSize();
-    const QPoint below = m_anchor->mapTo(parentWidget(), QPoint(m_anchor->width(), m_anchor->height() + 4));
-    const int margin = 4;
-    const int maxX = std::max(margin, parentWidget()->width() - width() - margin);
-    const int x = std::clamp(below.x() - width(), margin, maxX);
-    int y = below.y();
-    if (y + height() > parentWidget()->height() - margin)
-        y = std::max(margin, m_anchor->mapTo(parentWidget(), QPoint(0, -height() - 4)).y());
-    move(x, y);
-    raise();
-    show();
-}
-
-void PaneInfoPopover::scheduleClose() { m_closeTimer->start(); }
-
-bool PaneInfoPopover::pointerOrFocusInside() const {
-    QWidget *under = QApplication::widgetAt(QCursor::pos());
-    const bool overAnchor = under && (under == m_anchor || m_anchor->isAncestorOf(under));
-    const bool overPopover = under && (under == this || isAncestorOf(under));
-    return overAnchor || overPopover || (m_anchor && m_anchor->hasFocus()) || isAncestorOf(QApplication::focusWidget());
 }
 
 // ----- the view ----------------------------------------------------------------------------------

@@ -426,11 +426,13 @@ void RelayWindow::runActionNow(const QString &id, Pane *target) {
                     info && info->kind() == ToolPane::Kind::Info)
                     if (auto *owner = dynamic_cast<Pane *>(info->property("infoOwner").value<QObject *>()))
                         pane = owner;
+            // An info pane still open for it (a thread or saved session from the Sessions
+            // pane) closes first; otherwise the ⓘ overlay toggles (card #7EWF).
             if (ToolPane *info = infoPaneOf(pane)) {
                 closePane(info, false);
                 setActiveLeaf(pane);
                 focusLeaf(pane);
-            } else pane->openInfo();
+            } else pane->toggleInfo();
         }
         else if (id == QStringLiteral("find.inView")) pane->openFindInView();
         else if (id == QStringLiteral("agent.recap")) pane->requestRecap();

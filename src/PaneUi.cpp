@@ -1,6 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "Pane.h"
 
+#include <QPainter>
+#include <QPainterPath>
+
 void Pane::buildUi() {
         auto *layout = new QVBoxLayout(this); layout->setContentsMargins(8, 6, 8, 8); layout->setSpacing(6);
         // Pane header (issue JRWQ): what this pane is doing, written by the model and refreshed as
@@ -36,9 +39,44 @@ void Pane::buildUi() {
         m_titleEdit->setMinimumWidth(220);
         m_titleEdit->installEventFilter(this);
         connect(m_titleEdit, &QLineEdit::returnPressed, this, [this] { commitRename(); });
-        m_titleAuto = new QLabel(QStringLiteral("auto"));
-        m_titleAuto->setObjectName(QStringLiteral("paneAuto"));
-        m_titleAuto->setVisible(false);
+        // After the title, the session ID's copy button (card #7EWF): two overlapping sheets,
+        // painted like the chrome's glyphs. It copies the full Relay session ID — the one Board
+        // links and relay://session/ name — and is hidden until the pane has a session. It is a
+        // button, so a press on it copies instead of starting a header drag.
+        class SessionCopyButton : public QToolButton {
+        public:
+            QSize sizeHint() const override { const int side = fontMetrics().height(); return {side, side}; }
+        protected:
+            void paintEvent(QPaintEvent *) override {
+                QPainter painter(this);
+                painter.setRenderHint(QPainter::Antialiasing);
+                const QColor ink = palette().color(underMouse() ? QPalette::BrightText : QPalette::PlaceholderText);
+                const qreal side = std::min(width(), height()) - 4.0;
+                const QRectF box((width() - side) / 2.0, (height() - side) / 2.0, side, side);
+                const qreal sheet = side * 0.66;
+                painter.setPen(QPen(ink, std::max(1.1, side / 12.0)));
+                painter.setBrush(Qt::NoBrush);
+                painter.drawRoundedRect(QRectF(box.left(), box.top() + side - sheet, sheet, sheet), 1.5, 1.5);
+                QPainterPath back;
+                back.moveTo(box.left() + side - sheet, box.top() + side - sheet - 0.5);
+                back.lineTo(box.left() + side - sheet, box.top() + 1.5);
+                back.quadTo(box.left() + side - sheet, box.top(), box.left() + side - sheet + 1.5, box.top());
+                back.lineTo(box.right() - 1.5, box.top());
+                back.quadTo(box.right(), box.top(), box.right(), box.top() + 1.5);
+                back.lineTo(box.right(), box.top() + sheet - 1.5);
+                back.quadTo(box.right(), box.top() + sheet, box.right() - 1.5, box.top() + sheet);
+                back.lineTo(box.left() + sheet + 0.5, box.top() + sheet);
+                painter.drawPath(back);
+            }
+        };
+        m_sessionCopy = new SessionCopyButton;
+        m_sessionCopy->setObjectName(QStringLiteral("paneSessionCopy"));
+        m_sessionCopy->setAccessibleName(QStringLiteral("Copy session ID"));
+        m_sessionCopy->setAutoRaise(true);
+        m_sessionCopy->setFocusPolicy(Qt::NoFocus);
+        m_sessionCopy->setCursor(Qt::PointingHandCursor);
+        m_sessionCopy->setVisible(false);
+        connect(m_sessionCopy, &QToolButton::clicked, this, [this] { copySessionId(); });
         // The claims chip (#C7PF, #0FBB): the Board cards this pane is working, immediately before
         // the title — `#K7Q2`, or `#K7Q2 (3)` with the latest first. A click, Space or Enter opens
         // the one card, or the list when there are several (openClaimsMenu). It is a button of
@@ -93,7 +131,7 @@ void Pane::buildUi() {
         headerRow->addWidget(m_cardChip, 0);
         headerRow->addWidget(m_titleLabel, 0);
         headerRow->addWidget(m_titleEdit, 1);
-        headerRow->addWidget(m_titleAuto, 0);
+        headerRow->addWidget(m_sessionCopy, 0);
         headerRow->addStretch(1);
         headerRow->addWidget(m_cwdLabel, 0);
         m_headerWidget = header;

@@ -35,6 +35,10 @@
 #include <QFontDatabase>
 #include <QFrame>
 #include <QIcon>
+#include <QMenu>
+#include <QAction>
+#include <QPointer>
+#include <QStyleOptionToolButton>
 #include <QPainter>
 #include <QPainterPath>
 #include <QPixmap>
@@ -688,19 +692,80 @@ private:
     QString m_subagentCwd;
 };
 
+// The chrome row's painted glyphs (card #7EWF): the ☰ that holds the pane's less frequent moves
+// and the new-pane mark, a pane outline with a + at its top-right corner. Painted rather than
+// taken from a font, like the ⓘ beside them, so they share its line weight and never turn into
+// a colour emoji or a missing-glyph box.
+class ChromeGlyphButton final : public QToolButton {
+public:
+    enum class Glyph { Menu, NewPane };
+    explicit ChromeGlyphButton(Glyph glyph, QWidget *parent = nullptr) : QToolButton(parent), m_glyph(glyph) {}
+    QSize sizeHint() const override {
+        const int side = fontMetrics().height() + 6;
+        return {side, side};
+    }
+    QSize minimumSizeHint() const override { return sizeHint(); }
+
+protected:
+    void paintEvent(QPaintEvent *) override {
+        QPainter painter(this);
+        QStyleOptionToolButton option;
+        initStyleOption(&option);
+        option.text.clear();
+        option.icon = QIcon();
+        option.features &= ~QStyleOptionToolButton::HasMenu;   // no arrow: the ☰ says it is a menu
+        style()->drawPrimitive(QStyle::PE_PanelButtonTool, &option, &painter, this);
+        painter.setRenderHint(QPainter::Antialiasing);
+        const QColor ink = palette().color(underMouse() || isDown() ? QPalette::BrightText : QPalette::ButtonText);
+        const qreal side = std::min(width(), height()) - 8.0;
+        const QRectF box((width() - side) / 2.0, (height() - side) / 2.0, side, side);
+        const qreal stroke = std::max(1.2, side / 11.0);
+        QPen pen(ink, stroke, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin);
+        painter.setPen(pen);
+        painter.setBrush(Qt::NoBrush);
+        if (m_glyph == Glyph::Menu) {
+            for (int i = 0; i < 3; ++i) {
+                const qreal y = box.top() + side * (0.25 + 0.25 * i);
+                painter.drawLine(QPointF(box.left() + side * 0.12, y), QPointF(box.right() - side * 0.12, y));
+            }
+            return;
+        }
+        // The pane: its bottom-left three quarters, open at the top-right where the + sits.
+        const qreal plus = side * 0.42;
+        const QRectF pane(box.left(), box.top() + side * 0.18, side * 0.82, side * 0.78);
+        QPainterPath outline;
+        outline.moveTo(pane.left() + pane.width() - plus * 0.62, pane.top());
+        outline.lineTo(pane.left() + 1.5, pane.top());
+        outline.quadTo(pane.left(), pane.top(), pane.left(), pane.top() + 1.5);
+        outline.lineTo(pane.left(), pane.bottom() - 1.5);
+        outline.quadTo(pane.left(), pane.bottom(), pane.left() + 1.5, pane.bottom());
+        outline.lineTo(pane.right() - 1.5, pane.bottom());
+        outline.quadTo(pane.right(), pane.bottom(), pane.right(), pane.bottom() - 1.5);
+        outline.lineTo(pane.right(), pane.top() + plus * 0.62);
+        painter.drawPath(outline);
+        const QPointF centre(pane.right(), pane.top());
+        painter.drawLine(QPointF(centre.x() - plus / 2.0, centre.y()), QPointF(centre.x() + plus / 2.0, centre.y()));
+        painter.drawLine(QPointF(centre.x(), centre.y() - plus / 2.0), QPointF(centre.x(), centre.y() + plus / 2.0));
+    }
+
+private:
+    Glyph m_glyph;
+};
+
 // ----- pane chrome: button row and drag handle -----------------------------------------------
-// A small overlay in each pane's top-right corner. The three a person reaches for — new pane,
-// move to a tab of its own, close — are on screen in every pane at all times (owner, 2026-09-17:
-// buttons that appear only under the mouse are buttons you have to go looking for). There is one
-// new-pane button, which puts the pane on the right (card #803C). The low-frequency pane ID and
-// Dim action live behind the circle-i instead of taking permanent width (#P1CP). Dragging a pane's
-// header moves it.
+// A small overlay in each pane's top-right corner: ⓘ (terminal panes), ☰, new pane, × (owner,
+// 2026-09-25, card #7EWF). Those four are on screen in every pane at all times (owner,
+// 2026-09-17: buttons that appear only under the mouse are buttons you have to go looking for).
+// The less frequent moves — to a new tab, to the background, dimming — are in the ☰ menu; that
+// replaced the always-visible move-to-tab button, a rule the owner called stale. There is one
+// new-pane button, which puts the pane on the right (card #803C). Dragging a pane's header moves it.
 class PaneChrome final : public QFrame {
 public:
     std::function<void(const QString &action)> onAction;
+    std::function<void()> onInfo;   // the ⓘ: the window toggles the info overlay and teaches the key
     relay::dimming::State dimming;
     relay::dimming::Overlay *dimOverlay = nullptr;
-    relay::sessioninfo::PaneInfoPopover *infoPopover = nullptr;
+    relay::sessioninfo::InfoOverlay *infoOverlay = nullptr;
     int dimAmount = 0;
 
     void paintDimming(int amount) {
@@ -712,11 +777,10 @@ public:
         else if (auto *tool = dynamic_cast<ToolPane *>(parentWidget()); tool && tool->bandShown())
             header = tool->band()->geometry().bottom() + 1;
         dimOverlay->refresh(amount, relay::theme::Background, header);
-        if (infoPopover) infoPopover->setDimState(amount, dimming.manual > 0);
         raise();
-        // The dim layer is raised as it repaints. An open controls popover belongs with the
-        // undimmed chrome above it, including immediately after its own Dim button is clicked.
-        if (infoPopover && infoPopover->isVisible()) infoPopover->raise();
+        // The dim layer is raised as it repaints. An open info overlay belongs with the undimmed
+        // chrome above it.
+        if (infoOverlay && infoOverlay->isVisible()) infoOverlay->raise();
     }
 
     explicit PaneChrome(QWidget *leaf) : QFrame(leaf) {
@@ -729,18 +793,40 @@ public:
         column->insertWidget(0, m_chainChip);
         m_row = new QHBoxLayout; m_row->setSpacing(1);
         column->addLayout(m_row);
-        // The + makes it obvious that these open a new pane (a new shell and chat), not a layout
-        // toggle. Every button is here at all times: the row no longer grows, lifts onto a tile or
+        // Every button is here at all times: the row no longer grows, lifts onto a tile or
         // rearranges itself under the pointer (owner, 2026-09-18). The drag grip is gone with the
         // hover row — pressing anywhere on the header moves the pane.
+        // The ⓘ is the chrome's own (card #7EWF). The window used to find this row by walking the
+        // layout and insert it, and each new widget above the row (the share button, then the
+        // chain chip) made that walk miss and the ⓘ silently vanish.
+        if (dynamic_cast<Pane *>(leaf)) {
+            m_info = new relay::sessioninfo::InfoButton;
+            m_info->setObjectName(QStringLiteral("paneChromeButton"));
+            // refreshTooltips appends the live key: "Conversation info  (Alt+I)".
+            m_info->setProperty("action", QStringLiteral("agent.info"));
+            m_info->setProperty("label", QStringLiteral("Conversation info"));
+            connect(m_info, &QToolButton::clicked, this, [this] { if (onInfo) onInfo(); });
+            m_row->addWidget(m_info);
+        }
+        m_menu = new ChromeGlyphButton(ChromeGlyphButton::Glyph::Menu);
+        m_menu->setObjectName(QStringLiteral("paneChromeButton"));
+        m_menu->setAutoRaise(true); m_menu->setFocusPolicy(Qt::NoFocus);
+        m_menu->setProperty("label", QStringLiteral("Pane menu"));
+        m_menu->setAccessibleName(QStringLiteral("Pane menu"));
+        connect(m_menu, &QToolButton::clicked, this, [this] { openMenu(); });
+        m_row->addWidget(m_menu);
         // One "new pane" button, not one per side (owner, 2026-09-18, card #803C). It makes the
         // pane on the right at once, like Ctrl+E; the mouse is already in hand, so the pane is
         // placed by dragging its header. Its tooltip shows the key (pane.splitRight).
-        button(m_row, QStringLiteral("⊞"), QStringLiteral("pane.newByMouse"), QStringLiteral("New pane (drag its header to place it)"))
-            ->setProperty("keysFrom", QStringLiteral("pane.splitRight"));
-        button(m_row, QStringLiteral("⇱"), QStringLiteral("pane.moveToNewTab"), QStringLiteral("Move to new tab"));
-        if (dynamic_cast<Pane *>(leaf))
-            button(m_row, QStringLiteral("↗"), QStringLiteral("pane.moveToBackground"), QStringLiteral("Move to background"));
+        auto *newPane = new ChromeGlyphButton(ChromeGlyphButton::Glyph::NewPane);
+        newPane->setObjectName(QStringLiteral("paneChromeButton"));
+        newPane->setAutoRaise(true); newPane->setFocusPolicy(Qt::NoFocus);
+        newPane->setProperty("action", QStringLiteral("pane.newByMouse"));
+        newPane->setProperty("label", QStringLiteral("New pane (drag its header to place it)"));
+        newPane->setProperty("keysFrom", QStringLiteral("pane.splitRight"));
+        newPane->setAccessibleName(QStringLiteral("New pane"));
+        connect(newPane, &QToolButton::clicked, this, [this] { if (onAction) onAction(QStringLiteral("pane.newByMouse")); });
+        m_row->addWidget(newPane);
         button(m_row, QStringLiteral("×"), QStringLiteral("pane.close"), QStringLiteral("Close pane"));
         // The header gives up exactly this much room for good, so the title and the folder line
         // never re-elide.
@@ -785,8 +871,35 @@ public:
         timer->start();
     }
 
-    // The row of pane buttons, for the window's ⓘ (RelayWindow::syncChrome inserts it first).
     QHBoxLayout *buttonRow() const { return m_row; }
+    relay::sessioninfo::InfoButton *infoButton() const { return m_info; }
+    QToolButton *menuButton() const { return m_menu; }
+
+    // What the ☰ holds, in order, as (action, label) — the menu is built from this each time it
+    // opens, so Dim's wording follows the pane's dimming and the tests can read it.
+    QList<QPair<QString, QString>> menuEntries() const {
+        QList<QPair<QString, QString>> entries{{QStringLiteral("pane.moveToNewTab"), QStringLiteral("Move to new tab")}};
+        if (dynamic_cast<Pane *>(parentWidget()))
+            entries.append({QStringLiteral("pane.moveToBackground"), QStringLiteral("Move to background")});
+        entries.append({QStringLiteral("pane.dimToggle"), dimming.manual > 0 ? QStringLiteral("Restore automatic dimming")
+                                                                             : QStringLiteral("Dim pane")});
+        return entries;
+    }
+
+    // The ☰ menu. Each entry shows its live key in the shortcut column and runs through onAction,
+    // so a pick from here teaches that key exactly as the old buttons did (chrome.<action> hints).
+    QMenu *buildMenu() {
+        auto *menu = new QMenu(this);
+        menu->setObjectName(QStringLiteral("paneChromeMenu"));
+        for (const auto &[action, label] : menuEntries()) {
+            const QString keys = Keymap::instance().shortcutText(action);
+            QAction *item = menu->addAction(keys.isEmpty() ? label : label + QLatin1Char('\t') + keys);
+            item->setData(action);
+            if (action == QStringLiteral("pane.dimToggle")) { item->setCheckable(true); item->setChecked(dimming.manual > 0); }
+            connect(item, &QAction::triggered, this, [this, action] { if (onAction) onAction(action); });
+        }
+        return menu;
+    }
 
     // The linked-pane chain this pane belongs to (#R660). `segments` is the chain head-first
     // ("shell", "main.tex", "main.pdf"), `current` this pane's place in it; an empty list hides
@@ -1561,7 +1674,19 @@ private:
     }
 
     int m_fullWidth = 0;
-    QHBoxLayout *m_row = nullptr;     // the button row the ⓘ joins; the share button hangs below it
+    QHBoxLayout *m_row = nullptr;     // ⓘ ☰ new-pane ×; the share button hangs below it
+    relay::sessioninfo::InfoButton *m_info = nullptr;
+    QToolButton *m_menu = nullptr;
+
+    void openMenu() {
+        QPointer<QMenu> menu = buildMenu();
+        QPointer<QToolButton> anchor = m_menu;
+        anchor->setDown(true);
+        // An entry runs inside exec(), and moving the pane can take this chrome with it.
+        menu->exec(anchor->mapToGlobal(QPoint(anchor->width() - menu->sizeHint().width(), anchor->height())));
+        if (anchor) anchor->setDown(false);
+        if (menu) menu->deleteLater();
+    }
     PaneChainChip *m_chainChip = nullptr;   // the linked-pane chain (#R660), above the button row
     PaneStateGlyph *m_glyph = nullptr;
     PaneSubagentBadge *m_subagentBadge = nullptr;

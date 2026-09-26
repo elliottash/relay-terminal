@@ -165,8 +165,7 @@ QList<RelayWindow::PaletteItem> RelayWindow::rootItems() {
                                               "history full text past old grep manager projects globals background");
             items << sessions;
             PaletteItem info = actionItem(agent, QStringLiteral("Conversation info"),
-                                          QStringLiteral("This conversation's model, tokens, file and history, with its subagent "
-                                                         "threads · /status"),
+                                          QStringLiteral("This conversation's model, context, tokens and session ID · /status"),
                                           QStringLiteral("agent.info"));
             info.aliases = QStringLiteral("status info details usage cost context about session");
             items << info;

@@ -204,18 +204,28 @@ Layout rules:
   running at shutdown as interrupted, with their saved conversation available to reopen.
   Closing the final visible window warns that it will stop the live work.
 - **Pane button row** (`PaneChrome`, a child of each leaf created in `syncChrome()`): shown for
-  the leaf under the mouse (application event filter, Enter/MouseMove). There is **one** new-pane
-  button, ⊞ (card #803C; it replaced ⬓+ and ◫+). It runs `pane.newByMouse`, which is not a
+  the leaf under the mouse (application event filter, Enter/MouseMove). It reads **ⓘ ☰ new-pane ×**
+  (card #7EWF, owner 2026-09-25); tool panes have no ⓘ. The ⓘ (`InfoButton`) is built by
+  `PaneChrome` itself for a `Pane` leaf (`infoButton()`), so no widget added above or beside the
+  row can make it vanish — it did twice while the window found the row by walking the layout.
+  The ☰ (`ChromeGlyphButton`, painted) opens `buildMenu()`: Move to new tab, Move to background
+  (terminal panes only) and Dim pane / Restore automatic dimming (`pane.dimToggle`, ticked while
+  dimmed by hand), each with its live key in the menu's shortcut column; a pick runs through
+  `onAction`, so it teaches that key like a button (`chrome.<action>` hints). This replaced the
+  always-visible move-to-tab button and the #P1CP hover popover. There is **one** new-pane
+  button, a painted pane outline with a + at its top-right (card #803C; it replaced ⬓+ and ◫+). It runs `pane.newByMouse`, which is not a
   Keymap action: `splitToward(Right)` at once, like Ctrl+E but without the two-second arrow window
   (#78BN) — the pointer is already in hand, so the pane is placed by dragging its header. It
   toasts "New pane · drag its header to place it" and, per the hint registry (`pane.new.mouse`),
   "Next time: <live `pane.splitRight` keys> · new pane". The tooltip shows the
-  `pane.splitRight` keys through the button's `keysFrom` property. The other permanent buttons run
-  the same actions as the keys (`pane.moveToNewTab`, `pane.close`). In a terminal pane, hovering or
-  keyboard-focusing the circle-i opens `PaneInfoPopover`: it shows the pane's eight-character ID
-  with a Copy button and the low-frequency Dim pane action (`pane.dimToggle`, Alt+D). The popover
-  stays open across the gap from the circle-i to its controls; clicking the circle-i still opens
-  Conversation info. Dim no longer spends permanent width in the button row (#P1CP).
+  `pane.splitRight` keys through the button's `keysFrom` property. × runs `pane.close`.
+  Clicking the ⓘ, Alt+I (`agent.info`) and `/status` open **conversation info as an overlay**
+  (`relay::sessioninfo::InfoOverlay`, a child of the pane anchored under the ⓘ): model, context,
+  tokens, the session ID (copyable) with the pane's short ID beside it, started, turns and
+  instructions (`renderSummary`) — no cost and no history. The same action, Esc or a click
+  outside closes it and focus returns to the pane. The pane header has no `auto` badge any more;
+  after the title sits a painted copy button (`paneSessionCopy`) that copies the full Relay
+  session ID, hidden until the pane has one.
   `PaneChrome` has no `Q_OBJECT`, so it is found with `dynamic_cast` (`chromeOf`), never
   `findChild<PaneChrome*>` (that matches any `QFrame`, such as the transcript panel).
   `showChromeFor()` records the wanted leaf **before** hiding or showing anything: `hide()` and
@@ -2320,8 +2330,10 @@ closed sessions (the window feeds the manager what is open and what was closed t
 or for every session in a scope, always goes through the pane's worker and never starts on its own.
 
 The **ⓘ pane** is `src/SessionInfo.{h,cpp}` (`relay::sessioninfo::InfoView`, `ToolPane` kind
-`Info`, `paneType` `info`): opened by **Alt+I** (`agent.info`), the painted ⓘ button in an agent
-pane's header row, `/status` or `/info`, beside that pane, one per pane. It renders the worker's
+`Info`, `paneType` `info`): opened from the Sessions pane (a saved session's info) and by subagent
+thread links, beside the owning pane, one per pane. Alt+I, the ⓘ button and `/status` open the
+shorter `InfoOverlay` instead (card #7EWF, above); a console with no chrome still gets the pane.
+It renders the worker's
 `session_info` (protocol section 25): model and provider, context, provider-reported tokens and
 cost, the session file, times, turns, instructions, and the history — the turns in order with each
 subagent thread as a link at the turn that started it. A thread link shows that thread's own

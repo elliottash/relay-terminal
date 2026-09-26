@@ -554,6 +554,7 @@ bool Pane::handleSessionEvent(const QString &type, const QJsonObject &event) {
         if (type == QStringLiteral("state_loaded")) {
             const bool restoring = !m_restoreRequest.isEmpty();
             m_sessionId = event.value(QStringLiteral("session_id")).toString(m_sessionId);
+            if (syncSessionCopy()) updateHeader();
             if (!m_restoreRequest.isEmpty()) {
                 m_restoreRequest.clear();
                 m_restoreSession.clear();
@@ -683,7 +684,8 @@ bool Pane::handleSessionEvent(const QString &type, const QJsonObject &event) {
         if (type == QStringLiteral("sessions")) return true;
         // ----- conversation info, the ⓘ view (protocol section 25) --------------------------
         if (type == QStringLiteral("session_info")) {
-            if (m_infoView) {
+            const bool forOverlay = m_infoOverlay && m_infoOverlay->owns(event.value(QStringLiteral("id")).toString());
+            if (forOverlay || m_infoView) {
                 // Card #FYEY: the pane knows which backend pin its worker runs from, and can
                 // tell whether the checkout has moved on since; the worker's own report cannot.
                 // Both are stamped here — hashing the tree again is a cost an opening info view
@@ -696,7 +698,8 @@ bool Pane::handleSessionEvent(const QString &type, const QJsonObject &event) {
                 stamped.insert(QStringLiteral("backend_changed"),
                                !m_backendRev.isEmpty() && m_backendRev != QStringLiteral("live")
                                    && relay::runtimedirs::backendTreeHash(m_data) != m_backendRev);
-                m_infoView->setInfo(stamped);
+                if (forOverlay) m_infoOverlay->setInfo(stamped);
+                else m_infoView->setInfo(stamped);
             }
             return true;
         }
@@ -827,6 +830,7 @@ bool Pane::handleSessionEvent(const QString &type, const QJsonObject &event) {
             // A new conversation has a new id (protocol 25); an older worker does not say it, and
             // then the old one must not be taken for what this pane still holds.
             m_sessionId = event.value(QStringLiteral("session_id")).toString();
+            if (syncSessionCopy()) updateHeader();
             // /new or "clear the conversation": the one that just ended keeps its terminal text,
             // and the new one starts with none of it (#0TJ9).
             syncSessionText();

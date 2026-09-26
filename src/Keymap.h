@@ -514,7 +514,7 @@ private:
         // binding and `\eI` is only do-lowercase-version of it. No Ctrl+Shift twin: Ctrl+Shift+I is
         // input.toggle's, and like Alt+A and Alt+R this key steps aside for a program that has the
         // keyboard (actsInsidePrograms).
-        add("agent.info", "agent", "Conversation info: model, tokens, file and history with subagent threads (/status, the ⓘ button)",
+        add("agent.info", "agent", "Conversation info: model, context, tokens and session ID, over the pane (/status, the ⓘ button)",
             {QStringLiteral("Alt+I")});
         // Conversation list with full-text search, and find-in-view for this pane.
         add("conversations.open", "agent", "Sessions: search every saved session and Relay's terminal history (/conversations)", {});

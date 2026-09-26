@@ -7617,48 +7617,29 @@ private:
                 if (!chrome) {
                     chrome = new PaneChrome(leaf);
                     QPointer<QWidget> guard(leaf);
-                    // The conversation info button (ⓘ, card #Y63Z), first in an agent pane's row.
-                    if (auto *pane = dynamic_cast<Pane *>(leaf)) {
-                        // The button row is the chrome's own layout while it is one row, and the
-                        // first row inside the column once the share button hangs below it
-                        // (2026-09-20). Casting only chrome->layout() found nothing after that move,
-                        // and the i-button silently went. Take either shape so the order the two
-                        // land in does not matter.
-                        QHBoxLayout *row = qobject_cast<QHBoxLayout *>(chrome->layout());
-                        if (!row)
-                            if (auto *column = qobject_cast<QVBoxLayout *>(chrome->layout()))
-                                if (column->count() > 0)
-                                    row = qobject_cast<QHBoxLayout *>(column->itemAt(0)->layout());
-                        if (row) {
-                            auto *info = new relay::sessioninfo::InfoButton;
-                            info->setObjectName(QStringLiteral("paneChromeButton"));
-                            info->setProperty("action", QStringLiteral("agent.info"));
-                            // PaneChrome::refreshTooltips appends the live key, so the tooltip
-                            // reads "Conversation info  (Alt+I)" and follows a rebinding.
-                            info->setProperty("label", QStringLiteral("Conversation info"));
-                            auto *popover = new relay::sessioninfo::PaneInfoPopover(
-                                leaf, info, pane->sessionToken().left(8));
-                            chrome->infoPopover = popover;
-                            popover->onToggleDim = [guard] {
-                                auto *w = windowOf(guard);
-                                if (!w) return;
-                                w->setActiveLeaf(guard);
-                                w->runAction(QStringLiteral("pane.dimToggle"));
-                            };
-                            QObject::connect(info, &QToolButton::clicked, chrome, [guard] {
-                                auto *w = windowOf(guard);
-                                if (!w) return;
-                                w->setActiveLeaf(guard);
-                                // The button is the slow path: it teaches the key it is bound to,
-                                // and falls back to /status only while nothing is bound.
-                                const QString keys = Keymap::instance().shortcutText(QStringLiteral("agent.info"));
-                                w->runAction(QStringLiteral("agent.info"));
-                                w->hint(QStringLiteral("info.click"),
-                                        keys.isEmpty() ? QStringLiteral("Next time: /status in the prompt box")
-                                                       : relay::ShortcutHints::nextTime(keys, QStringLiteral("conversation info")));
-                            });
-                            row->insertWidget(0, info);
-                        }
+                    // The conversation info button (ⓘ, card #Y63Z) is the chrome's own; here it
+                    // gets its overlay (card #7EWF), which the pane binds to its worker.
+                    if (auto *pane = dynamic_cast<Pane *>(leaf); pane && chrome->infoButton()) {
+                        auto *overlay = new relay::sessioninfo::InfoOverlay(leaf, chrome->infoButton(),
+                                                                           pane->sessionToken().left(8));
+                        chrome->infoOverlay = overlay;
+                        pane->bindInfoOverlay(overlay);
+                        overlay->onClosed = [guard] {
+                            auto *w = windowOf(guard);
+                            if (w && w->m_activeLeaf.data() == guard.data()) focusLeaf(guard);
+                        };
+                        chrome->onInfo = [guard] {
+                            auto *w = windowOf(guard);
+                            if (!w) return;
+                            w->setActiveLeaf(guard);
+                            // The button is the slow path: it teaches the key it is bound to,
+                            // and falls back to /status only while nothing is bound.
+                            const QString keys = Keymap::instance().shortcutText(QStringLiteral("agent.info"));
+                            w->runAction(QStringLiteral("agent.info"));
+                            w->hint(QStringLiteral("info.click"),
+                                    keys.isEmpty() ? QStringLiteral("Next time: /status in the prompt box")
+                                                   : relay::ShortcutHints::nextTime(keys, QStringLiteral("conversation info")));
+                        };
                     }
                     chrome->onAction = [guard](const QString &action) {
                         auto *w = windowOf(guard);

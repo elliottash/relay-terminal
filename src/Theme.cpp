@@ -94,7 +94,7 @@ QString bevelStylesheet(const ThemeSpec &spec) {
     const QString dark = hex(extraColor(spec, QStringLiteral("bevel.dark"), SurfaceRaised.darker(160)));
     QString css = QStringLiteral(R"(
 QPushButton, QComboBox, QToolButton#stripChip, QLabel#stripChipLabel, QLabel#keyCap,
-QFrame#paneChrome, QFrame#helpPopup, QFrame#paneInfoPopover, QMenu, QFrame#notificationsPopup {
+QFrame#paneChrome, QFrame#helpPopup, QFrame#paneInfoOverlay, QMenu, QFrame#notificationsPopup {
     border-top: 2px solid %1; border-left: 2px solid %1; border-bottom: 2px solid %2; border-right: 2px solid %2; }
 QPushButton:pressed, QToolButton#stripChip:pressed {
     border-top: 2px solid %2; border-left: 2px solid %2; border-bottom: 2px solid %1; border-right: 2px solid %1; }
@@ -144,7 +144,7 @@ QString metalStylesheet(const ThemeSpec &spec) {
     QString css = QStringLiteral(R"(
 QPushButton, QComboBox, QToolButton#stripChip, QLabel#stripChipLabel, QLabel#keyCap,
 QToolButton#workChip, QFrame#paneChrome, QMenu, QFrame#notificationsPopup,
-QFrame#helpPopup, QFrame#paneInfoPopover, QLabel#toast {
+QFrame#helpPopup, QFrame#paneInfoOverlay, QLabel#toast {
     background-color: qlineargradient(x1:0, y1:0, x2:0, y2:1,
         stop:0 %4, stop:0.09 %1, stop:0.55 %2, stop:1 %3); }
 QPushButton:hover, QComboBox:hover, QToolButton#stripChip:hover, QToolButton#workChip:hover {
@@ -173,7 +173,7 @@ QString plasticStylesheet(const ThemeSpec &spec) {
     QString css = QStringLiteral(R"(
 QPushButton, QComboBox, QToolButton#stripChip, QLabel#stripChipLabel, QLabel#keyCap,
 QToolButton#workChip, QFrame#paneChrome, QMenu, QFrame#notificationsPopup,
-QFrame#helpPopup, QFrame#paneInfoPopover, QLabel#toast {
+QFrame#helpPopup, QFrame#paneInfoOverlay, QLabel#toast {
     background-color: qlineargradient(x1:0, y1:0, x2:0, y2:1,
         stop:0 %1, stop:0.45 %2, stop:1 %3); }
 QPushButton:hover, QComboBox:hover, QToolButton#stripChip:hover, QToolButton#workChip:hover {
@@ -375,7 +375,7 @@ QLabel#cardDrawerNotice { color: @muted; font-size: 9pt; }
 QTextBrowser#cardDrawerBody { background: @surface; color: @text; border: none; }
 QToolButton#cardDrawerClose { color: @muted; background: transparent; border: 1px solid transparent; border-radius: 4px; padding: 0 3px; }
 QToolButton#cardDrawerClose:hover { color: @text; }
-QLabel#paneAuto { color: @muted; font-size: 9pt; border: 1px solid @border; border-radius: 4px; padding: 0 4px; }
+QToolButton#paneSessionCopy { background: transparent; border: none; padding: 0; }
 QLineEdit#paneTitleEdit { background: @surface; color: @text; border: 1px solid @accentBorder; border-radius: 4px; padding: 1px 6px; }
 
 QPushButton { background: @raised; color: @text; border: 1px solid @border; border-radius: 6px; padding: 5px 14px; }
@@ -553,9 +553,8 @@ QComboBox#statusPicker QAbstractItemView { background: @raised; color: @text; se
    (card #0T2R) — without them the permanent row read as three grey glyphs floating on the header,
    dimmer than the row it replaced, and nothing said they were buttons. */
 QFrame#paneChrome { background: @raised; border: 1px solid @border; border-radius: 6px; }
-QFrame#paneInfoPopover { background: @surface; border: 1px solid @border; border-radius: 8px; }
-QLabel#paneInfoLabel { color: @muted; font-size: 9pt; }
-QLabel#paneInfoId { color: @text; font-family: monospace; font-size: 9pt; }
+QFrame#paneInfoOverlay { background: @surface; border: 1px solid @border; border-radius: 8px; }
+QLabel#paneInfoBody { color: @text; background: transparent; font-size: 9pt; }
 QToolButton#paneChromeButton { color: @muted; border: 1px solid transparent; border-radius: 4px; padding: 0 5px; min-width: 16px; }
 /* @raised is the top of the ground stack, so a hovered button cannot lift off the row by ground:
    it lifts by ink and a stronger outline instead, the way projectInitButton does. */

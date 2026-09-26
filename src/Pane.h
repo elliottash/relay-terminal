@@ -4729,7 +4729,7 @@ public:
     }
 
     // **A console draws no pane header.** The row is a *pane's* chrome — the title the model
-    // writes for the conversation, the "auto" badge that says it wrote it, the card chip, the
+    // writes for the conversation, the session ID's copy button, the card chip, the
     // directory, and the whole row as the pane's drag handle — and an embedded console has none
     // of those things to say: the host already says where you are (the Switchboard's own header,
     // the card's title, "Options helper"), the console stands in no splitter to be dragged, and
@@ -6067,7 +6067,7 @@ protected:
 
 private:
     // ----- moving the pane by its header (owner, 2026-09-17) ---------------------------------
-    // Press anywhere on the header — the title, the "auto" badge, the folder line, the gap
+    // Press anywhere on the header — the title, the folder line, the gap
     // between them — and drag: the pane travels, exactly as it does from the chrome's ⠿ grip.
     // Drop it on another pane's edge to split that pane; on a tab's label to move into that
     // tab; on the tab bar's empty space to give it a tab of its own. Esc puts it back.
@@ -6659,6 +6659,7 @@ private:
         m_ctxWindow = event.value(QStringLiteral("context_window")).toVariant().toLongLong();
         m_ctxLimit = event.value(QStringLiteral("limit_tokens")).toVariant().toLongLong();
         m_sessionId = event.value(QStringLiteral("session_id")).toString();
+        if (syncSessionCopy()) updateHeader();
         m_sessionDir = event.value(QStringLiteral("session_dir")).toString();
         m_turnsCompleted = 0;
         syncSessionText();   // a reconfigure can hand the pane a different conversation (#0TJ9)
@@ -8884,11 +8885,32 @@ public:
     }
     relay::sessioninfo::InfoView *infoView() const { return m_infoView; }
 
-    // The ⓘ button and /status.
+    // The ⓘ overlay (card #7EWF) asks this pane's worker the same `session_info` question.
+    void bindInfoOverlay(relay::sessioninfo::InfoOverlay *overlay) {
+        m_infoOverlay = overlay;
+        QPointer<Pane> self(this);
+        overlay->onRequest = [self](const QJsonObject &request) {
+            if (!self || !self->m_workerReady) return;
+            QJsonObject message = request;
+            message.insert(QStringLiteral("type"), QStringLiteral("session_info"));
+            self->send(message);
+        };
+        overlay->onOpenFile = [self](const QString &path) { if (self && self->onOpenPath) self->onOpenPath(path, 0); };
+    }
+    relay::sessioninfo::InfoOverlay *infoOverlay() const { return m_infoOverlay; }
+
+    // /status: open conversation info — the overlay under the ⓘ, or, for a pane with no chrome
+    // (an embedded console), the info pane.
     void openInfo() {
         if (!m_workerReady) { status(QStringLiteral("The agent worker is still starting.")); return; }
         if (!m_configured) { status(QStringLiteral("No agent provider is configured.")); return; }
+        if (m_infoOverlay) { if (!m_infoOverlay->isVisible()) m_infoOverlay->open(); return; }
         if (onOpenInfo) onOpenInfo();
+    }
+    // Alt+I and the ⓘ: the same, but a second press closes it.
+    void toggleInfo() {
+        if (m_infoOverlay && m_infoOverlay->isVisible()) { m_infoOverlay->close(); return; }
+        openInfo();
     }
 
     // Enter resumes in this pane, Shift+Enter opens the conversation in a new one. A conversation
@@ -9329,7 +9351,7 @@ private:
             {QStringLiteral("resume"), QStringLiteral("[words]"), QStringLiteral("Sessions: resume, search, subagent threads (same as /conversations)")},
             {QStringLiteral("sessions"), QStringLiteral("[words]"), QStringLiteral("Sessions: the same pane as /resume, under the name on its header")},
             {QStringLiteral("conversations"), QStringLiteral("[words]"), QStringLiteral("Sessions: search every session and Relay's terminal history")},
-            {QStringLiteral("status"), QString(), QStringLiteral("Conversation info: model, tokens, file and history with subagent threads (the ⓘ button)")},
+            {QStringLiteral("status"), QString(), QStringLiteral("Conversation info: model, context, tokens and session ID (the ⓘ button)")},
             {QStringLiteral("info"), QString(), QStringLiteral("Conversation info (same as /status)")},
             {QStringLiteral("find"), QStringLiteral("[words]"), QStringLiteral("Find in this pane: conversation and terminal scrollback")},
             {QStringLiteral("plan"), QString(), QStringLiteral("Toggle plan mode")},
@@ -17497,10 +17519,11 @@ public:
         wants.directory = m_cwdLabel && !m_cwdText.isEmpty() && !titleRepeatsPath
                               ? cwdMetrics.horizontalAdvance(m_cwdText)
                               : 0;
-        // What no element on the ladder can have: the `auto` badge, the margins, and the room the
-        // hover button row is kept clear of.
-        wants.fixed = (m_titleAuto && m_titleAuto->isVisible()
-                           ? m_titleAuto->sizeHint().width() + (m_headerLayout ? m_headerLayout->spacing() : 0)
+        // What no element on the ladder can have: the session ID's copy button, the margins, and
+        // the room the hover button row is kept clear of.
+        syncSessionCopy();
+        wants.fixed = (m_sessionCopy && !m_sessionCopy->isHidden()
+                           ? m_sessionCopy->sizeHint().width() + (m_headerLayout ? m_headerLayout->spacing() : 0)
                            : 0)
                       + (m_headerLayout ? m_headerLayout->contentsMargins().right() : 0) + 32;
         QList<QWidget *> chrome;
@@ -17508,7 +17531,7 @@ public:
         // Anything else that has been put in this row keeps its whole width: it is not on the ladder.
         for (int i = 0; m_headerLayout && i < m_headerLayout->count(); ++i)
             if (QWidget *w = m_headerLayout->itemAt(i)->widget(); w && !w->isHidden() && w != m_titleLabel
-                && w != m_titleEdit && w != m_titleAuto && w != m_cwdLabel && !chrome.contains(w))
+                && w != m_titleEdit && w != m_sessionCopy && w != m_cwdLabel && !chrome.contains(w))
                 wants.chips += w->sizeHint().width() + m_headerLayout->spacing();
         const int header = m_headerWidget ? m_headerWidget->width() : width();
         const relay::panes::HeaderFit fit = relay::panes::headerFit(header, wants);
@@ -17534,8 +17557,26 @@ public:
         setHeaderWrapped(!lines.isEmpty());
         m_titleLabel->setToolTip(headerTooltip());
         if (m_cwdLabel) m_cwdLabel->setToolTip(headerTooltip());
-        // The badge says the name is still the model's to change; a hand-set one loses it.
-        m_titleAuto->setVisible(!m_title.isEmpty() && !m_titleUser);
+    }
+
+    // The header's copy button follows the session (card #7EWF): shown once there is one, and its
+    // tooltip names the ID it copies. Cheap, so updateHeader() and each session change call it.
+    // Returns whether it appeared or went, which changes the room the title has.
+    bool syncSessionCopy() {
+        if (!m_sessionCopy) return false;
+        const bool show = !m_sessionId.isEmpty();
+        m_sessionCopy->setToolTip(m_sessionId.isEmpty() ? QString()
+                                                        : QStringLiteral("Copy session ID  %1").arg(m_sessionId));
+        if (m_sessionCopy->isHidden() != show) return false;
+        m_sessionCopy->setVisible(show);
+        return true;
+    }
+    void copySessionId() {
+        if (m_sessionId.isEmpty()) return;
+        QClipboard *clipboard = QApplication::clipboard();
+        if (clipboard->supportsSelection()) clipboard->setText(m_sessionId, QClipboard::Selection);
+        clipboard->setText(m_sessionId);
+        toast(QStringLiteral("Copied session ID %1").arg(m_sessionId.left(8)));
     }
 
     // Double click on the header, /rename, or /rename with no argument: edit the title in place.
@@ -17718,8 +17759,10 @@ private:
     QString m_preProgramMode;
     QLabel *m_routeLabel = nullptr, *m_cwdLabel = nullptr, *m_help = nullptr;
     QString m_cwdText;   // the directory line in full; the label shows as much of it as fits
-    // Pane title (issue JRWQ): the header line, its in-place editor and the "auto" badge.
-    QLabel *m_titleLabel = nullptr, *m_titleAuto = nullptr;
+    // Pane title (issue JRWQ): the header line and its in-place editor; after them the session
+    // ID's copy button (card #7EWF, which retired the "auto" badge).
+    QLabel *m_titleLabel = nullptr;
+    QToolButton *m_sessionCopy = nullptr;
     QToolButton *m_cardChip = nullptr;   // the claims chip before the title (#C7PF, #0FBB)
     QLineEdit *m_titleEdit = nullptr;
     QHBoxLayout *m_headerLayout = nullptr;
@@ -17960,6 +18003,7 @@ private:
     // Conversation list and search (protocol 14) plus the terminal-history capture.
     QPointer<relay::conversations::SessionManager> m_conversations;   // the window's manager pane, bound here
     QPointer<relay::sessioninfo::InfoView> m_infoView;                // the ⓘ pane, bound here
+    QPointer<relay::sessioninfo::InfoOverlay> m_infoOverlay;          // the ⓘ overlay (#7EWF)
     relay::conversations::FindBar *m_findBar = nullptr;
     relay::terminalcontext::Records m_terminalRecords;
     QString m_terminalSharingOverride;

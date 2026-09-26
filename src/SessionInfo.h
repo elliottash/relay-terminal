@@ -42,39 +42,55 @@ protected:
     void paintEvent(QPaintEvent *event) override;
 };
 
-// The low-frequency controls behind the header's circle-i. It is a child of the pane rather than
-// a Qt::Popup window: hovering it must not steal focus from the terminal, and it must remain
-// reachable while the pointer crosses the small gap below the button.
-class PaneInfoPopover final : public QFrame {
+// Conversation info as a small overlay under the pane's ⓘ (card #7EWF): the ⓘ button, Alt+I and
+// /status open it over the pane instead of docking an info pane beside it. It is a child of the
+// pane, not a Qt::Popup window, so it moves and clips with the pane and never leaves the window.
+// It shows the summary alone (renderSummary): no cost, no usage table, no history — rewinding is
+// how a person reads the history. The same action, Esc or a click outside closes it. The info
+// pane (InfoView) is still what the Sessions pane and subagent-thread links open.
+class InfoOverlay final : public QFrame {
 public:
-    PaneInfoPopover(QWidget *pane, QWidget *anchor, const QString &paneId);
+    InfoOverlay(QWidget *pane, QWidget *anchor, const QString &paneId);
 
-    std::function<void()> onToggleDim;
-    QToolButton *dimButton() const { return m_dim; }
+    // A `session_info` request body without "type", exactly as InfoView sends one.
+    std::function<void(const QJsonObject &request)> onRequest;
+    std::function<void(const QString &path)> onOpenFile;
+    std::function<void()> onClosed;   // after Esc, a click outside or toggle(): focus goes home
+
+    void open();      // show under the anchor and ask for the live session
+    void close();
+    void toggle() { isVisible() ? close() : open(); }
+    void refreshIfOpen();   // after a turn ends
+    void setInfo(const QJsonObject &event);
+    void setError(const QString &requestId, const QString &text);
+    bool owns(const QString &requestId) const { return !requestId.isEmpty() && requestId == m_pendingId; }
     QString paneId() const { return m_paneId; }
-    void setDimState(int amount, bool manual);
+    QString html() const;   // what the body shows, for the tests
 
 protected:
     bool eventFilter(QObject *object, QEvent *event) override;
+    void keyPressEvent(QKeyEvent *event) override;
 
 private:
-    void showAtAnchor();
-    void scheduleClose();
-    bool pointerOrFocusInside() const;
+    void request();
+    void place();
+    void linkActivated(const QString &href);
 
     QWidget *m_anchor = nullptr;
-    QLabel *m_id = nullptr;
-    QToolButton *m_copy = nullptr;
-    QToolButton *m_dim = nullptr;
-    QTimer *m_closeTimer = nullptr;
-    QTimer *m_copyTimer = nullptr;
-    QString m_paneId;
+    QLabel *m_body = nullptr;
+    QString m_paneId, m_pendingId;
+    QJsonObject m_current;
+    int m_counter = 0;
 };
 
 // The `session_info` event as HTML for the view's text browser. Links use the relay-info: scheme
 // (thread?id=&dir=&owner=, session?id=&dir=, live?agent=&thread=, file?path=, copy?text=&what=).
 // Pure; unit tested.
 QString renderInfo(const QJsonObject &info, const QDateTime &now);
+// The overlay's shorter form of a live session (card #7EWF): model, context, tokens, the session
+// ID (copyable) with the pane's short ID beside it, started, turns and instructions. No cost, no
+// usage by turn, no history. Pure; unit tested.
+QString renderSummary(const QJsonObject &info, const QString &paneId, const QDateTime &now);
 // "41.2k", "1.3M", "812"
 QString compactNumber(qint64 value);
 // The key/value pairs of a relay-info: link, decoded.

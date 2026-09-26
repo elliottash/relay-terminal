@@ -318,7 +318,8 @@ bool Pane::handleObservabilityEvent(const QString &type, const QJsonObject &even
             }
             // The ⓘ view's requests (protocol 25): the view says what went wrong, in place.
             if (id.startsWith(QStringLiteral("info-"))) {
-                if (m_infoView) m_infoView->setError(id, event.value(QStringLiteral("text")).toString());
+                if (m_infoOverlay && m_infoOverlay->owns(id)) m_infoOverlay->setError(id, event.value(QStringLiteral("text")).toString());
+                else if (m_infoView) m_infoView->setError(id, event.value(QStringLiteral("text")).toString());
                 return true;
             }
             // The × on a steer lost the race: the turn took it (or gave it back) first. The
