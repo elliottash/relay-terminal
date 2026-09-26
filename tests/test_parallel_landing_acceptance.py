@@ -640,8 +640,18 @@ class PolicyAndGates(AcceptanceCase):
                 p.cli("run", "--once", "--no-main", codes=(5,))
                 self.assertEqual(p.base, p.main())
                 self.assertIsNone(p.service().queue.receipt(job["id"]))
-                handoffs = p.service().handoffs(workspace_id=ws["workspace_id"])
-                self.assertTrue(any(h["kind"] == "failed" for h in handoffs), handoffs)
+                # One actionable handoff per failed job (B1, 65ca8c46 and c8dce251): the
+                # author is woken for exactly one pending row, the kind the service names
+                # actionable for the job; the gate's `failed` row is kept as history.
+                service = p.service()
+                history = service.handoffs(workspace_id=ws["workspace_id"], pending_only=False)
+                self.assertIn("failed", [h["kind"] for h in history], history)
+                pending = service.handoffs(workspace_id=ws["workspace_id"])
+                self.assertEqual(1, len(pending), pending)
+                self.assertEqual(service.actionable_kind(service.queue.status(job["id"])),
+                                 pending[0]["kind"])
+                self.assertIn(job["id"], pending[0]["text"])
+                self.assertTrue(pending[0]["payload"].get("reason"), pending[0])
 
     def test_stale_ignored_artifact_cannot_mask_a_failing_candidate(self):
         # The gate's own build step writes an ignored artifact that the tests read.
@@ -1576,6 +1586,36 @@ class NativeAndGuestPanes(AcceptanceCase):
         self.assertEqual("landed", p.cli("status", job["id"])[1]["status"])
         self.assertIn(BOARD_MARK, p.show(p.main(), ".board/threads/AB12.md"))
         native.stop()
+
+    def test_a_board_write_is_recorded_before_the_turn_ends_and_survives_the_workers_death(self):
+        # The contract: a pane's Board write is durable in the queue before its turn is
+        # reported finished, so a worker that is gone the instant after (no shutdown, no
+        # background thread left to run) has still handed the write to the publisher.
+        p = self.p
+        self.assertFalse((p.repo / "scripts" / "land.py").exists())   # queue route, in process
+        native = self.start_worker("dying-tok")
+        native.wait(lambda e: e.get("event") == "configured")
+        native.send({"type": "ask", "text": "%s: note progress on #AB12" % BOARD_TRIGGER,
+                     "id": "ask-die"})
+        native.wait(lambda e: e.get("event") == "agent_finished", timeout=60)
+        # SIGKILL the moment the turn is finished: nothing the worker meant to do later runs.
+        native.proc.kill()
+        native.proc.wait(timeout=30)
+        self.assertIn(BOARD_MARK, (p.repo / ".board/threads/AB12.md").read_text())
+        jobs = [j for j in p.cli("status")[1] if j["kind"] == "metadata"]
+        self.assertEqual(1, len(jobs), "the turn ended before its Board write was queued: %s"
+                         % [(j["kind"], j["status"]) for j in p.cli("status")[1]])
+        job = jobs[0]
+        self.assertEqual("queued", job["status"])
+        # The snapshot commit is retained under the queue's own refs and holds the write.
+        self.assertEqual(job["submitted_sha"],
+                         git(p.repo, "rev-parse", "refs/landq/jobs/%s/submitted" % job["id"]))
+        self.assertIn(BOARD_MARK, p.show(job["submitted_sha"], ".board/threads/AB12.md"))
+        self.assertEqual(p.main(), git(p.repo, "rev-parse", job["submitted_sha"] + "^"))
+        # No worker is alive; the publisher alone lands it.
+        p.cli("run", "--once", "--no-main")
+        self.assertEqual("landed", p.cli("status", job["id"])[1]["status"])
+        self.assertIn(BOARD_MARK, p.show(p.main(), ".board/threads/AB12.md"))
 
     def test_a_paused_project_refuses_development_launch_instead_of_sharing_the_checkout(self):
         self.p.cli("pause")
