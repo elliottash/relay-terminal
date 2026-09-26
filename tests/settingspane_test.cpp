@@ -903,6 +903,43 @@ private slots:
         QVERIFY(palette.contains(QStringLiteral("QStringLiteral(\"settings.import\")")));
     }
 
+    // Options › Storage (#HEY7 step 6): a report of the disk Relay's records hold — per area
+    // under `$XDG_DATA_HOME/relay` plus a total, computed in-process, no delete buttons
+    // (cleanup is the bundled storage-cleanup skill's job). Read as text like the rows above:
+    // the section needs a whole window to build, and the walk itself is QDirIterator over the
+    // live data root, which a headless test cannot make deterministic.
+    void storageSectionReportsSizes() {
+        QFile source(QStringLiteral(RELAY_SOURCE_DIR "/src/RelayWindowSettings.cpp"));
+        QVERIFY2(source.open(QIODevice::ReadOnly | QIODevice::Text), qPrintable(source.fileName()));
+        const QString text = QString::fromUtf8(source.readAll());
+        const int section = text.indexOf(QStringLiteral("relay::SettingsSection storage;"));
+        QVERIFY2(section > 0, "the Storage section is missing from Options");
+        const int placed = text.indexOf(QStringLiteral("sections << storage;"), section);
+        QVERIFY2(placed > section, "the Storage section is built but never added to the list");
+        const QString body = text.mid(section, placed - section);
+        // Every area the card names: the pane text journals, the saved layouts and scrollbacks,
+        // the conversations/sessions store and the index, then a total.
+        QVERIFY(body.contains(QStringLiteral("\"text\"")));
+        QVERIFY(body.contains(QStringLiteral("\"state\"")));
+        QVERIFY(body.contains(QStringLiteral("\"sessions\"")));
+        QVERIFY(body.contains(QStringLiteral("index.db")));
+        QVERIFY(body.contains(QStringLiteral("storage-total")));
+        // In-process and human-readable: QDirIterator over the data root, QLocale formats.
+        QVERIFY(body.contains(QStringLiteral("QDirIterator")));
+        QVERIFY(body.contains(QStringLiteral("formattedDataSize")));
+        // A report, not a tool: only Info rows, nothing to click.
+        QVERIFY(!body.contains(QStringLiteral("SettingRow::Button")));
+        QVERIFY(!body.contains(QStringLiteral("onToggle")));
+        // The bundled skill the section points at exists and leads with the report.
+        QFile skill(QStringLiteral(RELAY_SOURCE_DIR "/backend/relay_core/skills_bundled/storage-cleanup/SKILL.md"));
+        QVERIFY2(skill.open(QIODevice::ReadOnly | QIODevice::Text), qPrintable(skill.fileName()));
+        const QString md = QString::fromUtf8(skill.readAll());
+        QVERIFY(md.contains(QStringLiteral("name: storage-cleanup")));
+        QVERIFY(md.contains(QStringLiteral("textjournal.py du")));
+        QVERIFY(md.contains(QStringLiteral("forget_older_than")));
+        QVERIFY(md.contains(QStringLiteral("explicit")));
+    }
+
     // Options › Agent › Board gains "Work signals unasked" (#AQ6X decision 9). The row needs
     // a whole window to build, so it is read as text like the two above; what it writes —
     // `signals_config` into the board's own `board.yaml` — is covered headless in

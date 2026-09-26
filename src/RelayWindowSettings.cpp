@@ -9,6 +9,11 @@
 
 #include <QFileDialog>
 #include <QSet>
+// Options › Storage walks the data root (#HEY7 step 6); the rest of this file leaves paths to
+// the classes that own them.
+#include <QDirIterator>
+#include <QFileInfo>
+#include <QLocale>
 
 QList<relay::SettingsSection> RelayWindow::settingsSections() {
         QList<relay::SettingsSection> sections;
@@ -1178,6 +1183,110 @@ QList<relay::SettingsSection> RelayWindow::settingsSections() {
             shortcuts.rows << mouse;
         }
         sections << shortcuts;
+
+        // ----- Storage (card #HEY7 step 6; owner, 2026-09-25: "show disk space in options and
+        // then a helper agent has a skill to help you clean out large records") ----------------
+        // A *report* of what Relay's own records hold on disk, per area and in total, computed
+        // in-process when the pane builds this section list (the directories are small-to-
+        // moderate and the walk is capped defensively anyway). There are deliberately no delete
+        // buttons: cleanup is the bundled storage-cleanup skill's job, and it shows sizes first
+        // and forgets records only at the user's explicit instruction. The root walked is
+        // `$XDG_DATA_HOME/relay` — the same root TextJournal.cpp's rootDirectory() and
+        // WindowState.cpp's defaultDirectory() write under, spelled the way
+        // textjournal.text_root()/conv_index.relay_data_dir() spell it — not
+        // AppPaths::dataRoot(), which is Relay's install tree.
+        relay::SettingsSection storage;
+        storage.id = QStringLiteral("storage");
+        storage.title = QStringLiteral("Storage");
+        {
+            // Files only; links are not followed. kStorageWalkMax keeps a pathological tree
+            // (the journals are one folder per pane that ever opened, and panes accumulate)
+            // from stalling the pane: past the cap the figure is a lower bound, which a report
+            // can live with.
+            constexpr int kStorageWalkMax = 200000;
+            auto areaBytes = [](const QString &path) -> qint64 {
+                qint64 bytes = 0;
+                int walked = 0;
+                QDirIterator it(path, QDir::Files | QDir::NoDotAndDotDot | QDir::Hidden,
+                                QDirIterator::Subdirectories);
+                while (it.hasNext() && walked < kStorageWalkMax) {
+                    it.next();
+                    ++walked;
+                    bytes += it.fileInfo().size();
+                }
+                return bytes;
+            };
+            const QString data = QStandardPaths::writableLocation(QStandardPaths::GenericDataLocation);
+            const QString root = data.isEmpty() ? QString() : data + QStringLiteral("/relay");
+            if (root.isEmpty()) {
+                relay::SettingRow none;
+                none.kind = relay::SettingRow::Info;
+                none.id = QStringLiteral("storage-unavailable");
+                none.label = QStringLiteral("Relay data");
+                none.detail = QStringLiteral("No data location is available on this system.");
+                storage.rows << none;
+            } else {
+                storage.blurb = QStringLiteral(
+                    "What Relay's records hold on disk under %1. This page only reports; the "
+                    "storage-cleanup skill helps an agent show and clear old records, on your "
+                    "instruction.").arg(root);
+                const struct {
+                    const char *id, *path, *label, *detail;
+                } areas[] = {
+                    {"storage-text", "text", "Pane text journals",
+                     "The append-only journals behind every pane's restorable text (card #HEY7). "
+                     "Idle journals compress themselves: zlib on seal, xz after 7 days."},
+                    {"storage-state", "state", "Layouts and scrollbacks",
+                     "windows.json, the scrollback snapshots and the prompt history Relay "
+                     "restores your windows from."},
+                    {"storage-sessions", "sessions", "Conversations and sessions",
+                     "The session store: one folder per workspace, guests under sessions/guests. "
+                     "Relay keeps a record until its session is deleted; the index below is "
+                     "rebuilt from these."},
+                };
+                qint64 total = 0;
+                for (const auto &area : areas) {
+                    const qint64 bytes = areaBytes(root + QLatin1Char('/') + QLatin1String(area.path));
+                    total += bytes;
+                    relay::SettingRow row;
+                    row.kind = relay::SettingRow::Info;
+                    row.id = QLatin1String(area.id);
+                    row.label = QLatin1String(area.label);
+                    row.detail = QStringLiteral("%1 — %2").arg(QLocale().formattedDataSize(bytes),
+                                                               QLatin1String(area.detail));
+                    storage.rows << row;
+                }
+                {
+                    // The conversation index is one SQLite file (plus its -wal/-shm side files
+                    // while the backend holds it open), not a directory.
+                    qint64 indexBytes = 0;
+                    const QFileInfo index(root + QStringLiteral("/index.db"));
+                    if (index.exists()) indexBytes += index.size();
+                    const QFileInfo wal(root + QStringLiteral("/index.db-wal"));
+                    if (wal.exists()) indexBytes += wal.size();
+                    const QFileInfo shm(root + QStringLiteral("/index.db-shm"));
+                    if (shm.exists()) indexBytes += shm.size();
+                    total += indexBytes;
+                    relay::SettingRow row;
+                    row.kind = relay::SettingRow::Info;
+                    row.id = QStringLiteral("storage-index");
+                    row.label = QStringLiteral("Conversation index");
+                    row.detail = QStringLiteral("%1 — index.db, the SQLite catalog of every "
+                                                "conversation; a cache, rebuilt from the session "
+                                                "store when missing.")
+                                     .arg(QLocale().formattedDataSize(indexBytes));
+                    storage.rows << row;
+                }
+                relay::SettingRow sum;
+                sum.kind = relay::SettingRow::Info;
+                sum.id = QStringLiteral("storage-total");
+                sum.label = QStringLiteral("Total");
+                sum.detail = QLocale().formattedDataSize(total);
+                sum.strong = true;
+                storage.rows << sum;
+            }
+        }
+        sections << storage;
 
         // ----- About (owner, 2026-09-20: "i think there should be an about section in the
         // options") -------------------------------------------------------------------------
