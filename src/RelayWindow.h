@@ -5792,7 +5792,8 @@ public:
                     if (!here || pane->sessionToken().isEmpty()) continue;
                     live.append(QJsonObject{{"token", pane->sessionToken()},
                         {"title", pane->paneTitle().isEmpty() ? shortPath(pane->cwd()) : pane->paneTitle()},
-                        {"model", pane->paneModel()}, {"busy", pane->dimmingAgentBusy()}});
+                        {"model", pane->paneModel()}, {"busy", pane->dimmingAgentBusy()},
+                        {"tree_status", pane->treeStatus()}});
                 }
             }
             return live;
