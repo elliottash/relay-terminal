@@ -184,3 +184,19 @@ Three cautions from the economics that the design should keep: the human signal 
 | §1 / §5 point 3: earned authority end to end — sampling, promotion, demotion, AI-verdict calibration | #GW74 | Q3 (the designation lives on the server, sampled per case by policy), Q6 in part |
 
 Still open on this card: Q6 (who may set a server's profile: the agent proposes, the owner corrects, policy floors it — the practice so far, not yet a rule) and the pilot decision under #FVVY. Housekeeping: the seven QA cards (#WFRA, #1AA6, #MSJ0, #C3Q2, #95VZ, #BX7B, #JEWY) sit in needs-verification awaiting a separate session's pass.
+
+## Plan
+**Goal.** Deliver the cards → servers → cases model in small, checkable slices, with skill maintenance from #SZ1H using the same server identity and case history.
+
+**Findings.** The QA ladder and case foundation (#WFRA, #1AA6, #MSJ0, #C3Q2, #95VZ, #BX7B, #JEWY) and Skills registry (#9FX8) have landed but remain in needs-verification. Planned or discussing follow-ons are #G9ZD (case/server → card), #4YKJ (harden/soften), #GW74 (earned authority) and #FVVY (other objects and non-software pilot). #SZ1H owns import, catalog requirements, bundle quality and mail design.
+
+**Sequence.**
+1. Independently verify the landed QA, ledger and registry cards. Confirm a case records server identity and version, verdict, cost and confidentiality correctly before using those fields for automation.
+2. Use #G9ZD to turn repeated person-served cases and server failures into suggested build/repair cards, with per-server and project policy limiting noise. Use #4YKJ to derive step-level harden/soften hints from the same case rows after enough cases exist.
+3. Use #GW74 to calibrate AI verdicts against person verdicts, apply sampling and demote authority on failures. Keep the policy floor from #C3Q2 and human sign-off requirements in force; the server's profile supplies defaults, not permission to skip them.
+4. Pilot #FVVY on a non-software project and record one complete path: case intake → matched server or person → artifact and evidence → verdict → server improvement card. Choose the pilot and settle profile authority under this card's existing open questions before that phase; do not treat those choices as already made.
+5. Integrate #SZ1H: imported skills receive provenance and stable identity in the registry, and their Try-it and live cases use this ledger. Cross-check that a duplicate or new skill version does not combine case histories incorrectly.
+
+**Risks.** A small or biased case sample cannot justify automatic authority; keep denominators and calibration visible. Confidential cases store references and permitted metadata, not protected content. Avoid building new panes for every object until the pilot shows a durable need.
+
+**Verify.** Each owning card carries its own tests and verdict. The pilot demonstrates the full loop on real non-software work, and the cross-card check shows that skill versions, cases, policy and repair cards stay linked without duplicate records.

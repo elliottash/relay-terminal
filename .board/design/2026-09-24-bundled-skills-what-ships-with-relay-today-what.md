@@ -7,7 +7,7 @@ component: [worker, skills]
 rank: zzzzzzzzzzzzzzzzzzzzr
 created: '2026-09-24'
 source: 'Claude Fable guest session in Relay, 2026-09-24, split out of #9HS0'
-links: {commits: [b74afc4f68e6, c1a9585ff165, a9870d95e14b, 1566435b6107, 42d1cf11c47e], evidence: [reports/Bundled skills for Relay.md], github: null, plans: [], related: [9HS0, 1QKM, XHXX, HS7V, MEPR, GSK7, MSJ0, 95VZ, 9FX8, JVEJ, 4YKJ]}
+links: {commits: [b74afc4f68e6, c1a9585ff165, a9870d95e14b, 1566435b6107, 42d1cf11c47e, 24f637974061], evidence: [reports/Bundled skills for Relay.md], github: null, plans: [], related: [9HS0, 1QKM, XHXX, HS7V, MEPR, GSK7, MSJ0, 95VZ, 9FX8, JVEJ, 4YKJ]}
 ---
 # Bundled skills: what ships with Relay today, what the starter tasks need, and what the skill catalogue shows an agent
 
@@ -65,3 +65,19 @@ Re-checked after a day of other sessions' work; the recommendations stand unchan
 ## Decisions
 
 2026-09-25 — Owner approved the research recommendations: keep bundled skills focused on Relay operations; add skill `requires` and availability checks; improve catalog text and budget; give bundled skills profiles and release cases; design mail as a task plugin with a thin skill. For identity, collapse byte-identical skills automatically and find semantic equivalents as review candidates. Add a skill-maintenance skill that runs during first-install onboarding to discover and import skills from other agents, then maintains the catalog. Keep source, version and differences visible; do not silently merge distinct instructions. See the verbatim owner decision in the thread.
+
+## Plan
+**Goal.** Make Relay's skill catalog trustworthy from first install through ongoing use, while shipping only skills Relay can maintain. #1QKM supplies the server, case and verification model; this card owns catalog ingestion, requirements and the bundle.
+
+**Findings.** #HS7V defines Relay's canonical skill home; #9FX8 supplies the Skills registry; #MSJ0 and #95VZ supply profiles and case history. Their landed code is in needs-verification. The five approved children are #K26R, #G8JN, #4EMF, #M91Y and #1E5F.
+
+**Sequence.**
+1. Verify the shared foundations (#HS7V, #MSJ0, #95VZ, #9FX8) and settle their exposed contracts. Keep a failing or changed contract on its owning card rather than reimplementing it here.
+2. Build #K26R's requirement checks, source provenance and exact-content identity first. #G8JN's catalog text, prompt budget and guest filtering can proceed alongside it, then be tested against the same mixed-source fixture.
+3. Build #4EMF's bundled profiles, creator, Try-it cases and release check on those requirements. Build #M91Y's first-run import and maintenance workflow against the same index and #HS7V's canonical destination. Inventory and compare before any import; preserve source files and require a choice for semantic consolidation.
+4. Run #1E5F as a design track in parallel. Its mail plugin and triage skill enter the bundle only after the credential, consent and verification design is settled; it does not block the core catalog rollout.
+5. Exercise one end-to-end fixture with Relay, Claude, Codex and Warp sources: import proposal, exact and semantic duplicate handling, unavailable requirements, catalog display, a Try-it case and a repeat maintenance run. Link each result to its child card and check that #1QKM's case ledger records the served case.
+
+**Risks.** Semantic similarity is fallible: it produces review candidates, never an automatic merge. First-run import must stay reversible and must not copy secrets. Guest catalogs may already list their own skills, so filter at the prompt boundary. Treat pending QA on foundation cards as a gate to claiming their contracts stable.
+
+**Verify.** Each child records its own targeted tests and outcome. Close this orchestration card only when all five children have their own verdicts, the integrated catalog fixture passes, and the mail design has its scope decision.
