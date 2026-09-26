@@ -419,10 +419,13 @@ class FlowTests(ServiceCase):
         self.assertEqual(result["job"]["status"], "failed")
         self.assertEqual(self.tip(), self.base)
         self.assertIsNone(service.queue.receipt(job["id"]))
-        handoff = service.handoffs(session="broken")
-        self.assertEqual(len(handoff), 1)
-        self.assertEqual(handoff[0]["kind"], "failed")
+        handoffs = service.handoffs(session="broken")
+        # The one repair round ran (the stub model declined), so the author gets the failed
+        # gate and the author_required handoff with both gate results; nobody else does.
+        self.assertEqual(sorted(h["kind"] for h in handoffs), ["author_required", "failed"])
+        handoff = [h for h in handoffs if h["kind"] == "failed"]
         self.assertIn("target was not moved", handoff[0]["text"])
+        self.assertEqual({h["session"] for h in service.handoffs()}, {"broken"})
         self.assertIn("landq:%s:failed" % job["id"], (self.board / "threads" / "AA11.md").read_text())
         self.assertEqual(service.main_status()["installed_sha"], self.base,
                          "the runnable main follows the target, which did not move")
@@ -635,6 +638,61 @@ class ReconcileTests(ServiceCase):
         # No handoff is addressed anywhere but the author's session.
         self.assertEqual({h["session"] for h in service.handoffs()}, {"first", "second"})
 
+    def test_failed_gate_gets_one_repair_round_and_the_repair_is_gated_before_landing(self):
+        requests = []
+        fixed = self.original.replace("line 2\n", "repaired change\n")
+
+        def model(request):
+            requests.append(request)
+            return json.dumps({"files": [{"path": "shared.txt", "content": fixed}],
+                               "notes": "restored the dropped line"}), {"prompt_tokens": 400, "completion_tokens": 90}
+
+        service = self.service(reconciler=self.reconciler(model_call=model))
+        ws, path, sha = self.author(service, "repairable", "line 2\n", "repaired change\n", card="BB22")
+        broken = fixed.replace("line 39\n", "")           # 39 lines: the gate wants 40
+        (path / "shared.txt").write_text(broken)
+        run_git(path, "commit", "-q", "-am", "drops a line")
+        sha = git_out(path, "rev-parse", "HEAD")
+        job = service.submit(workspace_id=ws["workspace_id"], request_id="repair-1")
+        result = service.run_once()
+        self.assertEqual(result["job"]["status"], "landed", result)
+        self.assertEqual(len(requests), 1)
+        self.assertIn("GATE FAILURE", requests[0]["user"].upper())
+        self.assertIn("Bob's card", requests[0]["user"], "the card's intent reached the repair prompt")
+        self.assertEqual(git_out(self.repo, "show", "main:shared.txt") + "\n", fixed)
+        message = git_out(self.repo, "log", "-1", "--format=%B", "main")
+        self.assertIn("Landq-Repair: 1 of", message)
+        verifications = service.queue.verifications(job["id"])
+        self.assertEqual([v["ok"] for v in verifications], [False, True], "gate, repair, gate again")
+        self.assertTrue(service.queue.receipt(job["id"])["verified"])
+        self.assertEqual(sha, git_out(path, "rev-parse", "HEAD"), "the author's branch is untouched")
+        self.assertEqual([h["kind"] for h in service.handoffs(session="repairable")], ["landed"])
+        note = (self.board / "threads" / "BB22.md").read_text()
+        self.assertIn("landing job %s automatically: shared.txt repaired by" % job["id"], note)
+
+    def test_a_repair_that_fails_the_gate_again_returns_to_the_author_with_both_results(self):
+        still_broken = self.original.replace("line 2\n", "x\n").replace("line 39\n", "").replace("line 38\n", "")
+
+        def model(request):
+            return json.dumps({"files": [{"path": "shared.txt", "content": still_broken}],
+                               "notes": "tried"}), {"prompt_tokens": 400, "completion_tokens": 90}
+
+        service = self.service(reconciler=self.reconciler(model_call=model))
+        ws, path, sha = self.author(service, "stuck", "line 2\n", "x\n", card="BB22")
+        (path / "shared.txt").write_text(self.original.replace("line 2\n", "x\n").replace("line 39\n", ""))
+        run_git(path, "commit", "-q", "-am", "drops a line")
+        job = service.submit(workspace_id=ws["workspace_id"], request_id="stuck-1")
+        result = service.run_once()
+        self.assertEqual(result["job"]["status"], "failed", result)
+        self.assertEqual(self.tip(), self.base)
+        verifications = service.queue.verifications(job["id"])
+        self.assertEqual([v["ok"] for v in verifications], [False, False], "exactly one repair round")
+        kinds = [h["kind"] for h in service.handoffs(session="stuck")]
+        self.assertEqual(sorted(kinds), ["author_required", "failed"])
+        author = [h for h in service.handoffs(session="stuck") if h["kind"] == "author_required"][0]
+        self.assertEqual(len(author["payload"]["verifications"]), 2, "both gate results ride along")
+        self.assertIn("Gate log", author["text"])
+
     def test_enrich_context_reads_both_sides_from_the_canonical_board(self):
         service = self.service()
         first = self.land_first(service)
@@ -650,6 +708,15 @@ class ReconcileTests(ServiceCase):
         self.assertTrue(any("line 35 says bob" in i for i in enriched["intents"]))
         self.assertEqual(enriched["policy"]["reconcile"]["max_attempts"], 2)
         self.assertEqual(enriched["board_root"], str(self.board))
+        # A gate-failure context keeps what the queue and A4 agree on.
+        repair = service.enrich_context({**context, "conflicts": [], "kind": "gate_failure",
+                                         "repair_paths": ["shared.txt"],
+                                         "diagnostics": {"kind": "gate_failure", "round": 1,
+                                                         "reason": "exit 1", "log": "boom"}})
+        self.assertEqual(repair["kind"], "gate_failure")
+        self.assertEqual(repair["repair_paths"], ["shared.txt"])
+        self.assertEqual(repair["diagnostics"]["reason"], "exit 1")
+        self.assertEqual(reconcile.context_kind(repair), "gate_failure")
 
 
 # ----------------------------------------------------------------------------- legacy guard

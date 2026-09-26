@@ -1129,15 +1129,12 @@ class IntegrationService:
 
     def reconcile(self, context: dict) -> dict:
         """The queue's reconcile callback: enrich, then the A4 reconciler on the candidate.
-        Only a textual merge conflict is reconciled; a gate failure (the queue's optional repair
-        round) goes straight back to the author — the reconciler resolves conflicted files, and
-        spending a High-tier call on a failing test suite with no conflict to resolve is not
-        automatic reconciliation, it is guessing."""
-        diagnostics = context.get("diagnostics")
-        if isinstance(diagnostics, dict) and diagnostics.get("kind") == "gate_failure":
-            return {"status": "author_required",
-                    "reason": "gate failure is returned to the author; reconciliation resolves "
-                              "merge conflicts only"}
+        Two shapes arrive: a merge conflict (`conflicts` named, markers in the candidate) and
+        a gate failure (`diagnostics.kind == "gate_failure"`: the merged candidate the gate
+        refused, its reason and log, the files the submission changed as `repair_paths`). The
+        queue allows one bounded repair round per candidate; the repaired commit goes through
+        the required gate again, and a second failure returns to the author with both gate
+        results. `enrich_context` keeps `kind`, `diagnostics` and `repair_paths` as sent."""
         enriched = self.enrich_context(context)
         result = self.reconciler.reconcile_sync(enriched, board_root=str(self.board_root)
                                                 if self.board_root.is_dir() else None)
@@ -1219,11 +1216,11 @@ class IntegrationService:
         try:
             with self._admitted(job) as grant:
                 before = self.target_sha()
-                # reconcile_attempts=0: a failed gate is the author's, not a repair round
-                # (see `reconcile`); only merge conflicts are reconciled automatically.
+                # One bounded repair round for a failed gate (A2 `reconcile_attempts`, A4's
+                # gate_failure mode); the reconciler's own ledger caps attempts at two.
                 result = self.queue.process_one(self.verifier, reconcile=self.reconcile,
                                                 accepted_policy_hash=accepted["hash"],
-                                                reconcile_attempts=0)
+                                                reconcile_attempts=1)
         except integration_slots.AdmissionError as exc:
             return {"skipped": "admission: %s" % exc, "job_id": job["id"],
                     "delivered": self.deliver_handoffs()}
