@@ -3183,7 +3183,7 @@ public:
     }
     bool agentDriving() const { return m_delegated; }
 
-    // Ctrl+Shift+J, the banner button and the palette. With text in the prompt box it hands the
+    // The banner button and the palette (no default key since #XPEB). With text in the prompt box it hands the
     // program over *and* sends that request, so "answer it with y" is one keystroke away.
     void delegateProgram() {
         if (m_delegated) { takeOverFromAgent(); return; }

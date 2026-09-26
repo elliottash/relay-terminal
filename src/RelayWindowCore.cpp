@@ -221,11 +221,12 @@ bool RelayWindow::eventFilter(QObject *object, QEvent *event) {
         // forward-char, the way Ctrl+H stays Backspace there. Plain Ctrl+Q clears the prompt box
         // only from the prompt box (#CPRQ). Plain Ctrl+L starts the output-link walk from the
         // prompt box only: at the shell it is Readline's clear-screen (owner ask 2026-09-25).
-        // Ctrl+Shift+H, Ctrl+Shift+Q and Ctrl+Shift+L act from anywhere, a program's keyboard
-        // included, since Ctrl+Shift is Relay's layer (#QWAS).
+        // Plain Ctrl+J (#XPEB) likewise: at the shell it is a line feed.
+        // Ctrl+Shift+H, Ctrl+Shift+Q, Ctrl+Shift+L and Ctrl+Shift+J act from anywhere, a program's
+        // keyboard included, since Ctrl+Shift is Relay's layer (#QWAS).
         const bool shifted = key->modifiers() & Qt::ShiftModifier;
         if ((((id == QStringLiteral("control.human") || id == QStringLiteral("prompt.clear")) && !shifted)
-             || (id == QStringLiteral("links.step") && !shifted) || id == QStringLiteral("folds.step")
+             || ((id == QStringLiteral("links.step") || id == QStringLiteral("folds.step")) && !shifted)
              || id == QStringLiteral("input.toggle") || id == QStringLiteral("agent.interrupt")
              || id == QStringLiteral("pane.runInBackground")
              || id == QStringLiteral("agent.planToggle") || id == QStringLiteral("agent.effortUp") || id == QStringLiteral("agent.effortDown")

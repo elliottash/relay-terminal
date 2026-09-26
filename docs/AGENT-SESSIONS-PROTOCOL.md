@@ -4898,9 +4898,9 @@ knows the terminal at the instant of the write.
 
 ### 21.8 Notes and deviations
 
-- **Consent is a pane mode, not a guess at the prompt text.** `Ctrl+Shift+J`
-  (`program.delegate`), the banner's "Let the agent drive" button and the palette turn it on; with
-  text in the prompt box the same key also sends that text to the agent, so "answer it with y" is
+- **Consent is a pane mode, not a guess at the prompt text.** `program.delegate`
+  (no default key since #XPEB), the banner's "Let the agent drive" button and the palette turn it on; with
+  text in the prompt box the same action also sends that text to the agent, so "answer it with y" is
   one keystroke. Nothing in a prompt's wording ever grants control by itself.
 - **A delegation ends** on take-over, on a password prompt, and when the program exits. It is not
   restored afterwards: the user hands the next program over deliberately.
