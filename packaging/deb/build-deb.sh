@@ -30,9 +30,7 @@ case "$ID:$VERSION_ID" in
     deps=(qtbase5-dev libkf5parts-dev libkf5coreaddons-dev libkf5syntaxhighlighting-dev qtpdf5-dev)
     qt=5 ;;
   debian:13|ubuntu:26.04|ubuntu:25.10)
-    # qt6-pdf-dev is left out until src/FilePanes.cpp uses Qt6's scoped QPdfView enums
-    # (QPdfView::PageMode::MultiPage, QPdfView::ZoomMode::FitToWidth); PDF preview is off.
-    deps=(qt6-base-dev libkf6parts-dev libkf6coreaddons-dev libkf6syntaxhighlighting-dev)
+    deps=(qt6-base-dev libkf6parts-dev libkf6coreaddons-dev libkf6syntaxhighlighting-dev qt6-pdf-dev)
     qt=6 ;;
   *)
     echo "build-deb.sh: unsupported distribution $ID $VERSION_ID" >&2
@@ -76,7 +74,8 @@ else
 fi
 
 cmake -S "$src" -B "$build" -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=/usr \
-  -DRELAY_QT_MAJOR="$qt" -DRELAY_VERSION_SUFFIX="$suffix" -DBUILD_TESTING="$([[ ${RELAY_SKIP_TESTS:-0} == 1 ]] && echo OFF || echo ON)" \
+  -DRELAY_QT_MAJOR="$qt" -DRELAY_REQUIRE_PDF_PREVIEW=ON \
+  -DRELAY_VERSION_SUFFIX="$suffix" -DBUILD_TESTING="$([[ ${RELAY_SKIP_TESTS:-0} == 1 ]] && echo OFF || echo ON)" \
   "${ghostty_flags[@]}"
 cmake --build "$build" --parallel "${RELAY_JOBS:-$(nproc)}"
 if [[ ${RELAY_WITH_GHOSTTY:-1} != 0 ]]; then
@@ -92,4 +91,18 @@ if [[ ${RELAY_SKIP_TESTS:-0} != 1 ]]; then
   PYTHONDONTWRITEBYTECODE=1 ctest --test-dir "$build" --output-on-failure --repeat until-pass:2
 fi
 (cd "$build" && cpack -G DEB)
+for package in "$build"/*.deb; do
+  dependencies=$(dpkg-deb -f "$package" Depends)
+  if [[ $qt == 5 ]]; then
+    expected=libqt5pdf5
+    widgets=libqt5pdfwidgets5
+  else
+    expected=libqt6pdf6
+    widgets=libqt6pdfwidgets6
+  fi
+  [[ $dependencies == *"$expected"* && $dependencies == *"$widgets"* ]] || {
+    echo "build-deb.sh: $package is missing $expected or $widgets runtime dependency" >&2
+    exit 1
+  }
+done
 cp -v "$build"/*.deb "$out"/

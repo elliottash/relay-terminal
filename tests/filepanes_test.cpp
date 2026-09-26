@@ -12,6 +12,7 @@
 #include <QLineEdit>
 #include <QMenu>
 #include <QPlainTextEdit>
+#include <QPushButton>
 #include <QSettings>
 #include <QTemporaryDir>
 #include <QTest>
@@ -71,6 +72,31 @@ QStringList menuIds(const QList<relay::FileMenuItem> &items) {
     for (const relay::FileMenuItem &item : items)
         if (!item.isSeparator()) ids << item.id;
     return ids;
+}
+
+// Two visible pages with a valid cross-reference table. A PDF parser can reject a header-only
+// fixture, so this tests rendering rather than merely recognizing the extension.
+QByteArray twoPagePdf() {
+    QByteArray pdf("%PDF-1.4\n");
+    QList<int> offsets;
+    auto addObject = [&](int number, const QByteArray &body) {
+        offsets << pdf.size();
+        pdf += QByteArray::number(number) + " 0 obj\n" + body + "\nendobj\n";
+    };
+    addObject(1, "<</Type/Catalog/Pages 2 0 R>>");
+    addObject(2, "<</Type/Pages/Kids[3 0 R 4 0 R]/Count 2>>");
+    addObject(3, "<</Type/Page/Parent 2 0 R/MediaBox[0 0 240 300]/Contents 5 0 R>>");
+    addObject(4, "<</Type/Page/Parent 2 0 R/MediaBox[0 0 240 300]/Contents 6 0 R>>");
+    const QByteArray first("0 0 0 rg 20 20 100 100 re f\n");
+    const QByteArray second("0.5 0.5 0.5 rg 80 80 100 100 re f\n");
+    addObject(5, "<</Length " + QByteArray::number(first.size()) + ">>\nstream\n" + first + "endstream");
+    addObject(6, "<</Length " + QByteArray::number(second.size()) + ">>\nstream\n" + second + "endstream");
+    const int xref = pdf.size();
+    pdf += "xref\n0 7\n0000000000 65535 f \n";
+    for (int offset : offsets)
+        pdf += QByteArray::number(offset).rightJustified(10, '0') + " 00000 n \n";
+    pdf += "trailer\n<</Size 7/Root 1 0 R>>\nstartxref\n" + QByteArray::number(xref) + "\n%%EOF\n";
+    return pdf;
 }
 }  // namespace
 
@@ -938,19 +964,59 @@ private slots:
         QVERIFY(preview.notice().isEmpty());
     }
 
-    void aRemotePdfIsPreviewedOrSaysItCannotBe() {
-        // A minimal but real PDF. With Qt PDF built in it previews; without, the pane says so —
-        // the same answer a local PDF gets in the same build.
-        const QByteArray pdf = "%PDF-1.4\n1 0 obj<</Type/Catalog/Pages 2 0 R>>endobj\n"
-                               "2 0 obj<</Type/Pages/Kids[3 0 R]/Count 1>>endobj\n"
-                               "3 0 obj<</Type/Page/Parent 2 0 R/MediaBox[0 0 99 99]>>endobj\n"
-                               "trailer<</Root 1 0 R>>\n%%EOF\n";
+    void aLocalPdfRendersWhenViewerIsBuiltAndExplainsWhenMissing() {
+        QTemporaryDir temp;
+        const QString path = temp.filePath(QStringLiteral("report.pdf"));
+        writeFile(path, twoPagePdf());
+        FilePreview preview;
+        QVERIFY(preview.open(path));
+#ifdef RELAY_TEST_EXPECT_PDF
+        QCOMPARE(preview.kind(), FilePreview::Kind::Pdf);
+        QVERIFY(preview.notice().isEmpty());
+        if (!qEnvironmentVariableIsEmpty("RELAY_SHOT_DIR")) {
+            preview.resize(600, 700);
+            preview.show();
+            QTest::qWait(250);  // allow QPdfView to paint its first page
+            QVERIFY(preview.grab().save(qEnvironmentVariable("RELAY_SHOT_DIR") + QStringLiteral("/pdf-viewer.png")));
+        }
+        QVERIFY(preview.reload());
+        QCOMPARE(preview.kind(), FilePreview::Kind::Pdf);
+#else
+        QCOMPARE(preview.kind(), FilePreview::Kind::Info);
+        QVERIFY(preview.notice().contains(QStringLiteral("not available")));
+        auto *external = preview.findChild<QPushButton *>(QStringLiteral("filePreviewOpenExternal"));
+        QVERIFY(external && external->isVisibleTo(&preview));
+#endif
+    }
+
+    void aRemotePdfRendersWhenViewerIsBuiltAndExplainsWhenMissing() {
+        const QByteArray pdf = twoPagePdf();
         fakeHost(QByteArray::number(pdf.size()) + ":1758153600:644\n" + pdf);
         FilePreview preview;
         QVERIFY(preview.open(remoteUrl(QStringLiteral("/srv/report.pdf"))));
-        QTRY_VERIFY_WITH_TIMEOUT(preview.kind() == FilePreview::Kind::Pdf || preview.kind() == FilePreview::Kind::Info, 10000);
-        if (preview.kind() == FilePreview::Kind::Info)
-            QVERIFY(preview.notice().contains(QStringLiteral("not available")));
+#ifdef RELAY_TEST_EXPECT_PDF
+        QTRY_COMPARE_WITH_TIMEOUT(preview.kind(), FilePreview::Kind::Pdf, 10000);
+        QVERIFY(preview.notice().isEmpty());
+        QVERIFY(preview.reload());
+        QTRY_COMPARE_WITH_TIMEOUT(preview.kind(), FilePreview::Kind::Pdf, 10000);
+#else
+        QTRY_COMPARE_WITH_TIMEOUT(preview.kind(), FilePreview::Kind::Info, 10000);
+        QVERIFY(preview.notice().contains(QStringLiteral("not available")));
+#endif
+    }
+
+    void aMalformedPdfReportsAnErrorWhenViewerIsBuilt() {
+        QTemporaryDir temp;
+        const QString path = temp.filePath(QStringLiteral("broken.pdf"));
+        writeFile(path, "%PDF-1.4\nnot a document\n");
+        FilePreview preview;
+        QVERIFY(preview.open(path));
+        QCOMPARE(preview.kind(), FilePreview::Kind::Info);
+#ifdef RELAY_TEST_EXPECT_PDF
+        QVERIFY(preview.notice().contains(QStringLiteral("could not be opened")));
+#else
+        QVERIFY(preview.notice().contains(QStringLiteral("not available")));
+#endif
     }
 
     void aRemoteBinaryFileIsNotOpenedAsText() {

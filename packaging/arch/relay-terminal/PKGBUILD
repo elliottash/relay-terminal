@@ -25,7 +25,8 @@ source=("relay-${_tag#v}.tar.gz::${url}/releases/download/${_tag}/relay-${_tag#v
 sha256sums=('SKIP')
 
 build() {
-  # QtPdf lives in qt6-webengine on Arch; leave PDF preview out rather than pull it in.
+  # QtPdf lives in qt6-webengine on Arch. Keep this large dependency optional until the
+  # viewer-install flow in #7WGJ can provide it on demand; see #9Y7X.
   cmake -S "relay-${_tag#v}" -B build -G Ninja \
     -DCMAKE_BUILD_TYPE=None \
     -DCMAKE_INSTALL_PREFIX=/usr \

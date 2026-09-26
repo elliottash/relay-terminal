@@ -71,7 +71,9 @@ and a launcher given on the command line wins. Check it with
 the slots that share with each other.
 
 Ubuntu 26.04 and Debian 13 use Qt 6 packages such as `qt6-base-dev` and
-`libkf6syntaxhighlighting-dev`. KSyntaxHighlighting and Qt PDF are optional. A normal local install
+`libkf6syntaxhighlighting-dev`. KSyntaxHighlighting and Qt PDF are optional in source builds;
+configure with `-DRELAY_REQUIRE_PDF_PREVIEW=ON` to fail rather than produce a build without the
+in-app PDF viewer. A normal local install
 uses `cmake --install build` and defaults to `~/.local` when configured through `scripts/build.sh`.
 
 ## Linux `.deb` packages
@@ -89,6 +91,11 @@ test suite, installs each package in a fresh container and runs its installed sm
 native amd64 and arm64 runners to produce the full six-package matrix. The packaged Linux build
 includes the pinned libghostty-vt core; source builds default to libvterm unless configured with
 `-DRELAY_ENGINE_WITH_GHOSTTY=ON` and a built Ghostty archive.
+The `.deb` builds require Qt PDF at configure time, test the in-app viewer, and check that the
+package declares its Qt PDF and PdfWidgets runtime libraries. Ubuntu 24.04 uses `qtpdf5-dev`;
+Debian 13 and Ubuntu 26.04 use `qt6-pdf-dev`. The Arch/AUR recipes leave PDF support disabled:
+Arch currently packages Qt PDF in the much larger `qt6-webengine`, so the on-demand install
+path is tracked by #7WGJ. Until that path ships, Arch users can open PDFs externally.
 
 ## Native Windows x64 installer
 

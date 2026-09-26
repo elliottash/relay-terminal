@@ -29,6 +29,7 @@ pkgver() {
 }
 
 build() {
+  # QtPdf is packaged with qt6-webengine; #7WGJ owns the on-demand viewer path (#9Y7X).
   cmake -S relay-terminal -B build -G Ninja \
     -DCMAKE_BUILD_TYPE=None \
     -DCMAKE_INSTALL_PREFIX=/usr \
