@@ -68,6 +68,8 @@ register_repo(repo, *, state_root=None) -> dict
     # id, common_dir, project_root, board_root, target (default main), mode (legacy)
 resolve_project(path, *, state_root=None) -> dict | None
     # resolve registered canonical repo from any linked worktree; no allocation
+configure_repo(repo, *, state_root=None, mode=None, target=None) -> dict
+    # metadata only; modes legacy/queue/paused; caller owns safe transition
 TreeManager(repo, *, state_root=None)
     .create(session, *, card=None, base=None, excludes=(), init=None,
             max_workspaces=50) -> dict
@@ -143,8 +145,8 @@ projectconf.run_gate(config, cwd, *, selected_tests=(), env=None) -> dict
 integration_slots.HostAdmission(*, state_root=None)
     .acquire(repo_id, job_id, *, memory_bytes=0, disk_bytes=0, cpus=1,
              priority="land", timeout=0) -> context manager
-    .status() -> list[dict]
-main_release.MainRelease(repo, *, state_root=None, cache_root=None)
+    .status() -> dict                           # capacity, usage, reservations, waiters, live
+main_release.MainRelease(repo, *, state_root=None, cache_root=None, repo_id=None)
     .update(sha, config) -> dict
     .status() -> dict                           # current sha/path, requested sha, lag/error
 ```
@@ -185,7 +187,9 @@ tokens_per_day = 10000000
 `main.build`/`main.install` are arrays of argv arrays and support `{source}`, `{build}`, `{dest}`.
 Main releases include all runtime assets needed after the disposable source/build is reused;
 copying a binary that reaches back into an overwritten source directory is insufficient. Use a
-project install command and smoke gate. Coalesce updates; keep at least two completed releases.
+project install command and smoke gate (`main.smoke`, an optional array of argv arrays supporting
+`{dest}` and `{executable}`). B1 passes the canonical registry ID to MainRelease explicitly.
+Coalesce updates; keep at least two completed releases.
 Do not promise cache hits or zero extra compilation: record actual time and bytes.
 
 Accepted config is captured from the target at activation and stored durably by B1. Candidate
@@ -266,6 +270,9 @@ writers under a shared transition lock, preserve baseline refs and all work. Cre
 at the existing target tip and change HEAD symbolically without rewriting files or index, recording
 the transition. Refuse if any other worktree remains attached to the target. Start the service,
 route Board snapshots to it, then enable future workspace launches. Never move live processes.
+The legacy guard covers commit, repair and Board sync. Replace the Relay-owned pre-commit hook
+so ordinary commits in private worktrees succeed; keep the shared-index refusal and preserve any
+non-Relay project hook. Board CLI fallback resolves the canonical Board too.
 Rollback pauses admission, drains/stops the publisher, retains jobs and branches, and only then
 restores the legacy publication mode. Test with pending work; do not reset a dirty checkout.
 
