@@ -573,11 +573,11 @@ bool Pane::handleSessionEvent(const QString &type, const QJsonObject &event) {
             if (m_restoreGuestSession.isEmpty()) m_restoreGuestKey.clear();
             syncSessionText();   // the conversation this pane's text belongs to, from here on (#0TJ9)
             // The saved pane text was replayed before the worker loaded this session. The normal
-            // adoption boundary would put all of it before the conversation and overwrite its
-            // sidecar with only the new shell's rows at the next save.
+            // adoption boundary would put all of it before the conversation, and a rewind or a
+            // fork would then see only the new shell's rows.
             if (restoring) m_sessionTextMark = 0;
-            // A fork's id exists only now: the text its parent stashed is written under it and
-            // replayed here, so the fork opens showing what it was forked from (#0TJ9).
+            // A fork's id exists only now: the text its parent stashed is replayed here, so the
+            // fork opens showing what it was forked from (#0TJ9).
             if (m_forkLoadPending) adoptForkText();
             m_turnsCompleted = event.value(QStringLiteral("turns")).toInt();
             // A resumed session whose last turn never ended: the pane may offer to continue it (#SXF1).

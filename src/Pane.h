@@ -1623,20 +1623,22 @@ public:
             else
                 m_savedGeneration = generation;
         }
-        saveSessionText();
     }
 
     // ----- the conversation's terminal text (card #0TJ9, src/WindowState.h) --------------------
     //
-    // The per-pane file above is pruned as soon as the pane leaves the layout, so a conversation
-    // opened from the sessions manager days later found nothing. The same text is therefore also
-    // written under the *session's* own id, beside the session file, where it lives as long as
-    // the conversation does.
+    // The per-pane file above is pruned as soon as the pane leaves the layout, so this text used to
+    // be written a second time under the *session's* own id, beside the session file. Since card
+    // #HEY7 nothing writes that `<id>.scrollback.txt` any more: the pane text journal keeps a
+    // reference to the conversation and a reopened one is drawn from its transcript
+    // (TranscriptReplay, tool output folded). Files already on disk still replay
+    // (queueSessionTextReplay). What still reads the conversation's lines is a rewind, which
+    // keeps the branch it removes (saveRewoundText), and a fork, which carries them to its pane.
 
-    // How much of the engine's history a per-session save looks at. The per-pane save asks for the
-    // 5,000 lines it keeps; this one has to count from the line the session began at, and that
-    // line can be further back than 5,000, so it reads the whole buffer (as "copy everything"
-    // does). Only the rare events below call it, never a turn.
+    // How much of the engine's history those two look at. The per-pane save asks for the 5,000
+    // lines it keeps; these have to count from the line the session began at, and that line can
+    // be further back than 5,000, so they read the whole buffer (as "copy everything" does). Only
+    // a rewind or a fork calls it, never a turn.
     static constexpr int kSessionTextScan = 200000;
 
     // Which guest conversation this pane is holding, if any: the harness preset's guest (Tier A,
@@ -1651,44 +1653,15 @@ public:
     // the pane was holding when the conversation took it over, so session B's file does not begin
     // with session A's text. Once more than the engine's whole history has scrolled past, the mark
     // is beyond the oldest line still held and nothing in the buffer can tell the two apart: the
-    // save then starts at the oldest line there is, which is the approximation the plan allows for.
+    // lines then start at the oldest one there is, which is the approximation the plan allows for.
     QStringList sessionTextLines() const {
         QStringList history = paneFormattedHistoryLines(kSessionTextScan);
         if (m_sessionTextMark > 0 && m_sessionTextMark <= history.size()) history = history.mid(m_sessionTextMark);
         return history + paneFormattedScreenLines();
     }
 
-    // Where this conversation's text goes: a guest's sidecar in Relay's own tree, or the session
-    // file's neighbour. Empty before the pane has a conversation, and for any id that is not the
-    // shape a file name may be built from.
-    QString sessionTextPath() const {
-        return relay::sessiontext::isGuestSource(m_sessionTextSource)
-                   ? relay::sessiontext::guestPath(m_sessionTextSource, m_sessionTextGuestId)
-                   : relay::sessiontext::sessionPath(m_sessionTextDir, m_sessionTextId);
-    }
-
-    void saveSessionText() const {
-        const QString path = sessionTextPath();
-        if (path.isEmpty()) return;   // no conversation yet, or an id Relay will not name a file with
-        const QStringList lines = sessionTextLines();
-        // An empty pane is not evidence that the conversation printed nothing: the screen may have
-        // been cleared, or the terminal may already be gone at shutdown. The per-pane store removes
-        // its file in this case, because a restarted pane must not restore stale output; the
-        // conversation's file is the conversation's record, so it is left as it is.
-        // Nor is a pane holding only a prompt and a replay's rules: one that came up without the
-        // conversation's text would otherwise write that over the record, and every later open
-        // would replay nothing instead of falling back to the transcript.
-        if (!relay::sessiontext::hasContent(lines, restoreMarks())) return;
-        QString error;
-        // The same trailer the per-pane store carries (#MTCS): a conversation replayed later
-        // re-wraps what it was printed as.
-        if (!relay::sessiontext::write(path, lines, m_backend->proseBlocks(), &error) && !error.isEmpty())
-            fprintf(stderr, "relay: could not save this conversation's terminal text: %s\n", qPrintable(error));
-    }
-
-    // The pane's conversation has changed hands. The outgoing one keeps what it printed — written
-    // under its own id, before anything is replaced — and the incoming one's text starts at the
-    // line the pane is at now. Cheap and idempotent when nothing moved (four string compares), so
+    // The pane's conversation has changed hands. The incoming one's text starts at the line the
+    // pane is at now; the outgoing one's is in its transcript (card #HEY7). Cheap and idempotent when nothing moved (four string compares), so
     // it is called from everywhere the session or the guest can change rather than from each by
     // hand: "Resume here", "Open in new pane", /new, a fork, a guest arriving, leaving or being
     // replaced.
@@ -1703,11 +1676,6 @@ public:
         if (id == m_sessionTextId && directory == m_sessionTextDir && source == m_sessionTextSource
             && guestId == m_sessionTextGuestId)
             return;
-        // /new banks the outgoing conversation's text before it wipes the screen, and a bare
-        // "clear the terminal" throws that text away on purpose. Either way the pane no longer
-        // holds it, and saving now would write a blank screen over the record on disk.
-        if (m_sessionTextBanked) m_sessionTextBanked = false;
-        else saveSessionText();
         m_sessionTextId = id;
         m_sessionTextDir = directory;
         m_sessionTextSource = source;
@@ -1803,17 +1771,15 @@ public:
     static ForkText &pendingForkText() { static ForkText text; return text; }
     static constexpr int kForkTextSeconds = 60;
 
-    // The fork's new id has just arrived here. What its parent was holding is written under that
-    // id and replayed into this pane, so the fork opens showing what it was forked from and its
-    // own file keeps it; the parent's file is not touched by any of this.
+    // The fork's new id has just arrived here. What its parent was holding is replayed into this
+    // pane, so the fork opens showing what it was forked from. It is not written under the new id
+    // (card #HEY7): the fork's transcript holds the parent's turns, and a later open draws those.
     void adoptForkText(const QString &guest = QString()) {
         if (pendingForkText().guest != guest) return;   // a fork of the other kind, or none at all
         const ForkText stash = pendingForkText();
         pendingForkText() = ForkText{};
         if (!stash.at.isValid() || stash.at.secsTo(QDateTime::currentDateTimeUtc()) > kForkTextSeconds) return;
-        const QString path = sessionTextPath();
-        if (stash.lines.isEmpty() || path.isEmpty()) return;
-        relay::sessiontext::write(path, stash.lines, stash.prose);
+        if (stash.lines.isEmpty()) return;
         queueTextReplay(stash.lines, RestoredKind::Conversation, stash.prose);
     }
 
@@ -2113,11 +2079,6 @@ public:
     }
     void newChat() {
         if (m_agentBusy) { status(QStringLiteral("Stop the current agent turn first.")); return; }
-        // The conversation that is ending keeps what it printed (#0TJ9). Here rather than at the
-        // `reset` event: the terminal is cleared a few lines down, so by the time the worker
-        // answers there is nothing of this conversation left in the pane to save.
-        saveSessionText();
-        m_sessionTextBanked = true;
         send({{"type", "reset"}}); clearFix();
         closeQuestion(QString());   // the conversation it belonged to is over (#MQ9C)
         // Agent turns print into the terminal, so a new conversation that left the old ones on
@@ -4446,11 +4407,9 @@ public:
     // Falls back to the raw clear when a program owns the screen, where Ctrl+L belongs to it.
     void clearTerminal() {
         if (!m_backend) return;
-        // Clearing the screen is the user throwing this text away, so the conversation's saved
-        // text starts again from here rather than keeping what was wiped (#0TJ9). What is already
-        // on disk stays: the pane no longer holds it, so it cannot be written again.
+        // Clearing the screen is the user throwing this text away, so the conversation's text
+        // starts again from here rather than keeping what was wiped (#0TJ9).
         m_sessionTextMark = 0;
-        m_sessionTextBanked = true;
         closeInline();
         m_lastBlock = relay::gaps::Block::None;   // a cleared screen does not open with a blank line
         if (shellIdleAtPrompt()) {
@@ -17726,14 +17685,12 @@ private:
     // Which conversation the text in this pane belongs to, and the line it started at (#0TJ9).
     // Held apart from m_sessionId / m_guestSession because the text changes hands at a different
     // moment from the session: "Resume here" replays the incoming conversation's text before the
-    // worker has answered with an id, so the outgoing conversation's file is closed at the click.
+    // worker has answered with an id, so the mark moves at the click. A rewind's file is named
+    // from the Relay pair.
     // `m_sessionTextSource` is the guest source (`claude`, `codex`) when this is a guest's
     // conversation and `m_sessionTextGuestId` its id; otherwise the pair of Relay values is used.
     QString m_sessionTextId, m_sessionTextDir, m_sessionTextSource, m_sessionTextGuestId;
     int m_sessionTextMark = 0;
-    // The outgoing conversation's text is on disk and the screen has been wiped, so the next
-    // change of conversation must not save the blank screen over it (/new, "clear the terminal").
-    bool m_sessionTextBanked = false;
     // Whose text m_restoredScrollback holds: this pane's previous shell, a conversation's (which
     // may have been printed in another pane, #0TJ9) or a surface's, put away and brought back by
     // one console (card #CTRN). Each wears its own pair of rules.
