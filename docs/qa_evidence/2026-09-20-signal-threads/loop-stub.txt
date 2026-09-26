@@ -23,7 +23,7 @@ How this ends, in the order you should try:
 2. If the failure is not the code's fault and you can *show* that it is not: `python3 scripts/relay-board.py --board .switchboard signals dismiss unittest:test_width.WidthTests.test_three --reason environmental|flaky-known --comment '<what you checked>' --until <YYYY-MM-DD, at most a week out>`.
 3. If you cannot fix it, say so out loud rather than leaving it: `python3 scripts/relay-board.py --board .switchboard signals release unittest:test_width.WidthTests.test_three --reason gave-up --as a7ab4d6d04354dc0bdf966dd5deef51b`, which files it as a bug card for a person. Then report what you tried and what you believe is wrong.
 
-House rules for this checkout (they are the owner's, in CLAUDE.md and WARP.md — read both before you write anything):
+House rules for this checkout (they are the owner's, in CLAUDE.md and RELAY.md — read both before you write anything):
 - Commit only through `python3 scripts/land.py begin <name> <paths>` and `python3 scripts/land.py commit <name> -m "…"`. Never `git add`, `git commit`, `git stash`, `git checkout` or `git reset`: several sessions share this working tree.
 - Claim the paths immediately before you edit them and dry-run every commit (`commit --dry-run`): a stale snapshot lands somebody else's work.
 - `python3 scripts/land.py who` says which paths other live sessions hold. If your fix needs one of them, do not edit it — release the signal with reason `gave-up`, naming the file and the session, and let a person decide.

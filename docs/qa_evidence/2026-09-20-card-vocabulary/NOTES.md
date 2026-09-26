@@ -8,7 +8,7 @@ were grep artefacts (`discard`, `wildcard`). Owner agreed the survey on 2026-09-
 | Commit | Area |
 |---|---|
 | `9e1b10ae` | the card itself, with the survey and the decisions |
-| `820c667b` | `backend/relay_core/` prose, and the new `WARP.md` "Words" section |
+| `820c667b` | `backend/relay_core/` prose, and the new `RELAY.md` "Words" section |
 | `c1880026` | `src/`, `tests/`, `app/app.js`: identifiers, three visible strings, comments |
 | `e010a064` | the approvals and questions tests' own prose |
 | `2b21edbc` | `docs/` reword: protocol §27, architecture, remote protocol, phone design |
@@ -58,7 +58,7 @@ Ran 300 tests in 0.782s — OK
 ```
 
 **Sweep.** Every remaining `card` within reach of an approval or question word across `src/`,
-`backend/relay_core/`, the three protocol docs, `app/`, `tests/`, `README.md` and `WARP.md` is
+`backend/relay_core/`, the three protocol docs, `app/`, `tests/`, `README.md` and `RELAY.md` is
 Switchboard-sense: a question comment that goes *on* a card, a card thread, or `/card` held text.
 
 ## Left as written, deliberately

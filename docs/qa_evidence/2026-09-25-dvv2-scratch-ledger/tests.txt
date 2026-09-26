@@ -1,20 +1,22 @@
-# DVV2 evidence — generated 2026-09-25T05:10:31Z against landed 0da66145
+# DVV2 evidence — regenerated 2026-09-25T05:13:32Z against the landed tree (0da66145 + increment 2)
 
 ## python tests
 ................
 ----------------------------------------------------------------------
-Ran 16 tests in 0.803s
+Ran 16 tests in 0.783s
 
 OK
-......................s....
+........................s....
 ----------------------------------------------------------------------
-Ran 27 tests in 0.500s
+Ran 29 tests in 0.578s
 
 OK (skipped=1)
 
 ## ctest -R scratchmonitor
-1/1 Test #66: scratchmonitor ...................   Passed    1.48 sec
 
 100% tests passed, 0 tests failed out of 1
 
-Total Test time (real) =   1.48 sec
+Total Test time (real) =   1.50 sec
+
+## tryit staging root now under the scratch home
+/home/elliott/.cache/relay/scratch/tryit

@@ -9,7 +9,7 @@ notice, because a theme you cannot name is one you cannot ask for again. It is a
 stored mode, so there is nothing on the page to reset and the "Reset to defaults" count is
 unchanged. The same thing is on the fast path: `/theme random` (also `randomize`, `shuffle`), and
 **Random** as the last row of the bare `/theme` picker. Pressing the button teaches the command
-once (`theme.random` hint), as WARP.md's standing rule asks.
+once (`theme.random` hint), as RELAY.md's standing rule asks.
 
 | where | what |
 |---|---|

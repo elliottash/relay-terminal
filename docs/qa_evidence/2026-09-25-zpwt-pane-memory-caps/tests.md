@@ -13,3 +13,12 @@
   auto-lowered to 4 for the slot.
 - `scripts/relay-build --check "app-relay.slice"` and `--check "total_memory_max"`: both
   literals present in the built binary.
+
+## Amendment, same day (after the Try-it rehearsal)
+
+The Try-it staging (docs/qa_evidence/2026-09-25-tryit-ZPWT/) caught one real defect: a job could
+swap past its own memory bound — a 900M hog survived a 600M memory.max, because memory.max caps
+RAM and swap needed MemorySwapMax. `scoped_argv` now pins `MemorySwapMax=0`, and a live
+enforcement test was added (`test_memory_max_kills_only_the_command_when_passed`: 700M hog under
+memory_max=400M → exit -9, killed_for_memory, note names the bound). Suites after the fix:
+`pytest tests/test_isolation.py tests/test_jobs.py` — 35 passed (shared tree and clean export).

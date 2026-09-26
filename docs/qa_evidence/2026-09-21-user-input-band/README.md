@@ -22,7 +22,7 @@ Implementer evidence (kimi-k3, pane 2b383612).
 - `ctest --test-dir build -R consolemode` — passed.
 - `scripts/relay-build` — clean.
 
-Not run: full test suites (per WARP.md); a visual check — see the card's QA checklist.
+Not run: full test suites (per RELAY.md); a visual check — see the card's QA checklist.
 
 ## Pre-check that shaped the design
 

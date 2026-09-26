@@ -20,7 +20,7 @@ Landed in 4f5acd43 (board.py's part in 81ff60f8, see README):
   quick-add send section, status pick unparks, Execute → executing,
   sectionTakesNewCards for manual sections.
 - Docs: SWITCHBOARD-FORMAT, SWITCHBOARD-DESIGN §3, AGENT-SESSIONS-PROTOCOL
-  (19.2/19.3/19.10/19.15), board_policy rule 5, WARP.md.
+  (19.2/19.3/19.10/19.15), board_policy rule 5, RELAY.md.
 - This board: columns → the new eight; 24 cards ready→planned /
   in-progress→executing. Three cards were left to other sessions' in-flight
   work (word-wrap #EH98 in a QA lane; #BRD3 and #8YQ9 live-executing in the

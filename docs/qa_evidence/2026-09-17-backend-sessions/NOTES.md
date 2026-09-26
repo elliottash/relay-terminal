@@ -51,7 +51,7 @@ untrusted). Second run recalls correctly.
 - Usage reporting without `stream_options` (raw requests, 2026-09-17): Kimi puts `usage` inside
   `choices[0]` of the final chunk; GLM and OpenRouter send top-level `usage`. `provider.py` now reads both
   and emits one `usage` event per response.
-- `instructions.scan` on this repo with the real home: 27 items, 1 existing (`~/.warp/WARP.md`, 28,329 bytes);
+- `instructions.scan` on this repo with the real home: 27 items, 1 existing (`~/.warp/RELAY.md`, 28,329 bytes);
   loading it fits the 32 KiB default cap untruncated.
 - Default skill discovery on the real home: 45 skills (user `~/.warp/skills` plus bundled Warp skills and
   bundled Figma MCP skills); 7 Warp-app skills excluded and reported; prompt section 6,107 bytes.

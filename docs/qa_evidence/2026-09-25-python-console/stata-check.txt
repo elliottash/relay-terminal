@@ -1,0 +1,4 @@
+stata: MISSING
+stata-mp: MISSING
+stata-se: MISSING
+exit=127

@@ -20,3 +20,6 @@ $ PYTHONPATH=backend python3 -m unittest tests.test_session_protocol tests.test_
 Ran 194 tests in 31.403s
 
 OK
+
+## Landed
+`bf5aa57c` (#2M26) — the verify gate built tip + only the WARP→RELAY hunks; the other sessions' uncommitted hunks in Pane.h, RelayWindow.h/.cpp, RelayWindowSettings.cpp, TestSuitesPane.h, CMakeLists.txt, guest_launch.py, AGENT-SESSIONS-PROTOCOL.md, ARCHITECTURE.md and BoardPane.cpp were excluded and remain in the working tree for their sessions.

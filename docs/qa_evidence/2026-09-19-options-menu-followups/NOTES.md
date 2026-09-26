@@ -15,7 +15,7 @@ Browse… button; #05J2 is the only proposal left and is its own card).
 | `9a418c7` | the ↺'s two stylesheet rules in `src/Theme.cpp` (swept in by the theme session's commit, which is where they now live) |
 
 No protocol change: `docs/AGENT-SESSIONS-PROTOCOL.md` is untouched, as the card said it would be.
-No new fast path, so the shortcut-hint registry needed no entry (WARP.md standing rule) — the ↺ and
+No new fast path, so the shortcut-hint registry needed no entry (RELAY.md standing rule) — the ↺ and
 Browse… are controls on a row that already has a keyboard path through the pane's own Enter.
 
 ## Automated

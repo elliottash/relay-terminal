@@ -105,7 +105,7 @@ local model). This part is only the new **Settings › Local models** section, w
   `askAgent()`, `sendLocalModelRequest()` and `refreshPresets()` are the three things the window
   needs from a pane.
 - `src/Keymap.h`: `agent.localModelSetup`, with no default shortcut — it is a once-per-machine
-  errand and Options › Local models is the way in. No shortcut hint was added: WARP.md's rule is
+  errand and Options › Local models is the way in. No shortcut hint was added: RELAY.md's rule is
   for a feature that *has* a fast path, and this one has none.
 
 ## The run

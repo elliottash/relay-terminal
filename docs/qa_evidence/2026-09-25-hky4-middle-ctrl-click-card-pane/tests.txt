@@ -1,0 +1,15 @@
+********* Start testing of BoardGesturesTests *********
+Config: Using QtTest library 5.15.13, Qt 5.15.13 (arm64-little_endian-lp64 shared (dynamic) release build; by GCC 13.3.0), ubuntu 24.04
+PASS   : BoardGesturesTests::initTestCase()
+PASS   : BoardGesturesTests::middleAndCtrlClickDockTheCardInItsOwnPane()
+PASS   : BoardGesturesTests::cleanupTestCase()
+Totals: 3 passed, 0 failed, 0 skipped, 0 blacklisted, 148ms
+********* Finished testing of BoardGesturesTests *********
+Internal ctest changing into directory: /home/elliott/repos/relay-terminal/build
+Test project /home/elliott/repos/relay-terminal/build
+    Start 104: boardgestures
+1/1 Test #104: boardgestures ....................   Passed    0.15 sec
+
+100% tests passed, 0 tests failed out of 1
+
+Total Test time (real) =   0.15 sec

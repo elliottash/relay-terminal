@@ -27,7 +27,7 @@ hard-coded to a pixel; the notes record the OCR of every shot and the y each cli
 | `implementer-04-two-rows.png` | A second ask leaves a second row; the first turn's fold is still open above it with its own list. |
 | `implementer-05-earlier.png` | The clearest one: the **first** turn's fold open on the six-task list it left behind, the **second** turn's row folded below it, and the strip and task panel showing the *current* four-task list (T7–T10). An old row says what it said. |
 | `implementer-06-open.png` | The `tasklist` scene, before its second click: the fold open, `open the task list` its last row. |
-| `implementer-06-hint.png` | The instant after clicking that row: the Tasks panel is up **and** the shortcut hint is on screen — `Next time: Ctrl+Shift+K · task list`, the `tasks.fold` hint WARP.md's standing rule asks for. |
+| `implementer-06-hint.png` | The instant after clicking that row: the Tasks panel is up **and** the shortcut hint is on screen — `Next time: Ctrl+Shift+K · task list`, the `tasks.fold` hint RELAY.md's standing rule asks for. |
 | `implementer-06-tasklist.png` | Five seconds later, the toast gone: `Tasks · 1/6 (1 failed, 1 deferred, 1 cancelled, 2 unfinished)` with T1–T6 under the same glyphs the fold drew, the selected task's note below, and the fold still open behind it. |
 
 `logs/` holds the app's and the worker's logs from the last run in this folder (the

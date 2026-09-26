@@ -15,7 +15,7 @@ click on that and it will copy the hash tag"*.
 - **The card page's header.** A ⧉ `QToolButton` beside the ref, the sign a copyable id wears in
   the info pane (#YQC3), doing the same copy.
 - Both raise the one-off shortcut hint "Next time: y" — `y` copies the selected card's reference,
-  and the click is the slow path (the WARP.md hint rule); the registry in `docs/ARCHITECTURE.md`
+  and the click is the slow path (the RELAY.md hint rule); the registry in `docs/ARCHITECTURE.md`
   names the trigger.
 
 ## What was checked

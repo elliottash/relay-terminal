@@ -69,7 +69,7 @@ account, no network, `RELAY_KEYRING=off` throughout.
   runaway turn; then it stops with Continue".
 - `implementer-notes.txt` is the OCR of each crop; `relay.log` is the run's log.
 
-### Tests — targeted, per WARP.md
+### Tests — targeted, per RELAY.md
 
 - `logs/test_loopdetect.txt` — 61 tests: every pattern at and below its threshold, five long
   whitelist runs (batch ops, incremental edits, retry with variation, build-after-edit, polling)

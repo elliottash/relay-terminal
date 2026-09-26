@@ -46,7 +46,7 @@ and would have resurrected the old tree; it went back up immediately after the c
   backup and the move); `board_list` resolves 681 cards with `.board/` paths.
 - The rename commit carries 1,158 `issues/…` deletions and 1,208 `.board/…` additions, the
   regenerated `POLICY.md` and pointer blocks (hidden-folder `rg --hidden` guidance included),
-  `.gitattributes` moved to `.board/threads/*.md` and `.board/cases.jsonl`, `WARP.md`, and the
+  `.gitattributes` moved to `.board/threads/*.md` and `.board/cases.jsonl`, `RELAY.md`, and the
   intake-file paths in `scripts/land.py` and the two board briefs. `.board/.private/` and
   `.board/cases.jsonl` stay untracked, as they were under `issues/`.
 - Live sessions after the restart resolve `.board/` first (new `BOARD_FOLDERS` order), so no

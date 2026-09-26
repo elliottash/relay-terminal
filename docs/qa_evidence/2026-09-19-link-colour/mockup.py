@@ -150,7 +150,7 @@ def pane(t: Theme, after: bool):
     r.append("  ".join([span("build", t.ansi[12], bold=True), out_path("CMakeLists.txt"), span("data", t.ansi[12], bold=True),
                         span("docs", t.ansi[12], bold=True), span("engine", t.ansi[12], bold=True), out_path("README.md"),
                         span("scripts", t.ansi[12], bold=True), span("src", t.ansi[12], bold=True), span("tests", t.ansi[12], bold=True),
-                        span("WARP.md", link if after else fg)]))
+                        span("RELAY.md", link if after else fg)]))
     r.append(cmd("cmake --build build -j18 2>&1 | tail -4"))
     r.append(out_path("/home/elliott/repos/relay-terminal/src/Pane.h:8642:5") + span(": ", fg)
              + span("error: ", t.ansi[9], bold=True) + span("expected ‘;’ before ‘}’ token", fg))
