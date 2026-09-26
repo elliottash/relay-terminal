@@ -183,3 +183,6 @@ Landing job 7088516c0d55985f could not be reconciled automatically: the submissi
 
 <!-- relay:entry 20260926T081227Z-c5 author=reconcile kind=note -->
 Landing job abbc067113277fe4 could not be reconciled automatically: the submission changed 64 files; a repair is bounded to 24. Returned to the author.. Returned to the author agent with the diagnostics. <!-- reconcile:abbc067113277fe4:author_required -->
+
+<!-- relay:entry 20260926T132800Z-a3 author=codex kind=blocker -->
+Attempted the original claimed-card live run in an isolated Relay profile on the project Board. Relay displayed `workspace quota reached: 50 of at most 50 for repository 12c8c9ef12cf3b12; remove released workspaces first`. The card agent could not start because its queue workspace could not be allocated. I did not remove workspaces or touch the shared source checkout. #MJG6 remains Planned; no claimed-card busy/idle round trip was observed.
