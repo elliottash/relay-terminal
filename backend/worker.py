@@ -307,13 +307,22 @@ def main():
                 board_workspace = (str(Path(asked).expanduser().resolve())
                                    if isinstance(asked, str) and asked.strip() else None)
                 workspace = board_workspace or str(Path(os.getcwd()).resolve())
-                identity = (workspace_context.validate_prepared(
-                    request["tree_status"], request.get("project_root") or workspace,
-                    request.get("pane_token") or os.environ.get("RELAY_SESSION_TOKEN") or "")
-                    if request.get("tree_status") is not None else
-                    workspace_context.prepare(request.get("project_root") or workspace,
-                        request.get("pane_token") or os.environ.get("RELAY_SESSION_TOKEN") or "",
-                        planning_only=bool(request.get("planning_only"))))
+                project_root = request.get("project_root") or board_workspace
+                session_token = request.get("pane_token") or os.environ.get("RELAY_SESSION_TOKEN") or ""
+                if request.get("tree_status") is not None:
+                    identity = workspace_context.validate_prepared(
+                        request["tree_status"], project_root or workspace, session_token)
+                elif project_root:
+                    identity = workspace_context.prepare(
+                        project_root, session_token,
+                        planning_only=bool(request.get("planning_only")))
+                else:
+                    # A global pane still executes from the worker's cwd, but that directory is
+                    # not its project. It may itself be registered in queue mode, so never use
+                    # the cwd as an implicit lease request.
+                    identity = dict(project_root="", board_root="", repo_id="", workspace_id="",
+                                    execution_cwd=workspace, branch="", base_sha="", state="legacy",
+                                    recoverable=False, reason="")
                 if identity["state"] == "active":
                     workspace = identity["execution_cwd"]
                     board_workspace = identity["project_root"]

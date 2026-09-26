@@ -124,6 +124,28 @@ class WorkspaceContextTests(unittest.TestCase):
             workspace_context.validate_prepared({"workspace_id": "wrong"},
                                                 str(self.root), "token", state_root=self.state)
 
+    def test_global_worker_pane_does_not_lease_its_launch_directory(self):
+        land_root = Path(self.temp.name) / "land"
+        IntegrationService(self.root, state_root=self.state, land_root=land_root).activate()
+        env = {**os.environ, "RELAY_STATE_HOME": str(self.state.parent),
+               "RELAY_LAND_ROOT": str(land_root), "RELAY_KEYRING": "off"}
+        request = {"type": "configure", "api_key": "k", "base_url": "http://127.0.0.1:9/v1",
+                   "model": "test/model", "workspace": "", "pane_token": "global-pane"}
+        proc = subprocess.run([sys.executable, "-S", str(Path(__file__).resolve().parents[1] /
+                                                          "backend" / "worker.py")],
+                              input=json.dumps(request) + "\n" + json.dumps({"type": "shutdown"}) + "\n",
+                              text=True, capture_output=True, cwd=self.root, env=env, timeout=30)
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        events = [json.loads(line) for line in proc.stdout.splitlines()]
+        configured = [event for event in events if event.get("event") == "configured"]
+        self.assertEqual(len(configured), 1, events)
+        self.assertNotIn("board", configured[0])
+        if "tree_status" in configured[0]:
+            self.assertEqual(configured[0]["tree_status"]["state"], "legacy")
+            self.assertEqual(configured[0]["tree_status"]["project_root"], "")
+            self.assertEqual(configured[0]["tree_status"]["execution_cwd"], str(self.root))
+        self.assertEqual(trees.TreeManager(self.root, state_root=self.state).list(), [])
+
 
 if __name__ == "__main__":
     unittest.main()
