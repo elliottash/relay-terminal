@@ -779,7 +779,7 @@ public:
         connect(qApp, &QGuiApplication::applicationStateChanged, this, [this](Qt::ApplicationState) { tunePoll(); });
         // …and the watchdog does not run at all on a console, so a host that has wired `onStatus`
         // is not told that shell integration failed on a surface that never asked for a shell.
-        if (hasShell())
+        if (hasShell() && m_consolePluginRequest.isEmpty())
             QTimer::singleShot(5000, this, [this] {
                 if (!m_seenShell && m_backend) {
                     setNative(true);
