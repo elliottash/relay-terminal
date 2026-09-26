@@ -1,7 +1,7 @@
 ---
 id: YJK8
 type: work
-status: planned
+status: deferred
 labels: [feature]
 component: [gui]
 milestone: cross-platform
@@ -20,6 +20,10 @@ Make Relay's terminal and agent panes usable on macOS and Windows. The original 
 KonsolePart constraint is gone: Relay's own engine replaced it on 2026-09-18.
 
 ## Planning notes
+
+Owner, 2026-09-26: "yjk8 not yet". Do not schedule native-platform acceptance or
+notarization work now. Resume when the owner asks to pursue cross-platform delivery; the
+installed-app checks in the plan remain the gate.
 
 Freshness check, 2026-09-26: `docs/ENGINE.md` describes the engine as the sole backend and
 `engine/pty/PtyWin.cpp` now implements ConPTY. `docs/BUILDING.md` and the native GitHub workflows

@@ -1,12 +1,11 @@
 ---
 id: 4QM4
 type: work
-status: planned
+status: deferred
 labels: [feature, research, qa, switchboard]
 component: [worker]
 milestone: beta
 workstream: agent
-waiting_on: owner
 rank: zzzzzzzr
 created: '2026-09-19'
 acceptance: 'a per-item success matrix for >=2 reviewers over >=2 author models on CodeJudgeBench, with detection and false-approval rates, pairwise phi between reviewers, a per-bug-type breakdown, and a stated answer to whether the best reviewer depends on the author; the result either keeps or changes VERIFIER_RANK''s ordering, with the reason recorded on #T71W'
@@ -14,6 +13,12 @@ source: 'owner, in the terminal, 2026-09-19, after the #T71W research passes fou
 links: {plans: [], commits: [], evidence: [], related: [T71W], github: null}
 ---
 # Measure the author x reviewer matrix: for Claude-made bugs, is Kimi or GLM the better reviewer?
+
+## Planning notes
+
+Owner, 2026-09-26: "4qm4 defer". Do not run the metered pilot now. Revisit only when the owner
+asks to resume the study; then refresh provider availability and monetary pricing before seeking
+a capped spend decision. The no-spend design on this card remains the starting point.
 
 ## Issue
 add the pilot as an issue card
