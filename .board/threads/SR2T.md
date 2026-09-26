@@ -1,0 +1,2 @@
+<!-- relay:entry 20260926T133834Z-62 author=agent kind=event model=claude-opus-5-5 pane=7fc009b0 turn=9e7d96426aef4f42b8f052f757109540/264f708e4d4c467db0fa849748900dbd -->
+- ✦ agent created this card in Discussing · .board/design/2026-09-26-when-is-a-pane-s-queue-workspace-created-and-rel.md
