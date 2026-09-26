@@ -791,6 +791,36 @@ private slots:
         QVERIFY(tabs.modelBox()->isHidden());
     }
 
+    void altMOpensTheTabsModelBox() {
+        // Owner, 2026-09-25: "alt m doesnt work to change models from the subagent pane. it
+        // should". The view's openModelBox() is what the window routes Alt+M to (RelayWindowCore,
+        // agent.modelBox): it focuses the header's box and drops its list — and with no current
+        // tab there is nothing to open, and no crash.
+        Harness h;
+        SubagentTabsView tabs;
+        tabs.openModelBox();
+        QVERIFY(tabs.modelBox()->isHidden());
+        QVERIFY(!tabs.modelBox()->findChild<relay::FilterPopup *>());   // no tab: the list was never asked for
+        tabs.modelBox()->onRows = [](int *) {
+            relay::FilterRow row;
+            row.text = QStringLiteral("GLM 5.3");
+            row.data = QStringLiteral("glm-coding|glm-5.3");
+            return QList<relay::FilterRow>{row};
+        };
+        h.start("a1");
+        tabs.syncRows(h.model);   // opens a1's tab, as the owner's adoptSubagentTabs does
+        QVERIFY(!tabs.modelBox()->isHidden());
+        tabs.resize(600, 400);
+        tabs.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&tabs));
+        tabs.openModelBox();
+        // What Alt+M must do here: ask the box for its list, which builds the popup with the
+        // rows onRows returns. Whether the popup draws is a window-manager question — headless
+        // Xvfb has none, so its focus and visibility are not asserted — but building it is not.
+        auto *popup = tabs.modelBox()->findChild<relay::FilterPopup *>();
+        QVERIFY(popup);
+    }
+
     void tabsAutomaticallyIncludeEveryAgentWithoutStealingFocus() {
         if (!qEnvironmentVariableIsEmpty("RELAY_SUBAGENTS_ALL_TABS_SHOT")) relay::theme::applyTheme(*qApp);
         Harness h;

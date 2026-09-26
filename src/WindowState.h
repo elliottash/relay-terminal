@@ -163,6 +163,16 @@ QString resolveDirectory(const QString &cwd, const QString &workspace, const QSt
 // is gone are pruned whenever the layout is written.
 constexpr int kScrollbackMaxLines = 5000;
 constexpr qint64 kScrollbackMaxBytes = 512 * 1024;
+// The per-pane file is the pane's *tail* since card #HEY7: what its terminal still holds, all of
+// it (the engine's ring is 10,000 rows, plus the screen), because the rows older than that are in
+// the pane's text journal (src/TextJournal.h) and the two together are everything the pane showed.
+// The per-session store below keeps the caps above.
+constexpr int kPaneTextMaxLines = 10500;
+// The engine's scrollback ring (LibVtermCore's default limit, which Relay does not change): a
+// restore replays no more than this minus the screen, so the rows it puts back stay in the ring
+// with the row above them that links to the journal.
+constexpr int kEngineRingRows = 10000;
+constexpr qint64 kPaneTextMaxBytes = 16 * 1024 * 1024;
 
 // The rows carry the OSC 8 runs of Relay's own word-wrapped output (kProsePrefix, #R2WQ), so a
 // restored pane can find each block's rows again; and after the rows the file carries a prose
@@ -199,7 +209,7 @@ QStringList clampScrollback(QStringList lines, int maxLines = kScrollbackMaxLine
 bool writeScrollback(const QString &id, const QStringList &lines,
                      const QVector<ProseBlock> &prose = {}, QString *error = nullptr);
 // The saved lines, oldest first; empty when there is no file. Never reads more than the caps.
-QStringList readScrollback(const QString &id, int maxLines = kScrollbackMaxLines);
+QStringList readScrollback(const QString &id, int maxLines = kPaneTextMaxLines);
 // The prose trailer the file carries, as `prose` above writes it: empty for an old-format file,
 // and every record whose URI is not under kProsePrefix is dropped rather than trusted.
 QVector<ProseBlock> readScrollbackProse(const QString &id);
@@ -211,7 +221,11 @@ void removeRestoreChrome(QStringList *lines, const QStringList &marks);
 
 // Every `scrollback` id in a saved layout's window records (pane nodes at any depth).
 QStringList scrollbackIds(const QJsonArray &windows);
-// Delete the stored scrollback of every pane that is not in `keep`; returns how many files went.
+// Append a pane's tail file to its text journal and seal it (#HEY7): what prune and a fresh
+// window set do before a file goes, so the text is kept though no pane will show it again.
+bool absorbScrollback(const QString &id);
+// Delete the stored scrollback of every pane that is not in `keep`, after absorbing each into the
+// pane's text journal; returns how many files went.
 int pruneScrollback(const QStringList &keep);
 // Drop the whole store ("Start a fresh window set", or restoring turned off).
 void removeAllScrollback();

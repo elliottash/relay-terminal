@@ -4,6 +4,7 @@
 // screen that still exists, the cwd/workspace/$HOME fallback, and the per-pane scrollback store
 // a restored pane refills itself from.
 #include "WindowState.h"
+#include "TextJournal.h"
 #include "PromptDraft.h"
 #include "core/AnsiSerializer.h"
 #include "core/InlineImage.h"
@@ -594,17 +595,45 @@ private slots:
         DataHome data;
         QVERIFY(data.valid());
         const QString id = QStringLiteral("11111111-2222-3333-4444-555555555555");
+        // The per-pane file is the pane's tail (#HEY7): everything the terminal still holds, up to
+        // kPaneTextMaxLines, and no more.
         QStringList many;
-        for (int i = 0; i < kScrollbackMaxLines + 2000; ++i) many << QStringLiteral("line %1").arg(i);
+        for (int i = 0; i < kPaneTextMaxLines + 2000; ++i) many << QStringLiteral("line %1").arg(i);
         QVERIFY(writeScrollback(id, many));
-        QVERIFY(QFileInfo(scrollbackPath(id)).size() <= kScrollbackMaxBytes + 1);
+        QVERIFY(QFileInfo(scrollbackPath(id)).size() <= kPaneTextMaxBytes + 1);
         const QStringList back = readScrollback(id);
-        QVERIFY(!back.isEmpty());
+        QCOMPARE(back.size(), kPaneTextMaxLines);
         QCOMPARE(back.constLast(), many.constLast());
-        QVERIFY(back.size() <= kScrollbackMaxLines);
+        QCOMPARE(back.constFirst(), many.at(many.size() - kPaneTextMaxLines));
         // A caller may ask for less than the cap and gets the newest lines.
         QCOMPARE(readScrollback(id, 3).size(), 3);
         QCOMPARE(readScrollback(id, 3).constLast(), many.constLast());
+    }
+
+    // A pane pruned for good leaves its tail in its text journal (#HEY7): the file goes, the
+    // text does not, and the rows follow the ones the journal already held.
+    void prunedTailJoinsTheJournal() {
+        DataHome data;
+        QVERIFY(data.valid());
+        const QString gone = QStringLiteral("22222222-2222-4222-8222-222222222222");
+        const QString kept = QStringLiteral("33333333-3333-4333-8333-333333333333");
+        {
+            relay::textjournal::Writer writer(gone);
+            writer.appendLine(relay::textjournal::fromAnsi(QStringLiteral("evicted long ago")));
+            QVERIFY(writer.seal());
+        }
+        QVERIFY(writeScrollback(gone, QStringList{QStringLiteral("\x1b[1mtail one\x1b[0m"), QStringLiteral("tail two")}));
+        QVERIFY(writeScrollback(kept, QStringList{QStringLiteral("still open")}));
+        QCOMPARE(pruneScrollback(QStringList{kept}), 1);
+        QVERIFY(!QFile::exists(scrollbackPath(gone)));
+        const auto lines = relay::textjournal::readLines(gone);
+        QCOMPARE(lines.size(), 3);
+        QCOMPARE(lines.at(0).text, QStringLiteral("evicted long ago"));
+        QCOMPARE(relay::textjournal::toAnsi(lines.at(1)), QStringLiteral("\x1b[1mtail one\x1b[0m"));
+        QVERIFY(!relay::textjournal::exists(kept));   // a pane still in the layout keeps its file
+
+        removeAllScrollback();
+        QCOMPARE(relay::textjournal::readLines(kept).size(), 1);
     }
 
     // An empty pane leaves no file, so a fresh shell never inherits yesterday's output.

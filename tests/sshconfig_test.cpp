@@ -248,8 +248,50 @@ private Q_SLOTS:
                                QStringLiteral("sh -c 'ls'")}).isEmpty());
     }
 
-    void stripsTheHolderFromAMoshLogin() {
-        QString host;
+    // The local half (#87HB): a pane under the local holder has the holder script - or the tmux
+    // client it execs - as its foreground, and names its session from its stable scrollback id.
+    void readsTheLocalHolder() {
+        // The argv startTerminal builds, before the script execs tmux: /bin/sh because the
+        // script is not executable where Relay keeps it, then script, session, cwd and the
+        // session command as one word.
+        const QStringList script{QStringLiteral("/bin/sh"),
+                                 QStringLiteral("/opt/relay/shell/remote-holder.sh"),
+                                 QStringLiteral("relay-abcdef12"), QStringLiteral("/home/a dir"),
+                                 QStringLiteral("RELAY_HOLDER=1 /bin/bash --noprofile --rcfile /opt/relay/shell/integration.bash -i")};
+        QCOMPARE(holderSession(script), QStringLiteral("relay-abcdef12"));
+        QCOMPARE(holderCwd(script), QStringLiteral("/home/a dir"));
+        // The argv after the script execs tmux, which is what a pane's foreground usually shows.
+        const QStringList client{QStringLiteral("/usr/bin/tmux"), QStringLiteral("-L"), QStringLiteral("relay"),
+                                 QStringLiteral("-f"), QStringLiteral("/home/a/.cache/relay/tmux.conf"),
+                                 QStringLiteral("new-session"), QStringLiteral("-A"), QStringLiteral("-D"),
+                                 QStringLiteral("-s"), QStringLiteral("relay-abcdef12"),
+                                 QStringLiteral("-c"), QStringLiteral("/srv"),
+                                 QStringLiteral("RELAY_HOLDER=1 bash --noprofile --rcfile i.bash -i")};
+        QCOMPARE(holderSession(client), QStringLiteral("relay-abcdef12"));
+        QCOMPARE(holderCwd(client), QStringLiteral("/srv"));
+        // The re-attach line a restored pane types runs the same script with no session command.
+        const QStringList restored{QStringLiteral("/bin/sh"),
+                                   QStringLiteral("/opt/relay/shell/remote-holder.sh"),
+                                   QStringLiteral("relay-abcdef12"), QStringLiteral("/srv")};
+        QCOMPARE(holderSession(restored), QStringLiteral("relay-abcdef12"));
+        // A tmux of the user's own is nobody's holder: no Relay socket, and no session word.
+        QVERIFY(holderSession({QStringLiteral("tmux"), QStringLiteral("new-session"), QStringLiteral("-s"),
+                               QStringLiteral("relay-x")}).isEmpty());
+        QVERIFY(holderSession({QStringLiteral("/usr/bin/tmux"), QStringLiteral("-L"), QStringLiteral("relay"),
+                               QStringLiteral("new-session"), QStringLiteral("-s")}).isEmpty());
+        // The ssh wrapper's remote shape still reads through the remote branch.
+        QCOMPARE(holderSession({QStringLiteral("ssh"), QStringLiteral("host"),
+                                QStringLiteral("sh -c 'x' relay-holder relay-abcdef12 /srv")}),
+                 QStringLiteral("relay-abcdef12"));
+        // The session name is the first eight safe characters of the scrollback id - the same
+        // reduction the ssh wrapper applies to RELAY_PANE_ID on a host.
+        QCOMPARE(localHolderName(QStringLiteral("abcdef12-3456-7890-abcd-ef0123456789")),
+                 QStringLiteral("relay-abcdef12"));
+        QCOMPARE(localHolderName(QStringLiteral("we! rd-id")), QStringLiteral("relay-werd-id"));
+        QVERIFY(localHolderName(QStringLiteral("!@#$")).isEmpty());
+    }
+
+    void stripsTheHolderFromAMoshLogin() {        QString host;
         // mosh's own argv: the holder command in several words after `--`, and as one word.
         QCOMPARE(rerunCommand({QStringLiteral("mosh"),
                                QStringLiteral("--ssh=ssh -o ControlMaster=auto -o ControlPath=/run/user/1/relay-ssh/%C "

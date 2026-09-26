@@ -12,6 +12,7 @@
 #pragma once
 
 #include "WordWrap.h"
+#include "core/CellTypes.h"   // EvictedText (#HEY7)
 
 #include <QByteArray>
 #include <QColor>
@@ -489,6 +490,20 @@ public:
     std::function<void(const QByteArray &bytes)> onOutput;
     std::function<void(int exitCode)> onFinished;
     virtual void setOutputCallbackEnabled(bool enabled) = 0;
+
+    // ---- the pane's text journal (card #HEY7, src/TextJournal.h) ----
+    // Rows that leave the scrollback for good, oldest first, in the saved form, as they go: set
+    // the handler and turn collection on. An engine that cannot report them never calls it.
+    std::function<void(const EvictedText &text)> onHistoryEvicted;
+    virtual void setCollectEvicted(bool on) { Q_UNUSED(on); }
+    // Hand over what is waiting now, instead of at the next output (a save, a close).
+    virtual void drainEvictedRows() {}
+    // Every scrollback row to the handler, and the scrollback emptied: this terminal is being
+    // replaced by a new one and its text would otherwise go nowhere.
+    virtual void evictAllRows() {}
+    // Changes whenever what the terminal holds changes; 0 when the engine does not count, which
+    // a caller must treat as "always changed".
+    virtual quint64 contentGeneration() const { return 0; }
 };
 
 } // namespace relay

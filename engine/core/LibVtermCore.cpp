@@ -168,6 +168,25 @@ struct LibVtermCore::Impl {
     bool resizing = false;
     size_t minCountDuringResize = 0;
 
+    // Rows that left the ring for good, for the pane's text journal (#HEY7, VtCore.h).
+    bool collectEvicted = false;
+    std::vector<Line> evicted;
+    std::vector<int> evictedClears;   // evicted.size() at each clear
+
+    // Every ring row into `evicted`, oldest first; the ring is left empty. `clear` records one.
+    void evictRing(bool clear)
+    {
+        if (collectEvicted) {
+            evicted.reserve(evicted.size() + count);
+            for (size_t i = 0; i < count; ++i)
+                evicted.push_back(std::move(ringAt(i)));
+            if (clear)
+                evictedClears.push_back(int(evicted.size()));
+        }
+        count = 0;
+        head = 0;
+    }
+
     // hyperlinkRuns() answers the scrollback half of its walk from here (#PPR4).
     // A line in the ring never changes once it is pushed, so the rows walked
     // for one prefix only have to be walked again when the ring itself is
@@ -354,6 +373,9 @@ struct LibVtermCore::Impl {
             return &ring.back();
         }
         Line *l = &ring[head];
+        // The oldest row goes for good: the journal keeps it (#HEY7).
+        if (collectEvicted)
+            evicted.push_back(std::move(*l));
         head = (head + 1) % ring.size();
         return l;
     }
@@ -564,8 +586,8 @@ struct LibVtermCore::Impl {
     static int sbClear(void *user)
     {
         auto *d = static_cast<Impl *>(user);
-        d->count = 0;
-        d->head = 0;
+        d->evictRing(true);
+        ++d->changeCounter;
         d->scrollOffset = 0;
         d->allDirty = true;
         ++d->ringEpoch;
@@ -1165,6 +1187,9 @@ void LibVtermCore::setScrollbackLines(int lines)
     std::vector<Line> keep;
     const size_t n = std::min(d->count, size_t(lines));
     keep.reserve(n);
+    if (d->collectEvicted)   // the rows a smaller limit cuts are gone for good (#HEY7)
+        for (size_t i = 0; i < d->count - n; ++i)
+            d->evicted.push_back(std::move(d->ringAt(i)));
     for (size_t i = d->count - n; i < d->count; ++i)
         keep.push_back(std::move(d->ringAt(i)));
     const qint64 first = d->pushed - qint64(n);
@@ -1177,6 +1202,34 @@ void LibVtermCore::setScrollbackLines(int lines)
     d->scrollOffset = std::min<int>(d->scrollOffset, int(d->count));
     d->allDirty = true;
 }
+
+void LibVtermCore::setCollectEvicted(bool on)
+{
+    d->collectEvicted = on;
+    if (!on) {
+        d->evicted.clear();
+        d->evictedClears.clear();
+    }
+}
+
+void LibVtermCore::takeEvicted(std::vector<Line> *lines, std::vector<int> *clears)
+{
+    lines->clear();
+    clears->clear();
+    lines->swap(d->evicted);
+    clears->swap(d->evictedClears);
+}
+
+void LibVtermCore::evictAll()
+{
+    d->evictRing(false);
+    d->scrollOffset = 0;
+    d->allDirty = true;
+    ++d->ringEpoch;
+    ++d->changeCounter;
+}
+
+quint64 LibVtermCore::changeCount() const { return d->changeCounter; }
 
 bool LibVtermCore::atGround() const
 {
@@ -1650,8 +1703,8 @@ void LibVtermCore::focusChanged(bool focused)
 
 void LibVtermCore::clearScrollback()
 {
-    d->count = 0;
-    d->head = 0;
+    d->evictRing(true);
+    ++d->changeCounter;
     d->scrollOffset = 0;
     d->allDirty = true;
     ++d->ringEpoch;

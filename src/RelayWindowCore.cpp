@@ -372,6 +372,13 @@ void RelayWindow::runActionNow(const QString &id, Pane *target) {
             if (id == QStringLiteral("agent.modelBox")) openConsoleModelBox();
             else toggleModelsPane(focusedConsole());
         }
+        // Alt+M in the subagent pane (a leaf of its own, not a Pane, so `pane` below would be
+        // the owner terminal and its box would drop open in the other leaf). The key's pane is
+        // the one that answers: the current tab's model box (owner, 2026-09-25: "alt m doesnt
+        // work to change models from the subagent pane. it should"). Ctrl+Shift+M keeps the
+        // owner terminal's models pane — the same door the box's gear row opens.
+        else if (id == QStringLiteral("agent.modelBox") && subagentModelBoxOwner())
+            subagentModelBoxOwner()->openSubagentModelBox();
         // The Board answers `find.inView` before the `!pane` guard too, for the same reason as
         // the model box just above: the Switchboard holds no terminal pane, so Ctrl+F used to
         // fall through the guard and do nothing at all (#9NBZ). Asked of the focus widget, so
@@ -1745,6 +1752,9 @@ void RelayWindow::closePane(QWidget *pane, bool record) {
         if (m_closePrompt) return;
         QWidget *page = pageOf(pane);
         if (!page) return;
+        // Closing a chain's head asks about the rest (#R660): all of them, or just it. Answering
+        // "all" closes every member; "just this pane" falls through to the plain close.
+        if (workspaceChainClose(pane)) return;
         bool stopApproved = false;
         if (auto *terminal = dynamic_cast<Pane *>(pane); terminal && terminal->hasCloseWork()) {
             QPointer<QWidget> guard(pane);

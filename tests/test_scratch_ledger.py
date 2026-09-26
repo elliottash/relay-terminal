@@ -184,6 +184,38 @@ class EndSessionTests(Sandbox):
         self.assertEqual(self.ledger().find(other.id).state, "live")
 
 
+class IdleFloorTests(Sandbox):
+    """The #DVV2 floor: gc --apply under 6h idle on the default roots refuses without
+    force_idle — added after a misaimed `--idle-hours 0 --apply` deleted other sessions'
+    3-7h scratch. Narrowed roots (tests, RELAY_SCRATCH_ROOTS) stay exempt."""
+
+    def test_apply_below_floor_on_default_roots_is_refused_without_force(self):
+        os.environ.pop("RELAY_SCRATCH_ROOTS", None)
+        old_tempdir = tempfile.tempdir
+        tempfile.tempdir = str(self.base)
+        try:
+            with self.assertRaises(ValueError) as caught:
+                scratch.gc(idle_hours=0, apply=True, include_loose=False,
+                           log=lambda *a, **k: None)
+            self.assertIn("force_idle", str(caught.exception))
+            # the same call with force_idle proceeds (all roots are the sandbox here)
+            count, _ = scratch.gc(idle_hours=0, apply=True, force_idle=True,
+                                  include_loose=False, log=lambda *a, **k: None)
+            self.assertGreaterEqual(count, 0)
+        finally:
+            tempfile.tempdir = old_tempdir
+
+    def test_reconcile_row_live_but_dir_gone_is_reported_not_silent(self):
+        row = scratch.new_dir("scratch", "vanished", session="ghost",
+                              ledger=self.ledger())
+        Path(row.path).rmdir()  # somebody wiped it outside the ledger
+        entries = scratch.report(roots=None, include_loose=False, ledger=self.ledger())
+        by_id = {e.ledger_id: e for e in entries if e.ledger_id}
+        self.assertIn(row.id, by_id)
+        self.assertFalse(by_id[row.id].removable, "a gone dir is never a deletion candidate")
+        self.assertEqual(by_id[row.id].why_kept, "gone from disk")
+
+
 class GcTests(Sandbox):
     def test_gc_writes_reclaimed_transitions_and_keeps_keeps(self):
         # Ledger transitions are only written in un-narrowed mode, so this test unsets

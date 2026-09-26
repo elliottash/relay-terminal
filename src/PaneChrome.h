@@ -723,6 +723,10 @@ public:
         setObjectName(QStringLiteral("paneChrome"));
         setAttribute(Qt::WA_StyledBackground);
         auto *column = new QVBoxLayout(this); column->setContentsMargins(3, 2, 3, 2); column->setSpacing(1);
+        m_chainChip = new PaneChainChip;
+        m_chainChip->onPick = [this](int at) { if (onChainPick) onChainPick(at); };
+        m_chainChip->hide();
+        column->insertWidget(0, m_chainChip);
         m_row = new QHBoxLayout; m_row->setSpacing(1);
         column->addLayout(m_row);
         // The + makes it obvious that these open a new pane (a new shell and chat), not a layout
@@ -783,6 +787,16 @@ public:
 
     // The row of pane buttons, for the window's ⓘ (RelayWindow::syncChrome inserts it first).
     QHBoxLayout *buttonRow() const { return m_row; }
+
+    // The linked-pane chain this pane belongs to (#R660). `segments` is the chain head-first
+    // ("shell", "main.tex", "main.pdf"), `current` this pane's place in it; an empty list hides
+    // the chip. `onChainPick` fires when a segment is clicked, with its index.
+    void setChain(const QStringList &segments, int current) {
+        if (!m_chainChip) return;
+        m_chainChip->setChain(segments, current);
+        if (!segments.isEmpty()) place();
+    }
+    std::function<void(int)> onChainPick;
 
     void place() {
         auto *leaf = parentWidget();
@@ -1180,6 +1194,125 @@ private:
         bool m_alarm = false;
     };
 
+    // The linked-pane chain's chip (#R660), shown in every member's chrome: the whole chain —
+    // "⛓ shell › main.tex › main.pdf" — with the pane's own segment bold, so a member knows both
+    // where it is and what it is linked to. A segment click moves focus to that member
+    // (onChainPick, wired by RelayWindowWorkspace.cpp). Fed by setChain(); empty hides it, so
+    // a pane outside a chain looks exactly as it did before.
+    class PaneChainChip final : public QWidget {
+    public:
+        explicit PaneChainChip() {
+            setObjectName(QStringLiteral("paneChainChip"));
+            setSizePolicy(QSizePolicy::Maximum, QSizePolicy::Fixed);
+            setMouseTracking(true);
+            setCursor(Qt::PointingHandCursor);
+            setToolTip(QStringLiteral("Linked panes: click a member to focus it."));
+        }
+        void setChain(const QStringList &segments, int current) {
+            if (m_segments == segments && m_current == current) return;
+            m_segments = segments; m_current = current;
+            m_hover = -1;
+            updateGeometry(); update();
+            setVisible(!m_segments.isEmpty());
+        }
+        int pickTarget() const { return m_hover; }
+        QSize sizeHint() const override {
+            int w = textX();
+            for (int i = 0; i < m_segments.size(); ++i) w += (i ? sepWidth() : 0) + segmentHint(i);
+            return {std::min(w + 8, 300), 18};
+        }
+        QSize minimumSizeHint() const override { return {textX() + 8, 18}; }
+    protected:
+        void paintEvent(QPaintEvent *) override {
+            if (m_segments.isEmpty()) return;
+            const relay::panestatus::Tokens t = relay::chrome::tokens();
+            QPainter p(this);
+            p.setRenderHint(QPainter::Antialiasing);
+            const QRectF r = QRectF(rect()).adjusted(0.5, 0.5, -0.5, -0.5);
+            const qreal radius = relay::chrome::paneRadius() > 0 ? 5 : 0;
+            p.setPen(QPen(relay::panestatus::mix(t.text, t.background, 0.55), 1));
+            p.setBrush(relay::panestatus::mix(t.text, t.background, 0.90));
+            p.drawRoundedRect(r, radius, radius);
+            QFont base = font(); QFont bold = base; bold.setWeight(QFont::DemiBold);
+            // The link glyph leads, as the chain does: everything downstream of it was opened
+            // from the member before it.
+            p.setFont(bold);
+            p.setPen(relay::panestatus::mix(t.text, t.background, 0.35));
+            p.drawText(QRectF(6, 0, linkWidth(), height()), Qt::AlignVCenter, QStringLiteral("⛓"));
+            int x = textX();
+            for (int i = 0; i < m_segments.size(); ++i) {
+                if (i > 0) {
+                    p.setFont(base); p.setPen(relay::panestatus::mix(t.text, t.background, 0.55));
+                    p.drawText(QRectF(x, 0, sepWidth() - 8, height()), Qt::AlignCenter, QStringLiteral("›"));
+                    x += sepWidth();
+                }
+                const bool mine = i == m_current;
+                p.setFont(mine ? bold : base);
+                p.setPen(mine ? t.text : relay::panestatus::mix(t.text, t.background, 0.35));
+                const int w = segmentWidth(i);
+                const QString text = elided(i, w);
+                p.drawText(QRectF(x, 0, w, height()), Qt::AlignVCenter, text);
+                if (i == m_hover && !mine) {
+                    const QFontMetrics fm(mine ? bold : base);
+                    p.drawLine(QPointF(x + 1, height() - 3.5), QPointF(x + 1 + fm.horizontalAdvance(text), height() - 3.5));
+                }
+                x += w;
+            }
+        }
+        void mouseMoveEvent(QMouseEvent *e) override {
+            const int at = segmentAt(e->pos().x());
+            if (at != m_hover) { m_hover = at; update(); }
+        }
+        void leaveEvent(QEvent *) override { m_hover = -1; update(); }
+        void mousePressEvent(QMouseEvent *e) override {
+            m_hover = segmentAt(e->pos().x());
+            update();
+            if (m_hover >= 0 && onPick) onPick(m_hover);
+        }
+    public:
+        std::function<void(int)> onPick;
+    private:
+        // The natural (unelided) segment widths, and what fits: the chip caps at 300 px, and when
+        // it must shrink, the pane's own segment keeps its whole name while the others elide in
+        // the middle — the member you are in stays readable, and the chain's shape stays legible.
+        QFont segmentFont(int i) const { QFont f = font(); if (i == m_current) f.setWeight(QFont::DemiBold); return f; }
+        int segmentHint(int i) const { return QFontMetrics(segmentFont(i)).horizontalAdvance(m_segments.at(i)); }
+        int linkWidth() const { return QFontMetrics(font()).horizontalAdvance(QStringLiteral("⛓")); }
+        int sepWidth() const { return QFontMetrics(font()).horizontalAdvance(QStringLiteral("›")) + 8; }
+        int textX() const { return 6 + linkWidth() + 4; }
+        int naturalWidth() const {
+            int w = textX();
+            for (int i = 0; i < m_segments.size(); ++i) w += (i ? sepWidth() : 0) + segmentHint(i);
+            return w;
+        }
+        int segmentWidth(int i) const {
+            const int room = std::max(width() - 8, minimumSizeHint().width());
+            if (naturalWidth() <= room) return segmentHint(i);
+            const int mine = m_current >= 0 && m_current < m_segments.size() ? segmentHint(m_current) : 0;
+            const int others = m_segments.size() - (mine ? 1 : 0);
+            const int share = others > 0
+                ? std::max(24, (room - textX() - mine - (m_segments.size() - 1) * sepWidth()) / others)
+                : room;
+            return i == m_current ? mine : std::min(segmentHint(i), share);
+        }
+        QString elided(int i, int w) const {
+            return QFontMetrics(segmentFont(i)).elidedText(m_segments.at(i), Qt::ElideMiddle, std::max(8, w));
+        }
+        int segmentAt(int x) const {
+            int at = textX();
+            for (int i = 0; i < m_segments.size(); ++i) {
+                if (i > 0) at += sepWidth();
+                const int w = segmentWidth(i);
+                if (x < at + w) return i;
+                at += w;
+            }
+            return -1;
+        }
+        QStringList m_segments;
+        int m_current = -1;
+        int m_hover = -1;
+    };
+
     // The pane's resource meter (issues #D03W, #6BGA): "cpu 12% · mem 3%" in words, right of the
     // phone chip in the header row. Quiet on purpose — the body face, the header's muted ink for
     // the words, no band, colour only when a value is high — and absent while the pane costs
@@ -1429,6 +1562,7 @@ private:
 
     int m_fullWidth = 0;
     QHBoxLayout *m_row = nullptr;     // the button row the ⓘ joins; the share button hangs below it
+    PaneChainChip *m_chainChip = nullptr;   // the linked-pane chain (#R660), above the button row
     PaneStateGlyph *m_glyph = nullptr;
     PaneSubagentBadge *m_subagentBadge = nullptr;
     PaneHeaderChip *m_remoteChip = nullptr, *m_phoneChip = nullptr;

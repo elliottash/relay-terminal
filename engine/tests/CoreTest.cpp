@@ -567,6 +567,85 @@ private slots:
         QCOMPARE(h.vt->historyRows(), 0);
     }
 
+    // The pane's text journal (card #HEY7): a row that leaves the ring for good — overwritten at
+    // the limit, cut by a smaller limit, cleared — is handed over once, in order, with its style
+    // and its soft-wrap flag; nothing is collected while collection is off.
+    void evictedRowsAreHandedOverOnceInOrder()
+    {
+        QFETCH_GLOBAL(QString, core);
+        if (core != QLatin1String("libvterm"))
+            QSKIP("only libvterm reports evicted rows; the journal then gets the tail at prune");
+        Harness h(core, 3, 10);
+        h.vt->setScrollbackLines(5);
+        std::vector<Line> lines;
+        std::vector<int> clears;
+        for (int i = 1; i <= 12; ++i)
+            h.feed(QByteArray::number(i) + "\r\n");
+        h.vt->takeEvicted(&lines, &clears);
+        QVERIFY(lines.empty());   // not collecting: nothing kept
+
+        h.vt->setCollectEvicted(true);
+        const quint64 before = h.vt->changeCount();
+        // "1".."12" and a newline on a 3-row screen: 11, 12 and the cursor row are on screen, so
+        // 1..10 were pushed and the ring (5) holds 6..10. Three more rows push out 6, 7 and 8.
+        h.feed("\x1b[1mbold\x1b[0m\r\n");
+        h.feed("13\r\n14\r\n");
+        QVERIFY(h.vt->changeCount() != before);
+        h.vt->takeEvicted(&lines, &clears);
+        QStringList texts;
+        for (const Line &l : lines)
+            texts << l.text();
+        QCOMPARE(texts, (QStringList{QStringLiteral("6"), QStringLiteral("7"), QStringLiteral("8")}));
+        QVERIFY(clears.empty());
+        h.vt->takeEvicted(&lines, &clears);
+        QVERIFY(lines.empty());   // handed over once
+
+        // A wrapped line leaves as rows flagged as continuations; its style goes with it.
+        h.feed("abcdefghijKLM\r\n");
+        for (int i = 0; i < 8; ++i)
+            h.feed("x\r\n");
+        h.vt->takeEvicted(&lines, &clears);
+        QStringList saved;
+        QList<bool> cont;
+        for (const Line &l : lines) {
+            saved << lineToSavedAnsi(l, {});
+            cont << l.continuation;
+        }
+        const int wrapped = int(saved.indexOf(QStringLiteral("abcdefghij")));
+        QVERIFY(wrapped >= 0);
+        QCOMPARE(saved.value(wrapped + 1), QStringLiteral("KLM"));
+        QVERIFY(cont.value(wrapped + 1));
+        QVERIFY(saved.contains(QStringLiteral("\x1b[1mbold\x1b[0m")));
+
+        // A clear hands over the whole ring and says where it happened.
+        const int held = h.vt->historyRows();
+        QVERIFY(held > 0);
+        h.vt->clearScrollback();
+        h.vt->takeEvicted(&lines, &clears);
+        QCOMPARE(int(lines.size()), held);
+        QCOMPARE(clears, (std::vector<int>{held}));
+        // CSI 3 J is the same clear, from the program.
+        h.feed("y\r\ny\r\ny\r\ny\r\n");
+        h.feed("\x1b[3J");
+        h.vt->takeEvicted(&lines, &clears);
+        QCOMPARE(clears.size(), size_t(1));
+        QCOMPARE(clears.front(), int(lines.size()));
+
+        // A smaller limit cuts the oldest rows; evictAll takes the rest without a clear mark.
+        for (int i = 0; i < 9; ++i)
+            h.feed("z\r\n");
+        h.vt->takeEvicted(&lines, &clears);
+        h.vt->setScrollbackLines(2);
+        h.vt->takeEvicted(&lines, &clears);
+        QCOMPARE(int(lines.size()), 3);
+        QCOMPARE(h.vt->historyRows(), 2);
+        h.vt->evictAll();
+        h.vt->takeEvicted(&lines, &clears);
+        QCOMPARE(int(lines.size()), 2);
+        QVERIFY(clears.empty());
+        QCOMPARE(h.vt->historyRows(), 0);
+    }
+
     // Scrollback reaches a phone styled (docs/REMOTE-PROTOCOL.md section 6.5):
     // historyLines() hands back the same Line the viewport frame carries, so
     // one serializer does the live screen and history alike.

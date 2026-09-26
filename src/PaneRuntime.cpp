@@ -787,11 +787,17 @@ void Pane::startTerminal(bool cleanShell, const ConsoleProgram &program) {
         m_backend = m_backendOwned.get();
         m_terminal = m_backend->widget();
         m_terminalHost->layout()->addWidget(m_terminal);
+        // Rows the terminal lets go of for good go to the pane's text journal (card #HEY7).
+        m_paneJournal.attach(m_backend);
         // The prompt box is the only keyboard input: the terminal does not take focus on click.
         m_terminalFocusPolicy = Qt::NoFocus;
         applyTerminalFocusPolicy();
         m_backend->onFinished = [this](int) {
             m_backend = nullptr; m_terminal = nullptr; m_shellReady = false;
+            // The console program left with the pty (#83YV): the chips, routing and completion
+            // go back to reading whatever the pane runs next, which is usually nothing.
+            m_consoleProgram = {};
+            updateHeader();
             // The backend outlives this callback; drop it once the stack has unwound.
             QTimer::singleShot(0, this, [this] { if (!m_backend) m_backendOwned.reset(); });
             if (m_closing || m_restarting) return;

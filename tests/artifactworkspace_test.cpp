@@ -49,8 +49,16 @@ private slots:
         const Group g = texGroup();
         const QJsonObject json = g.toJson();
         QCOMPARE(json.value(QStringLiteral("schema")).toInt(), kSchemaVersion);
-        QCOMPARE(json.value(QStringLiteral("members")).toObject().value(QStringLiteral("m-editor")).toString(),
-                 QStringLiteral("editor"));
+        // Schema 2 (#R660): the members array spells the chain head-first, each entry naming its
+        // upstream — shell -> TeX editor -> PDF preview.
+        const QJsonArray members = json.value(QStringLiteral("members")).toArray();
+        QCOMPARE(members.size(), 3);
+        QCOMPARE(members.at(0).toObject().value(QStringLiteral("id")).toString(), QStringLiteral("m-console"));
+        QCOMPARE(members.at(0).toObject().value(QStringLiteral("role")).toString(), QStringLiteral("console"));
+        QVERIFY(!members.at(0).toObject().contains(QStringLiteral("upstream")));
+        QCOMPARE(members.at(1).toObject().value(QStringLiteral("id")).toString(), QStringLiteral("m-editor"));
+        QCOMPARE(members.at(1).toObject().value(QStringLiteral("upstream")).toString(), QStringLiteral("m-console"));
+        QCOMPARE(members.at(2).toObject().value(QStringLiteral("upstream")).toString(), QStringLiteral("m-editor"));
         QString error;
         const Group back = Group::fromJson(json, &error);
         QVERIFY2(back.isValid(), qPrintable(error));
@@ -59,6 +67,7 @@ private slots:
         QCOMPARE(back.root, g.root);
         QCOMPARE(back.layout, g.layout);
         QCOMPARE(back.members, g.members);
+        QCOMPARE(back.order, g.order);
         QCOMPARE(back.sources, g.sources);
         QCOMPARE(back.outputs.size(), 1);
         const Output &pdf = back.outputs.first();
@@ -86,14 +95,16 @@ private slots:
 
     void unknownRolesAndBadLayoutsAreDroppedNotFatal() {
         QJsonObject json = texGroup().toJson();
-        QJsonObject members = json.value(QStringLiteral("members")).toObject();
-        members.insert(QStringLiteral("m-odd"), QStringLiteral("sidebar"));
+        QJsonArray members = json.value(QStringLiteral("members")).toArray();
+        members.append(QJsonObject{{QStringLiteral("id"), QStringLiteral("m-odd")},
+                                   {QStringLiteral("role"), QStringLiteral("sidebar")}});
         json.insert(QStringLiteral("members"), members);
         json.insert(QStringLiteral("layout"), QStringLiteral("wide"));
         const Group g = Group::fromJson(json);
         QVERIFY(g.isValid());
         QCOMPARE(g.members.size(), 3);
         QVERIFY(!g.roleOf(QStringLiteral("m-odd")));
+        QVERIFY(!g.order.contains(QStringLiteral("m-odd")));
         QVERIFY(g.layout.isEmpty());
     }
 
@@ -121,7 +132,12 @@ private slots:
         QVERIFY(g.isValid());
         QCOMPARE(g.members.size(), 2);
         QVERIFY(g.memberFor(Role::Editor).isEmpty());
-        QVERIFY(!g.toJson().value(QStringLiteral("members")).toObject().contains(QStringLiteral("m-editor")));
+        const QJsonArray saved = g.toJson().value(QStringLiteral("members")).toArray();
+        bool editorSaved = false;
+        for (const auto &value : saved)
+            if (value.toObject().value(QStringLiteral("id")).toString() == QStringLiteral("m-editor"))
+                editorSaved = true;
+        QVERIFY(!editorSaved);
         QVERIFY(!g.reconcile({QStringLiteral("m-console"), QStringLiteral("m-preview")}));
         // Every pane gone: an empty group, still the tab's.
         QVERIFY(g.reconcile({}));
@@ -143,6 +159,85 @@ private slots:
                      QStringLiteral("m-editor")});
         QCOMPARE(g.memberFor(Role::Editor), QStringLiteral("m-new"));
         QVERIFY(!g.roleOf(QStringLiteral("m-editor")));
+    }
+
+    // ----- the chain (#R660) ------------------------------------------------------------------
+
+    // The chain is the group's `order`: head-first, the console (the shell the chain grew from)
+    // at the head, the preview at the tail. `upstream` walks toward the head — the editor was
+    // opened from the shell, the preview from the editor's build — and `downstream` away from it.
+    void theChainOrdersItsMembersWithUpstreamAndHead() {
+        Group g = texGroup();
+        QCOMPARE(g.head(), QStringLiteral("m-console"));
+        QCOMPARE(g.order, QStringList({QStringLiteral("m-console"), QStringLiteral("m-editor"),
+                                       QStringLiteral("m-preview")}));
+        QVERIFY(g.upstreamOf(QStringLiteral("m-console")).isEmpty());
+        QCOMPARE(g.upstreamOf(QStringLiteral("m-editor")), QStringLiteral("m-console"));
+        QCOMPARE(g.upstreamOf(QStringLiteral("m-preview")), QStringLiteral("m-editor"));
+        QCOMPARE(g.downstreamOf(QStringLiteral("m-console")), QStringLiteral("m-editor"));
+        QCOMPARE(g.downstreamOf(QStringLiteral("m-preview")), QString());
+        QCOMPARE(g.downstreamOf(QStringLiteral("m-unknown")), QString());
+    }
+
+    // A chain that has grown only its first two members — the shell, then the editor opened
+    // beside it — is a prefix of the full one; the preview joins the tail when it is built.
+    void aPartialChainSavesAndRestoresInOrder() {
+        Group g = texGroup();
+        g.removeMember(QStringLiteral("m-preview"));
+        const Group back = Group::fromJson(g.toJson());
+        QCOMPARE(back.order, QStringList({QStringLiteral("m-console"), QStringLiteral("m-editor")}));
+        QCOMPARE(back.head(), QStringLiteral("m-console"));
+        QCOMPARE(back.downstreamOf(QStringLiteral("m-editor")), QString());
+    }
+
+    // Schema 1's {member id: role} object shape is still read and upgraded to the chain the
+    // presets always built: console -> editor -> preview.
+    void schemaOneGroupsUpgradeToTheChain() {
+        QJsonObject legacy = texGroup().toJson();
+        QJsonObject members;
+        members.insert(QStringLiteral("m-preview"), QStringLiteral("preview"));
+        members.insert(QStringLiteral("m-editor"), QStringLiteral("editor"));
+        members.insert(QStringLiteral("m-console"), QStringLiteral("console"));
+        legacy.insert(QStringLiteral("members"), members);
+        legacy.insert(QStringLiteral("schema"), 1);
+        const Group g = Group::fromJson(legacy);
+        QVERIFY(g.isValid());
+        QCOMPARE(g.members.size(), 3);
+        QCOMPARE(g.head(), QStringLiteral("m-console"));
+        QCOMPARE(g.order, QStringList({QStringLiteral("m-console"), QStringLiteral("m-editor"),
+                                       QStringLiteral("m-preview")}));
+        QCOMPARE(g.upstreamOf(QStringLiteral("m-editor")), QStringLiteral("m-console"));
+        // And it saves in the new shape, chain spelled with upstreams.
+        const QJsonArray saved = g.toJson().value(QStringLiteral("members")).toArray();
+        QCOMPARE(saved.size(), 3);
+        QCOMPARE(saved.at(2).toObject().value(QStringLiteral("upstream")).toString(),
+                 QStringLiteral("m-editor"));
+    }
+
+    // A member that leaves heals the chain around it: the preview whose upstream editor closed
+    // answers the console instead, and a member that comes back reclaims its place.
+    void theChainHealsAroundADepartedMember() {
+        Group g = texGroup();
+        g.reconcile({QStringLiteral("m-console"), QStringLiteral("m-preview")});
+        QCOMPARE(g.order, QStringList({QStringLiteral("m-console"), QStringLiteral("m-preview")}));
+        QCOMPARE(g.upstreamOf(QStringLiteral("m-preview")), QStringLiteral("m-console"));
+
+        QVERIFY(g.reconcile({QStringLiteral("m-console"), QStringLiteral("m-preview"),
+                             QStringLiteral("m-editor")}));
+        QCOMPARE(g.order, QStringList({QStringLiteral("m-console"), QStringLiteral("m-preview"),
+                                       QStringLiteral("m-editor")}));
+        QCOMPARE(g.upstreamOf(QStringLiteral("m-editor")), QStringLiteral("m-preview"));
+    }
+
+    // A role that changes hands keeps its place in the chain: the new editor pane steps into the
+    // old one's slot, between the console and the preview.
+    void aNewcomerTakesTheDepartedRoleSlot() {
+        Group g = texGroup();
+        g.setMember(QStringLiteral("m-fresh"), Role::Editor);
+        QCOMPARE(g.order, QStringList({QStringLiteral("m-console"), QStringLiteral("m-fresh"),
+                                       QStringLiteral("m-preview")}));
+        QCOMPARE(g.upstreamOf(QStringLiteral("m-fresh")), QStringLiteral("m-console"));
+        QCOMPARE(g.downstreamOf(QStringLiteral("m-fresh")), QStringLiteral("m-preview"));
     }
 
     void departedMembersAreNotSaved() {

@@ -1307,12 +1307,14 @@ void RelayWindow::importSettingsDialog()
         }
     }
     known.remove(QString());
-    dialog.hooks.isKnownModel = [known](const QString &id) { return known.contains(id); };
-    dialog.hooks.isKnownAction = [](const QString &id) {
+    relay::settingsexport::Hooks hooks;
+    hooks.isKnownModel = [known](const QString &id) { return known.contains(id); };
+    hooks.isKnownAction = [](const QString &id) {
         for (const ActionDef &action : Keymap::instance().actions())
             if (action.id == id) return true;
         return false;
     };
+    dialog.setHooks(hooks);
     dialog.afterApply = [this] {
         relay::settings::invalidate();
         Keymap::instance().reload();

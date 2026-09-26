@@ -31,8 +31,10 @@
 namespace relay::workspace {
 
 // The saved group's "schema". A group written by a newer Relay is not read (the tab restores
-// without it) rather than half-understood.
-inline constexpr int kSchemaVersion = 1;
+// without it) rather than half-understood. Schema 2 added the member chain (#R660): "members"
+// became an ordered array with each member's upstream; schema 1's object shape is still read and
+// upgraded to the chain the presets always built (console -> editor -> preview).
+inline constexpr int kSchemaVersion = 2;
 
 enum class Role { Editor, Console, Preview, Variables };
 QString roleName(Role role);
@@ -108,6 +110,7 @@ struct Group {
     QString root;
     QString layout;                           // the last preset applied ("1:1:1", "2:1"), or ""
     QMap<QString, Role> members;              // member id (a leaf's saved id) -> role
+    QStringList order;                        // the chain: member ids head-first, in join order
     QStringList sources;                      // absolute paths, in the order they joined
     QList<Output> outputs;
     // Members that left (their pane closed, or moved to another tab) this run, so a pane restored
@@ -123,6 +126,11 @@ struct Group {
     // Give `member` the role, taking it from whoever held it (who then leaves the group).
     void setMember(const QString &member, Role role);
     void removeMember(const QString &member);
+    // The chain (#R660): `order` head-first. The head is the chain's origin — the shell the
+    // editor and preview were opened from; `upstream` walks toward it, `downstream` away.
+    QString head() const;
+    QString upstreamOf(const QString &member) const;
+    QString downstreamOf(const QString &member) const;
     // Drop members that are not among `live` (they are remembered in `departed`) and take back
     // departed ones that are live again, unless their role has been given to someone else.
     // Returns true when membership changed.

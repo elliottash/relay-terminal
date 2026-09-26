@@ -96,6 +96,10 @@ VTermBackend::VTermBackend(const QString &coreName, QWidget *parent)
         if (onOutput)
             onOutput(b);
     });
+    connect(m_session, &TerminalSession::historyEvicted, this, [this](const EvictedText &text) {
+        if (onHistoryEvicted)
+            onHistoryEvicted(text);
+    });
     connect(m_session, &TerminalSession::finished, this, [this](int code) {
         if (onFinished)
             onFinished(code);
@@ -519,5 +523,9 @@ bool VTermBackend::zoom(int step)
 }
 
 void VTermBackend::setOutputCallbackEnabled(bool enabled) { m_session->setOutputSignalEnabled(enabled); }
+void VTermBackend::setCollectEvicted(bool on) { m_session->setCollectEvicted(on); }
+void VTermBackend::drainEvictedRows() { m_session->drainEvicted(); }
+void VTermBackend::evictAllRows() { m_session->evictAll(); }
+quint64 VTermBackend::contentGeneration() const { return m_session->changeCount(); }
 
 } // namespace relay

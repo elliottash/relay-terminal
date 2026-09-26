@@ -87,6 +87,13 @@ public:
 
     void setScrollbackLines(int lines);
     void setClipboardWriteAllowed(bool allowed);
+    // The pane's text journal (card #HEY7): rows that leave the scrollback for good are collected
+    // by the core and emitted as historyEvicted() at each delivery, already in the saved form.
+    // drainEvicted() emits what is waiting now (a save or a close cannot wait for output).
+    void setCollectEvicted(bool on);
+    void drainEvicted();
+    void evictAll();   // the ring into the journal: this terminal is being replaced
+    quint64 changeCount();
     // Emit output() with raw PTY bytes (GUI thread, batched). Off by default:
     // copying a 200 MB flood to the GUI thread is not free. If more than 64 MiB
     // accumulate before the GUI thread takes them, the excess is dropped.
@@ -103,6 +110,7 @@ signals:
     void notification(const QString &title, const QString &body);
     void output(const QByteArray &bytes);
     void finished(int exitCode);
+    void historyEvicted(const relay::EvictedText &text);
 
 private:
     struct GuiLock {
@@ -157,6 +165,7 @@ private:
     int m_rows = 24;
     int m_cols = 80;
     int m_cellWidthPx = 8, m_cellHeightPx = 16; // last resize(), guarded by m_mutex
+    bool m_collectEvicted = false;   // GUI thread (#HEY7)
     bool m_holdPtyResize = false;
     bool m_ptyResizePending = false;
     int m_pendingPixelWidth = 0, m_pendingPixelHeight = 0;

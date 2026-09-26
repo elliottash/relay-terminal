@@ -75,6 +75,7 @@
 #include "TerminalBackend.h"
 #include "EngineBackend.h"     // applyTerminalSettings(): Options › Terminal reaches the engine view in place
 #include "WindowState.h"
+#include "PaneJournal.h"
 #include "RuntimeDirs.h"
 #include "RemoteShare.h"
 #include "PaneState.h"
@@ -868,6 +869,9 @@ public:
         for (const QString &clip : std::as_const(m_remoteVoiceClips)) QFile::remove(clip);
         if (m_speechHooked && readingAloud()) relay::speech::Speaker::instance().stop();   // #MDA7
         m_poll.stop();
+        // What the terminal let go of is written and its journal segment sealed (card #HEY7);
+        // what it still holds is the tail file's, saved when the pane was closed.
+        m_paneJournal.close(m_backend);
         // Destroy the terminal before its private shell state directory is removed.
         m_backend = nullptr;
         m_backendOwned.reset();
@@ -1524,10 +1528,21 @@ public:
     // is not a *conversation's* — the card's conversation is the worker's file and outlives this.
     static QString surfaceTextOpenMark() { return QStringLiteral("— what was said here before —"); }
     static QString surfaceTextCloseMark() { return QStringLiteral("— end of what was said here before —"); }
+    // The row a restore puts above the replayed text when the pane's text journal holds older
+    // lines than the terminal can (card #HEY7). It links to them; a click reads them in `less`.
+    static QString earlierTextMark() { return QStringLiteral("▸ Earlier lines of this pane are kept · click to read them"); }
     static QStringList restoreMarks() {
         return {scrollbackOpenMark(), scrollbackLegacyOpenMark(), scrollbackCloseMark(), sessionTextOpenMark(),
                 sessionTextCloseMark(), surfaceTextOpenMark(), surfaceTextCloseMark(),
-                transcriptFillOpenMark(), transcriptFillCloseMark()};
+                transcriptFillOpenMark(), transcriptFillCloseMark(), earlierTextMark()};
+    }
+    // What the journal must not keep: a whole restore rule, as the engine hands it over.
+    static bool isRestoreChrome(const QString &text) {
+        const QString plain = text.trimmed();
+        if (plain.isEmpty()) return false;
+        for (const QString &mark : restoreMarks())
+            if (plain == mark) return true;
+        return false;
     }
     // Which pair of rules a queued replay is printed between.
     enum class RestoredKind { Scrollback, Conversation, Surface };
@@ -1589,15 +1604,26 @@ public:
     }
     void saveScrollback() const {
         if (!terminalCan(relay::TerminalBackend::Scrollback)) return;
-        QString error;
-        // The pane's word-wrapped blocks ride the same file as a trailer (#MTCS), so a restore
-        // can hand them back and the restored pane re-wraps them when it is resized.
-        const QVector<relay::ProseBlock> prose =
-                m_backend ? m_backend->proseBlocks() : QVector<relay::ProseBlock>();
-        if (!relay::windowstate::writeScrollback(
-                    m_scrollbackId, paneFormattedTextLines(relay::windowstate::kScrollbackMaxLines), prose, &error)
-            && !error.isEmpty())
-            fprintf(stderr, "relay: could not save this pane's scrollback: %s\n", qPrintable(error));
+        // Rows the terminal already let go of go to the journal first (card #HEY7), so every row is
+        // in exactly one of the two: the journal (older) or the tail written below (newer).
+        m_paneJournal.flush(m_backend);
+        // The tail is the whole terminal — up to the engine's ring — and serializing it is the cost
+        // of a save, so a terminal that has not changed since the last save is not written again.
+        const quint64 generation = m_backend ? m_backend->contentGeneration() : 0;
+        if (generation == 0 || generation != m_savedGeneration
+                || !QFileInfo::exists(relay::windowstate::scrollbackPath(m_scrollbackId))) {
+            QString error;
+            // The pane's word-wrapped blocks ride the same file as a trailer (#MTCS), so a restore
+            // can hand them back and the restored pane re-wraps them when it is resized.
+            const QVector<relay::ProseBlock> prose =
+                    m_backend ? m_backend->proseBlocks() : QVector<relay::ProseBlock>();
+            if (!relay::windowstate::writeScrollback(
+                        m_scrollbackId, paneFormattedTextLines(relay::windowstate::kPaneTextMaxLines), prose, &error)
+                && !error.isEmpty())
+                fprintf(stderr, "relay: could not save this pane's scrollback: %s\n", qPrintable(error));
+            else
+                m_savedGeneration = generation;
+        }
         saveSessionText();
     }
 
@@ -2586,6 +2612,13 @@ public:
         m_boxAllPending = false;
         m_modelBox->setFocus(Qt::ShortcutFocusReason);
         m_modelBox->showPopup();
+    }
+    // Alt+M routed from a focused subagent pane: reset to the short list and open its box.
+    void openSubagentModelBox() {
+        if (!m_subagentTabs || !m_subagentTabs->modelBox()) return;
+        m_subagentBoxExpanded.clear();
+        m_subagentBoxAllPending = false;
+        m_subagentTabs->openModelBox();
     }
     // The filter behind passHotkeysThrough: a key with a modifier that the keymap knows closes
     // the popup untouched and is re-posted to the window. Plain keys (arrows, Enter, Esc, typing
@@ -4046,6 +4079,11 @@ public:
             case relay::ClickAction::Open: modifiers = Qt::NoModifier; break;   // the path below
             }
         }
+        // The restore row that stands for the pane's older text (card #HEY7).
+        if (target.startsWith(QLatin1String("relay-journal:"))) {
+            readJournal(target.mid(int(qstrlen("relay-journal:"))));
+            return;
+        }
         // File actions use the actual path, even when ordinary opening resolves a Markdown file
         // to a Switchboard card. Remote paths never arrive here with Shift (the login branch at
         // the backend callback keeps handling those on their own machine).
@@ -4221,6 +4259,38 @@ public:
     }
     // Alt+click on a folder link, or "Navigate here": `cd` this pane's shell into it. runCommand
     // refuses, and says why, when a program has the terminal, so nothing is typed into it.
+    // The pane's older text (card #HEY7): every line its journal holds, with its colours, read in
+    // `less -R` from this pane's own shell — the terminal can hold only its newest rows. `q` goes
+    // back. Without `less` (Windows), or with the shell busy, the plain text opens in a file pane.
+    void readJournal(const QString &id) {
+        const QString dir = relay::textjournal::journalDirectory(id);
+        if (dir.isEmpty() || !QFileInfo::exists(dir)) {
+            status(QStringLiteral("This pane's earlier text is no longer kept."));
+            return;
+        }
+        if (id == m_scrollbackId) m_paneJournal.flush(m_backend);
+        const QString script = m_data + QStringLiteral("/backend/relay_core/textjournal.py");
+        const QString less = QStandardPaths::findExecutable(QStringLiteral("less"));
+        if (!less.isEmpty() && hasShell() && shellIdleAtPrompt() && !m_login.active) {
+            sendShellInput(shellQuote(m_python) + QStringLiteral(" -S ") + shellQuote(script) + QStringLiteral(" cat ")
+                           + shellQuote(dir) + QStringLiteral(" | less -R +G\n"));
+            return;
+        }
+        QProcess cat;
+        cat.start(m_python, {QStringLiteral("-S"), script, QStringLiteral("cat"), dir, QStringLiteral("--plain")});
+        if (!cat.waitForFinished(30000) || cat.exitCode() != 0) {
+            status(QStringLiteral("Could not read this pane's earlier text."));
+            return;
+        }
+        const QString path = m_runtime.path() + QStringLiteral("/earlier-text.txt");
+        QFile file(path);
+        if (!file.open(QIODevice::WriteOnly) || file.write(cat.readAllStandardOutput()) < 0) {
+            status(QStringLiteral("Could not write this pane's earlier text: ") + file.errorString());
+            return;
+        }
+        file.close();
+        if (onOpenPath) onOpenPath(path, 0);
+    }
     void navigateToOutputFolder(const QString &folder) {
         if (!hasShell()) { status(QStringLiteral("This pane has no shell to navigate.")); return; }
         if (changeDirectory(folder)) status(QStringLiteral("cd ") + folder);
@@ -10257,6 +10327,10 @@ private:
                                                                  : model;
         const QString target = subagentModelTarget(id, label);
         if (target.isEmpty()) return;
+        if (!Keymap::instance().shortcutText(QStringLiteral("agent.modelBox")).isEmpty())
+            hint(QStringLiteral("subagents.model.mouse"),
+                 relay::ShortcutHints::nextTime(Keymap::instance().shortcutText(QStringLiteral("agent.modelBox")),
+                                                QStringLiteral("open the model box")));
         send({{"type", "agent_set_model"}, {"id", target}, {"model", model}});
     }
     // The box's collapsed text is the current tab's model — the same string the chip under the
@@ -10268,7 +10342,11 @@ private:
         CurrentTextComboBox *box = m_subagentTabs->modelBox();
         box->setCollapsedText(row ? row->model : QString());
         box->setToolTip(QStringLiteral("The model this subagent runs on; every model the model picker "
-                                       "offers is a choice here too"));
+                                       "offers is a choice here too")
+                        + (Keymap::instance().shortcutText(QStringLiteral("agent.modelBox")).isEmpty()
+                               ? QString()
+                               : QStringLiteral(" — %1 opens it").arg(Keymap::instance().shortcutText(
+                                     QStringLiteral("agent.modelBox")))));
     }
 
     // The strip under the prompt (subagents on the left, the open tasks on the right) shows only
@@ -11284,6 +11362,8 @@ public:
         if (m_backend && !m_shellStopped) return;
         if (m_backendOwned) {
             // Replace the terminal that still shows the stopped program; do not close the pane.
+            // Its scrollback would go with it, so it goes to the journal instead (card #HEY7).
+            if (m_backend) m_backend->evictAllRows();
             m_restarting = true;
             m_backend = nullptr;
             m_backendOwned.reset();
@@ -13424,13 +13504,28 @@ private:
         // replay add none; the pane's title and session state already identify the conversation.
         const RestoredKind kind = m_restoredKind;
         m_restoredKind = RestoredKind::Scrollback;
-        const QStringList lines = m_restoredScrollback;
+        QStringList lines = m_restoredScrollback;
         m_restoredScrollback.clear();
+        // A tail longer than the terminal can hold would push its own oldest rows — and the row
+        // that links to the journal — straight back out. Those rows go to the journal now,
+        // where the replay would have sent them, and the rest is replayed under the link (#HEY7).
+        if (kind == RestoredKind::Scrollback) {
+            const int room = std::max(0, relay::windowstate::kEngineRingRows - m_backend->rows() - 8);
+            if (lines.size() > room) {
+                m_paneJournal.absorbRows(lines.mid(0, lines.size() - room));
+                lines = lines.mid(lines.size() - room);
+            }
+        }
         const QVector<relay::ProseBlock> prose = m_restoredProse;
         m_restoredProse.clear();
         QByteArray out = "\r\x1b[2K";
         if (kind == RestoredKind::Surface)
             out += inkCode(Ink::Note) + surfaceTextOpenMark().toUtf8() + "\x1b[0m\r\n";
+        // The terminal holds only its newest rows; what it let go of is in the pane's journal
+        // (card #HEY7). One row says so and links to it, and a click reads it in `less`.
+        if (kind == RestoredKind::Scrollback && m_paneJournal.lines() > 0)
+            out += "\x1b]8;;" + (QStringLiteral("relay-journal:") + m_scrollbackId).toUtf8() + "\x1b\\"
+                   + inkCode(Ink::Note) + "\x1b[3m" + earlierTextMark().toUtf8() + "\x1b[0m\x1b]8;;\x1b\\\r\n";
         // Saved output is replayed as text: any escape sequence left in the file is stripped, so
         // a hand-edited (or truncated) file cannot drive the terminal. When the backend produced
         // ANSI-formatted scrollback we keep the SGR sequences and strip everything else.
@@ -16218,10 +16313,13 @@ private:
     }
 
     // Load shell/remote-integration.sh into the remote shell once per login, per Options ›
-    // Terminal › SSH sessions: automatically, after asking, or never. mosh drops the escape
-    // sequences the script sends, so only ssh is enhanced.
+    // Terminal › SSH sessions: automatically, after asking, or never. ssh and mosh both: over
+    // mosh the script's marks ride OSC 52 (#XQ8F), the one escape mosh forwards.
     void maybeEnhanceLogin() {
-        if (m_login.program != QStringLiteral("ssh") || m_login.bootstrapped || m_login.enhanced) return;
+        // ssh and mosh both. A mosh login used to be left plain: mosh eats OSC 7, so the
+        // bootstrap line had nothing to bind to — #XQ8F's marks ride OSC 52 over mosh links
+        // now, and the line itself carries RELAY_M=1 so the remote script knows to use them.
+        if (m_login.bootstrapped || m_login.enhanced) return;
         // Something on the host is asking a question (zsh's first-run menu on a host with no
         // ~/.zshrc, a pager, a wizard): its prompt is not a shell's, and a line typed into it is
         // an answer, not a command. Wait; the next real prompt enhances the login.
@@ -16236,8 +16334,11 @@ private:
         if (mode == QStringLiteral("ask") && !listed("ssh/hosts_always")) {
             if (m_login.offered) return;
             m_login.offered = true;
-            showBanner(QStringLiteral("Enhance this ssh session on %1? Prompt marks, the remote folder, the agent's replies "
-                                      "at the prompt · nothing is installed on the host").arg(host),
+            // "this ssh session" was the only case once; now the transport rides along (#XQ8F).
+            const QString transport = m_login.program.startsWith(QStringLiteral("mosh"))
+                ? QStringLiteral("mosh") : m_login.program;
+            showBanner(QStringLiteral("Enhance this %2 session on %1? Prompt marks, the remote folder, the agent's replies "
+                                      "at the prompt · nothing is installed on the host").arg(host, transport),
                        QStringLiteral("Enhance"), [this] { hideBanner(); typeLoginBootstrap(); });
             return;
         }
@@ -16250,7 +16351,10 @@ private:
         if (!file.open(QIODevice::ReadOnly)) return;
         const QPoint cursor = m_backend->cursorPosition();
         const QByteArray script = "RELAY_REMOTE_TOKEN='" + m_login.token.toUtf8() + "'\n" + file.readAll();
-        const QString line = relay::remote::bootstrapLine(script, std::max(0, cursor.x()), m_backend->columns());
+        // viaMosh for a mosh login: the line sets RELAY_M=1, and the remote script sends its
+        // marks as OSC 52, the one escape mosh forwards, which the engine turns back into marks.
+        const QString line = relay::remote::bootstrapLine(script, std::max(0, cursor.x()), m_backend->columns(),
+                                                          m_login.program != QStringLiteral("ssh"));
         m_login.bootstrapped = true;
         m_login.atPrompt = false; m_login.promptTicks = 0;   // the line runs; the next prompt is the enhanced one
         sendShellInput(line + '\r');
@@ -17487,6 +17591,10 @@ private:
     // Terminal scrollback across a restart: the file this pane's text is saved in, the lines a
     // restore handed it, and whether they have been replayed (once per pane, at the first prompt).
     QString m_scrollbackId;
+    // The pane's text journal (card #HEY7): every row the terminal lets go of for good.
+    mutable relay::PaneJournal m_paneJournal{this, [this] { return m_scrollbackId; }, [this] { return m_cwd; },
+                                             [](const QString &text) { return isRestoreChrome(text); }};
+    mutable quint64 m_savedGeneration = 0;   // contentGeneration() at the last tail write
     QString m_draftKey;
     QStringList m_restoredScrollback;
     // The prose blocks m_restoredScrollback's rows anchor, in the form the backend handed them

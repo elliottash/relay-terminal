@@ -11,7 +11,9 @@ import sys
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--socket', default=os.environ.get('RELAY_OPEN_SOCKET'))
-    parser.add_argument('op', choices=['open', 'press', 'read', 'type', 'action', 'panes'])
+    # `workspace` (card #E85D): NAME is state | preset | status | refresh; TEXT is the layout
+    # ("2:1", optionally followed by a source path) or a builder status as JSON.
+    parser.add_argument('op', choices=['open', 'press', 'read', 'type', 'action', 'panes', 'workspace'])
     parser.add_argument('name', nargs='?', default='')
     parser.add_argument('text', nargs='?', default='')
     parser.add_argument('--pane', default='')

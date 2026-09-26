@@ -731,6 +731,8 @@ public:
         const QFileInfo info(path);
         if (!remote && !info.exists()) { notice(QStringLiteral("No such file or folder: ") + path, 6000); return; }
         // A source of the tab's artifact workspace opens in its linked editor, at the line (#E85D).
+        // A .tex opened from a shell offers its chain first (#R660): open beside, linked.
+        if (!remote && info.isFile() && openWorkspaceChainSource(info.absoluteFilePath(), line, anchor)) return;
         if (!remote && info.isFile() && openInWorkspaceEditor(info.absoluteFilePath(), line, anchor)) return;
         if (!anchor || !isLeaf(anchor) || anchor->window() != this) anchor = m_activeLeaf;
         if (!anchor) return;
@@ -784,6 +786,28 @@ public:
     void refreshWorkspace(QWidget *page);
     QObject *ensureWorkspace(QWidget *page);
     QJsonObject driveWorkspace(const QJsonObject &request);
+    // ----- the chain (#R660): shell -> TeX editor -> PDF preview ---------------------------------
+    // `relay open main.tex` from a shell (or a click on the file in its output) offers to open
+    // the editor beside it, linked: the shell becomes the chain's head, the editor its downstream.
+    // Returns true when the open is answered either way by the chain (formed, or declined and
+    // handled by the caller's plain open); false when the path is not the chain's to take.
+    bool openWorkspaceChainSource(const QString &path, int line, QWidget *anchor);
+    // The next member of the chain downstream of its tail: the editor beside the head, then the
+    // preview beside the editor. Applied by the Build that opens or refreshes a preview
+    // (docs/TASK-PLUGINS.md relay.tex) and available as `relay-drive workspace next`.
+    void openWorkspaceNext(QWidget *page);
+    // The preset's shape for the members the chain has (a chain of two takes the preset's
+    // prefix), for every member of the chain; used when the chain forms, grows, or moves.
+    void dockWorkspaceChain(QWidget *page);
+    // The chain chip in every member's chrome: the whole chain, this member bold (#R660 t:qr).
+    void refreshChainChips(QWidget *page);
+    // Closing a chain's head asks "Close the linked panes too?" — all of them, or just it.
+    bool workspaceChainClose(QWidget *pane);
+    // A member that lands in another tab of this window brings the chain with it, in order.
+    void moveWorkspaceChain(QWidget *member);
+    // A member whose file is gone at restore shows a placeholder with "Reopen", keeping its
+    // place in the chain until the file is back (or another is picked for it).
+    void reconcileMissingMembers(QWidget *page);
     static QJsonObject withWorkspaceMember(QWidget *leaf, QJsonObject node);
     static void tagWorkspaceMember(QWidget *leaf, const QJsonObject &node);
 
@@ -1305,6 +1329,22 @@ private:
     bool helperComposerHasFocus() const { return focusedConsole() != nullptr; }
     void openConsoleModelBox() {
         if (Pane *console = focusedConsole()) console->openModelBox();
+    }
+    // The pane that owns the subagent pane the keyboard is in, or null — asked of the focus
+    // widget for the same reason as focusedConsole() above: the active leaf is the last terminal
+    // pane, which is not where the key went. The subagent pane is a leaf of its own and not a
+    // Pane, so Alt+M there would otherwise open the owner terminal's box (owner, 2026-09-25:
+    // "alt m doesnt work to change models from the subagent pane. it should"); it must open the
+    // current tab's box, and the owner pane is the one that fills it.
+    Pane *subagentModelBoxOwner() const {
+        relay::SubagentTabsView *view = nullptr;
+        for (QWidget *widget = QApplication::focusWidget(); widget != nullptr && !view;
+             widget = widget->parentWidget())
+            view = dynamic_cast<relay::SubagentTabsView *>(widget);
+        if (!view) return nullptr;
+        for (Pane *pane : allPanes())
+            if (pane->subagentTabs() == view) return pane;
+        return nullptr;
     }
 
     void focusHelperOfActiveLeaf() {
@@ -8160,6 +8200,8 @@ private:
                 w->m_tabs->setCurrentWidget(page);
                 w->setActiveLeaf(dragged); focusLeaf(dragged);
                 if (w != this) { w->raise(); w->activateWindow(); }
+                // A chain member that lands in another tab brings the chain with it (#R660).
+                if (w == this) moveWorkspaceChain(dragged);
             }
         } else {
             QPointer<QWidget> anchor(target.first);
@@ -8170,6 +8212,10 @@ private:
             w->m_tabs->setCurrentWidget(w->pageOf(dragged));
             w->setActiveLeaf(dragged); focusLeaf(dragged);
             if (w != this) { w->raise(); w->activateWindow(); }
+            // Same (#R660): a drop into another tab's pane is a cross-tab move for a member.
+            if (w == this && w->pageOf(dragged) != nullptr
+                && !dragged->property("relayWorkspaceMember").toString().isEmpty())
+                moveWorkspaceChain(dragged);
             // The chord teaches itself the one time it is the faster path: dragged from beside
             // the anchor and dropped on its bottom edge.
             if (target.second == Edge::Bottom && !sideKey.isEmpty() && w == windowOf(dragged)) {
@@ -8271,6 +8317,8 @@ private:
         const int index = m_tabs->indexOf(page) + 1;
         if (!takeLeaf(leaf)) return;
         adoptLeafAsTab(leaf, index);
+        // A chain member that takes a tab of its own brings the chain with it (#R660).
+        moveWorkspaceChain(leaf);
     }
 
     // The move-out sequence of one tab, shared by "Move tab to new window" and a tear-off

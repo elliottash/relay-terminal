@@ -192,6 +192,9 @@ public:
     // the same CurrentTextComboBox every pane header carries, for the subagent on the current tab.
     // Null only before the constructor returns; hidden while no tab is current.
     CurrentTextComboBox *modelBox() const { return m_modelBox; }
+    // Alt+M from anywhere over the pane (owner, 2026-09-25): the same door the terminal pane's
+    // own box has — focus the box and drop its list. No current tab: nothing to open.
+    void openModelBox();
     int count() const;
     void closeTab(const QString &id);
     // The tab's ×: onUserClosed, then closeTab.

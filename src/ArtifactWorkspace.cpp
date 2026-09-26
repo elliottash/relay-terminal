@@ -167,11 +167,27 @@ std::optional<Role> Group::roleOf(const QString &member) const {
 
 void Group::setMember(const QString &member, Role role) {
     if (member.isEmpty()) return;
+    // A same-role member leaving hands the newcomer its place in the chain, so a role change
+    // keeps the chain's shape (an editor replaced by a new editor pane stays between the console
+    // and the preview).
+    QString slot;
     for (auto it = members.begin(); it != members.end();) {
-        if (it.value() == role && it.key() != member) it = members.erase(it);
-        else ++it;
+        if (it.value() == role && it.key() != member) {
+            const int at = order.indexOf(it.key());
+            if (at >= 0) slot = it.key();
+            it = members.erase(it);
+        } else ++it;
     }
     members.insert(member, role);
+    if (!order.contains(member)) {
+        const int at = slot.isEmpty() ? -1 : order.indexOf(slot);
+        if (at >= 0) order.insert(at, member);
+        else order.append(member);
+    }
+    if (!slot.isEmpty()) {
+        const int at = order.indexOf(slot);
+        if (at >= 0) order.removeAt(at);
+    }
     departed.remove(member);
     for (auto it = departed.begin(); it != departed.end();) {
         if (it.value() == role) it = departed.erase(it);
@@ -182,6 +198,19 @@ void Group::setMember(const QString &member, Role role) {
 void Group::removeMember(const QString &member) {
     members.remove(member);
     departed.remove(member);
+    order.removeAll(member);
+}
+
+QString Group::head() const { return order.isEmpty() ? QString() : order.first(); }
+
+QString Group::upstreamOf(const QString &member) const {
+    const int at = order.indexOf(member);
+    return at > 0 ? order.at(at - 1) : QString();
+}
+
+QString Group::downstreamOf(const QString &member) const {
+    const int at = order.indexOf(member);
+    return at >= 0 && at + 1 < order.size() ? order.at(at + 1) : QString();
 }
 
 bool Group::reconcile(const QSet<QString> &live) {
@@ -199,6 +228,28 @@ bool Group::reconcile(const QSet<QString> &live) {
             changed = true;
         }
         it = departed.erase(it);
+    }
+    // The chain drops the members that left and takes back the ones that returned (#R660). A
+    // returning member reclaims its place; a newcomer that joins while its role is held keeps
+    // the tail. `departed` remembers the order entry, so reconcile() restores both membership
+    // and position.
+    QSet<QString> keep;
+    for (auto it = members.cbegin(); it != members.cend(); ++it) keep.insert(it.key());
+    QStringList keptOrder;
+    for (const QString &id : order)
+        if (keep.contains(id)) keptOrder.append(id);
+    // Members that never had an order entry (a group from schema 1 read before this chain, or a
+    // member added by hand) go on the tail, in the map's role-first order.
+    if (keptOrder.size() < members.size()) {
+        const QList<Role> chainOrder = {Role::Console, Role::Editor, Role::Preview, Role::Variables};
+        for (Role role : chainOrder) {
+            const QString id = memberFor(role);
+            if (!id.isEmpty() && !keptOrder.contains(id)) keptOrder.append(id);
+        }
+    }
+    if (keptOrder != order) {
+        order = keptOrder;
+        changed = true;
     }
     return changed;
 }
@@ -235,8 +286,25 @@ Output &Group::ensureOutput(const QString &path, const QString &adapter, Authori
 
 QJsonObject Group::toJson() const {
     if (!isValid()) return {};
-    QJsonObject memberJson;
-    for (auto it = members.cbegin(); it != members.cend(); ++it) memberJson.insert(it.key(), roleName(it.value()));
+    // The chain, head-first: each entry names its upstream, so the array spells the order and the
+    // links in one place (#R660).
+    QJsonArray memberJson;
+    for (const QString &id : order) {
+        const auto it = members.constFind(id);
+        if (it == members.constEnd()) continue;
+        QJsonObject m{{QStringLiteral("id"), id},
+                      {QStringLiteral("role"), roleName(it.value())}};
+        const QString upstream = upstreamOf(id);
+        if (!upstream.isEmpty()) m.insert(QStringLiteral("upstream"), upstream);
+        memberJson.append(m);
+    }
+    // A member that somehow lost its order entry (a hand-edited array) is still a member: it
+    // rides the tail rather than vanishing from the saved group.
+    for (auto it = members.cbegin(); it != members.cend(); ++it) {
+        if (order.contains(it.key())) continue;
+        memberJson.append(QJsonObject{{QStringLiteral("id"), it.key()},
+                                      {QStringLiteral("role"), roleName(it.value())}});
+    }
     QJsonArray outputJson;
     for (const Output &out : outputs) {
         QJsonObject o{{QStringLiteral("path"), out.path},
@@ -282,10 +350,42 @@ Group Group::fromJson(const QJsonObject &json, QString *error) {
     group.root = json.value(QStringLiteral("root")).toString();
     group.layout = presetWeights(json.value(QStringLiteral("layout")).toString()).isEmpty()
                        ? QString() : json.value(QStringLiteral("layout")).toString();
-    const QJsonObject memberJson = json.value(QStringLiteral("members")).toObject();
-    for (auto it = memberJson.constBegin(); it != memberJson.constEnd(); ++it)
-        if (const auto role = roleFromName(it.value().toString()); role && !it.key().isEmpty())
-            group.setMember(it.key(), *role);   // a hand-edited duplicate role keeps the last one
+    const QJsonValue membersValue = json.value(QStringLiteral("members"));
+    if (membersValue.isArray()) {
+        // Schema 2 (#R660): ordered, each member naming its upstream. The array's order is the
+        // chain; an upstream that names anything other than the preceding member (a hand edit,
+        // a removed middle) is ignored rather than second-guessed.
+        QStringList savedOrder;
+        for (const auto &value : membersValue.toArray()) {
+            const QJsonObject m = value.toObject();
+            const QString id = m.value(QStringLiteral("id")).toString();
+            const auto role = roleFromName(m.value(QStringLiteral("role")).toString());
+            if (id.isEmpty() || !role) continue;
+            group.setMember(id, *role);
+            savedOrder.append(id);
+        }
+        QStringList inGroup;
+        for (const QString &id : savedOrder)
+            if (group.members.contains(id) && !inGroup.contains(id)) inGroup.append(id);
+        for (auto it = group.members.cbegin(); it != group.members.cend(); ++it)
+            if (!inGroup.contains(it.key())) inGroup.append(it.key());
+        group.order = inGroup;
+    } else {
+        // Schema 1: {member id: role}. Upgraded to the chain the presets always built:
+        // console -> editor -> preview, anything else on the tail.
+        const QJsonObject memberJson = membersValue.toObject();
+        for (auto it = memberJson.constBegin(); it != memberJson.constEnd(); ++it)
+            if (const auto role = roleFromName(it.value().toString()); role && !it.key().isEmpty())
+                group.setMember(it.key(), *role);   // a hand-edited duplicate role keeps the last one
+        QStringList upgraded;
+        const QString console = group.memberFor(Role::Console), editor = group.memberFor(Role::Editor),
+                    preview = group.memberFor(Role::Preview);
+        for (const QString &id : {console, editor, preview})
+            if (!id.isEmpty()) upgraded.append(id);
+        for (const QString &id : group.order)
+            if (!id.isEmpty() && !upgraded.contains(id)) upgraded.append(id);
+        group.order = upgraded;
+    }
     for (const auto &source : json.value(QStringLiteral("sources")).toArray())
         group.addSource(source.toString());
     for (const auto &value : json.value(QStringLiteral("outputs")).toArray()) {

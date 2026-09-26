@@ -1599,6 +1599,44 @@ Ways to open a path:
 | Click a `#K7Q2` in an engine pane's output | the same path, with `relay://card/<id>` as the target → `RelayWindow::openBoardCard` |
 | Click a path printed by a host a pane is logged into | `Pane::openRemoteOutputPath` → `ssh://host/path` → the same preview pane, fetched over ssh (#S5SH) |
 
+**The agent docked under a file** (card #PBZ4, slice 7 of #P2W8; owner, 2026-09-25: *"in an
+artifact pane, you have the agent system prompt docked at the bottom, same as a console pane … it
+could also have commands that can be slashed or auto-detected, and there would be a plug-in spec
+defining that"*). A text or Markdown file in a preview pane, and a plan pane, end in a
+`relay::ArtifactDock` (`src/FilePanes.{h,cpp}`): one "✦ Agent (Alt+Q)" row until it is asked for,
+then the ordinary no-shell console about that file — `relay::agent::ArtifactContext`
+(`src/ArtifactContext.{h,cpp}`, in `relay-agentcontext`), below. Images, PDFs, `.docx` and the info
+panel have no buffer and no dock. The console is built on the **first expand**, through the same
+`wireConsoleHost` seam as Options and Models (`createToolPane` wires it; Alt+Q reaches it through
+`focusHelper`), so a file nobody asks about costs nothing. What only a file has sits between the
+console's header and its transcript:
+
+- **The change list** (owner decision U5): each turn that changed this buffer, named by the words
+  that asked once the turn has ended (`Turn · "…"`), and under it each change with its lines — a
+  click goes to them. It is drawn from the buffer's own agent changes (`FilePreview::agentChanges`)
+  and `ArtifactContext::turnFinished`; nothing about it is on the wire.
+- **Review before apply** (decision D1), remembered per project (`artifact/reviewBeforeApply` in
+  QSettings, keyed by the tab's workspace, or the file's folder in a tab with none). On, an agent's
+  patch waits on the file's agent bar for Apply or Discard instead of landing.
+
+The agent's edits are the open-buffer path of protocol 35 (#F8R7): an `edit_file` or `write_file`
+on a file open here goes into the buffer as **one undo step**, merged around unsaved typing, saved
+at once only if the buffer was clean. Two answers are this card's: `held` (Review before apply) and
+`conflict` — a patch that overlaps the person's unsaved lines is no longer refused but merged into
+the buffer between `<<<<<<< editor` / `>>>>>>> agent` markers as one undo step, never saved, with a
+⚠ chip on the agent bar (decision D2). Every console of a tab hears every worker event, so
+`answerBufferRequestIn` answers one patch (same id, path and text within five seconds) once. A plan
+pane follows a clean file's disk writes as one undo step too, so a plan agent's write shows.
+
+The file's **task plugin** (`docs/TASK-PLUGINS.md`) supplies the commands: the first enabled plugin
+whose `activation.files` select the file, by origin precedence — project, global, bundled —
+found by `relay::agent::pluginForFile`, a QtCore mirror of `task_plugins`' discovery, so the popup
+needs no round trip. The bundled `relay.markdown` (`plugins_bundled/markdown/plugin.json`) gives
+`*.md` its `outline`, `tighten`, `proofread` and `toc`. The dock reads the plugin again when it
+builds its console, because a pane opens its first file in `ToolPane`'s constructor, before the
+window has called `FilePreview::setPluginSearch` (found in the live pass: the session's first
+Markdown file had no commands). Evidence: `docs/qa_evidence/2026-09-25-artifact-panes/`.
+
 ### Clickable paths in terminal output
 
 `src/OutputLinks.{h,cpp}` (library `relay-outputlinks`, namespace `relay::links`) holds the
@@ -1889,7 +1927,7 @@ passing none is a terminal pane, which is every pane written before this card):
   panel; the routing is locked to `agent` and the mode chip is hidden. `applyContextRouting` only ever
   *restricts*, so a terminal context leaves it having changed nothing.
 
-**The contexts that exist, and what each supplies.** A seventh — the project-management page the owner
+**The contexts that exist, and what each supplies.** Another — the project-management page the owner
 named — is one more class implementing `Context`, and nothing else.
 
 | Context | Where | Role | Shell | Persist | Action row | Links it resolves | A finished turn |
@@ -1912,6 +1950,38 @@ model page") sits under all four of its tabs and says which tab, the filter, the
 the class or job in focus; the providers tab's embedded `SettingsPane` gets no factory, so it draws
 no second row. `OptionsContext` is one class for both modes: `setMode` calls `changed()` and the name,
 the brief and the placeholder all read `mode()`, so Options and Actions swap without swapping consoles.
+
+**A file is a context too: the artifact console** (card #PBZ4; section 10 has the dock). What the
+owner called an artifact pane — *"the content is an editable object you are interacting with, rather
+than a console"* — is not a second kind of agent: it is `ArtifactContext`, one more class, on the
+same no-shell `Pane`. Its `spec()` is `name: "artifact"`, `surface: "file:<path>"` and
+`persistKey: "file:<path>"` — the window puts the tab in front, exactly as it does a card's, so each
+open file keeps a conversation of its own per tab (`artifactKey` digests a path past the worker's
+64- and 128-character limits) — plus the two fields only it sends, `file` and `plugin` (protocol 33,
+additive: `toJson` emits them only when set, so no other context's block changed). `screen` is the
+file, its view, whether it is being edited and dirty, the plugin, the cursor and the selection,
+asked fresh from the editor before every `ask`. The worker's side is one name and one brief in
+`agent_context.py`, whose brief tells the model its writes to this file land in the open buffer as
+one undo step and what `held` and `conflict` mean — and **no tool list**, as everywhere: scope
+`console`. The one thing the key's shape broke was the worker's reading of a `persist.key` as the
+tab id (`board_chat.tab_of`), which learned the card key's shape in #KSKH and now the file key's
+too: a docked agent's first `configure` was refused with "tab must be the tab's id" until it did.
+
+**A context can add slash commands**, and this is the only one that does. `Context::slashCommands()`
+(default empty) returns `relay::agent::ContextCommand`s — a name, args, a description, a group label
+and a namespace, and either `prompt(args)` (the text the console sends its agent) or `run(args)`.
+The pane merges them into the `/` popup **after** every Relay-owned row — built-ins, aliases,
+skills — under "✦ <group>" (`Pane::contextSlashCommands`, `updateSlashPopup`), and
+`offeredSlashCommands` moves a name Relay already uses into the plugin's namespace (`/markdown:toc`)
+so a plugin can never shadow a Relay command; the qualified form always works
+(`findSlashCommand`). Enter, a click and a typed line with arguments run one (`tryRunContextSlash`,
+ahead of the guest catalog), the route chip names it before Enter (`COMMAND · /outline · ✦
+Markdown · …`), and it counts as known for the unknown-command check. The artifact context builds
+its commands from the file's task plugin — manifest v2 `commands` whose `when.roles` include
+`editor`, a `prompt` or `tool` action with `{file}` filled in (a `program_line` needs a program an
+editor does not have) — and offers the same commands as the action row, whose buttons send through
+the one new `ConsoleHandle` member, `submitPrompt` (`Pane::submitPrompt`). Nothing about a plugin
+command is on the wire: it arrives as an ordinary `ask`.
 
 **A card turn is an ordinary console turn** (card #CTRN, owner 2026-09-21: *"that sounds sensible to
 me, scope that"*; protocol 19.10, 19.16, 33.2). A card page was the last surface in Relay that still
@@ -2012,7 +2082,7 @@ got the whole executor while a board-attached one got read-only tools.
 | Scope | Who | Tools |
 |---|---|---|
 | `pane` | a terminal pane's agent | the whole executor, the app tools, its own session's read tools, the ordinary board tools. The only scope that defers its on-demand tool groups (protocol 12.13) |
-| `console` | the Board page, an open card, Options, Actions, Sessions | the same list, plus `board_split_card`, `board_import_items` and `search_files` (`board_merge_cards` became an ordinary tool in #GREM, 2026-09-25) |
+| `console` | the Board page, an open card, Options, Actions, Sessions, Models, a file's docked agent | the same list, plus `board_split_card`, `board_import_items` and `search_files` (`board_merge_cards` became an ordinary tool in #GREM, 2026-09-25) |
 
 There was a third row, `card`, until card #CTRN: one Discuss or Plan turn on one card, offered the
 mode's board tools and the read-only file tools. It is gone. A card console is a console, and what a
@@ -2090,6 +2160,54 @@ windowed digest of that agent's own turns, tool calls and timings, never the who
 #AGNT they are attached to **every** agent rather than to a pane's alone — a console should be able to
 answer "why was that turn slow" about a turn of its own — and each pane keeps its Ask row, which
 prefills the owning pane's composer and focuses it, the Check-finding draft pattern.
+
+## 10b. The artifact workspace and its chain
+
+A tab can be an **artifact workspace** (#E85D, `src/ArtifactWorkspace.h`, `src/RelayWindowWorkspace.cpp`):
+a group of panes around one artifact — its source in an editor, the build's output in a preview,
+and optionally a console beside them. A group knows its `kind` (`relay.tex` today), its `root`,
+the preset that laid it out (`presetColumns`/`presetWeights`: "1:1:1" lays console | editor |
+preview, "2:1" lays editor-over-console | preview), its `sources` in join order, and its `outputs`
+— each with an `authority` (a generated output is read-only; it is rebuilt, never edited) and a
+`generation` that the preview's strip shows, so a person can see the file on screen is the one the
+last build made. The group is one pane set: `applyWorkspacePreset` docks every member in one
+motion, `openInWorkspaceEditor` routes a source's open into its linked editor at the line, and
+`reconcileWorkspaceViews` keeps the roles straight as panes open and close. The tab's state file
+saves the group (`workspaceGroupJson`), and `restoreWorkspaceGroup` puts it back at the next start.
+
+**The chain** (#R660): a workspace group is *ordered* — a chain with a head, not a bag of roles.
+`Group::order` holds the member ids head-first: the head is the origin, the shell the editor and
+preview were opened from; `upstreamOf` walks toward it (the editor was opened from the shell, the
+preview from the editor's build) and `downstreamOf` away from it. `head()` answers who the chain
+grew from. Serialization spells it in one place: `members` is an array of
+`{id, role, upstream}` head-first under `"schema": 2`; schema 1's `{id: role}` object is still
+read, upgraded to the chain the presets always built (console → editor → preview). The chain model
+lives in `ArtifactWorkspace`; everything visual lives in the workspace glue.
+
+The chain is grown **one open at a time**. `relay open main.tex` from a shell pane — or a click on
+the file in its output — offers "Open beside, linked": accepting adopts the shell as the chain's
+head and opens the editor beside it as its downstream member; declining opens the file the old
+way, so the offer costs nothing (`openWorkspaceChainSource`). From there each member can open its
+next: the editor's build joins the preview as the tail (`openWorkspaceNext`, `relay-drive workspace
+next`), and a click on a chip segment moves focus to that member. The preset follows the chain,
+not the other way round: `dockWorkspaceChain` lays the preset's columns for the members *present*,
+so a chain of two takes the preset's prefix and grows into the full shape when the tail joins.
+
+**Every member wears the chain** in its chrome: a `PaneChainChip` — "⛓ shell › main.tex ›
+main.pdf" — with the pane's own segment bold, the current member readable even when the others
+elide in a narrow pane (`refreshChainChips`).
+
+**The chain lives and dies together, deliberately** (t:fy). Closing the head asks "Close the
+linked panes too?" — all of them, or just the head (`workspaceChainClose`); when the chain is the
+whole window, the head stays as the plain shell it was rather than taking the window down. Closing
+any other member is the plain close it always was, and the chain heals around the gap. Moving a
+member across tabs moves the group (`moveWorkspaceChain`: the group's state follows the member,
+then the other members dock beside it in chain order); a drop into another window is the adopting
+window's business and leaves the chain to heal. At the next start the group restores in chain
+order with its saved sizes; a member whose editor file is gone restores as a placeholder —
+"*file* is gone — Reopen…" — and keeps its place in the chain until the file is picked again
+(`reconcileMissingMembers`). A generated output that has not been built yet is not gone: the
+preview's not-yet-built state covers it.
 
 ## 11. Agent backend
 

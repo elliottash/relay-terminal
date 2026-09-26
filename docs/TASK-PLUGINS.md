@@ -198,6 +198,34 @@ workspace id (the pane's own is `pane`), and each owns its runtime:
 - **Cleanup.** Deactivating, replacing the plugin, or the worker shutting down closes the
   runtime. Nothing is shared between two workspace ids.
 
+## The chain walkthrough (relay.tex)
+
+`relay.tex`'s panes are a **chain** (#R660): the shell you were working in, the document's editor,
+and the PDF preview, linked in that order. `docs/ARCHITECTURE.md` section 10b has the model; this
+is the walkthrough.
+
+1. **The shell offers.** In a shell pane, `relay open main.tex` (or a click on `main.tex` in the
+   shell's output) asks: *Open main.tex beside this shell, linked?* — "Open beside, linked" adopts
+   the shell as the chain's head and opens the editor beside it; "Just open" opens the file alone.
+   The shell never moves and never re-offers once a group lives in that tab.
+2. **The chain grows at the tail.** From there, the next member always joins downstream of the
+   last: the editor's build opens the PDF preview beside the editor (`relay-drive workspace next`
+   drives the same step), and the chain is never wider than what you actually opened — a chain of
+   shell + editor takes the preset's prefix, the preset's full shape when the preview joins.
+3. **Every member knows the chain.** Each pane's chrome wears "⛓ shell › main.tex › main.pdf",
+   its own segment bold; a click on a segment focuses that pane. The editor's strip shows the
+   source revision; the preview's shows the generation — build again and the number moves.
+4. **Build.** `/build` in the shell (or the build tool) runs latexmk on the root; the preview
+   refreshes itself when the PDF changes, showing the generation that is on screen. Editing
+   `main.tex` in the linked editor, building, and seeing the generation move is the loop.
+5. **The chain closes as a question, not a cascade.** Closing the head (the shell) asks "Close the
+   linked panes too?" — all of them, or just the shell. Closing the editor or the preview is the
+   plain close it always was; the chain heals around the gap.
+6. **The chain survives a restart.** Quit Relay, start it again, and the three panes come back
+   linked, in chain order, with their saved sizes. If `main.tex` was moved or deleted meanwhile,
+   its member restores as a placeholder — "main.tex is gone. Reopen…" — keeping its place until
+   the file is picked again; the preview simply waits for its next build.
+
 ## Schema version 2
 
 Version 2 adds console-kind declarations to the version 1 workspace manifest. Version 1 remains valid; its unknown-key checks still reject version 2 fields. A manifest must declare `schema_version: 2` to use the fields below. `validate` checks their types, allowed values, paths and command argv. `describe ID [--workspace DIR]` prints the resolved manifest as JSON, including all three surfaces, without starting its program.

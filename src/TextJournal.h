@@ -40,6 +40,8 @@
 #include <QStringList>
 #include <QVector>
 
+#include <functional>
+
 namespace relay::textjournal {
 
 // A run of one style (and link) inside a line. Positions count code points, not UTF-16 units, so
@@ -115,6 +117,9 @@ public:
     bool seal(QString *error = nullptr);
 
     void setDirectory(const QString &cwd) { m_cwd = cwd; }
+    // Lines this returns true for are not written: Relay's own restore chrome, which the pane
+    // prints again on every restore and which is nobody's output.
+    void setSkip(std::function<bool(const QString &text)> skip) { m_skip = std::move(skip); }
     qint64 lines() const { return m_lines; }
 
     static constexpr qint64 kSealBytes = 1024 * 1024;
@@ -150,6 +155,7 @@ private:
     QDateTime m_lastAppend;
     QDateTime m_lastStamp;
     QDateTime m_testNow;
+    std::function<bool(const QString &)> m_skip;
 };
 
 // Seal a raw segment file in place: `<path>.z` is written atomically, then `<path>` goes. Also

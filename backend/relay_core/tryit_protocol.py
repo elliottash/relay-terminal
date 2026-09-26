@@ -63,6 +63,7 @@ from pathlib import Path
 from typing import Callable
 
 from . import board as B
+from . import scratch as _scratch
 from . import cases
 from .board_tools import BoardToolError, card_brief, normalize_id, section_text
 
@@ -843,21 +844,17 @@ def _platform_brief() -> str:
 
 
 def _run_dir() -> str:
-    """The short, disposable directory a fixture is staged under.
+    """The disposable directory a fixture is staged under.
 
-    Short because a unix socket path is capped at 108 bytes and the app makes one under
-    `XDG_RUNTIME_DIR`; disposable because the person must be able to delete the fixture without
-    thinking about it.  `RELAY_TRYIT_ROOT` overrides it for a machine laid out differently.
+    Disposable because the person must be able to delete the fixture without thinking about it —
+    but no longer in /tmp (card #DVV2): Try-it staging is scratch like everything else Relay
+    owns, so it lives under the ledgered scratch root, which survives a reboot mid-run.
+    `RELAY_TRYIT_ROOT` overrides it for a machine laid out differently.
     """
     override = os.environ.get("RELAY_TRYIT_ROOT")
     if override:
         return override
-    if WINDOWS:
-        return str(Path(tempfile.gettempdir()) / "relay-tryit")
-    runtime = os.environ.get("XDG_RUNTIME_DIR") or ""
-    if runtime.startswith("/run/user/"):
-        return f"/tmp/claude-{os.getuid()}/tryit"
-    return str(Path("/tmp") / f"claude-{os.getuid()}" / "tryit")
+    return str(_scratch.scratch_root() / "tryit")
 
 
 def _card_text(tools, card_id: str) -> str:

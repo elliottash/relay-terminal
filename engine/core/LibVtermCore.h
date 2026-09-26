@@ -22,6 +22,10 @@ public:
     int rows() const override;
     int columns() const override;
     void setScrollbackLines(int lines) override;
+    void setCollectEvicted(bool on) override;
+    void takeEvicted(std::vector<Line> *lines, std::vector<int> *clears) override;
+    void evictAll() override;
+    quint64 changeCount() const override;
     bool atGround() const override;
 
     bool updateFrame(ViewportFrame *frame, bool force) override;

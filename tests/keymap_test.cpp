@@ -10,9 +10,24 @@
 #include <QSettings>
 #include <QtTest>
 
+#include <algorithm>
+
 class KeymapTests : public QObject {
     Q_OBJECT
 private slots:
+    void onePaneLabels() {
+        const auto &actions = Keymap::instance().actions();
+        const auto description = [&actions](const QString &id) {
+            for (const ActionDef &action : actions)
+                if (action.id == id) return action.description;
+            return QString();
+        };
+        QCOMPARE(description(QStringLiteral("pane.splitRight")),
+                 QStringLiteral("New shell to the right (then ← ↑ ↓ places it)"));
+        QCOMPARE(description(QStringLiteral("pane.splitDown")), QStringLiteral("New shell below"));
+        QVERIFY(description(QStringLiteral("helper.ask")).startsWith(QStringLiteral("Ask the agent")));
+        QCOMPARE(description(QStringLiteral("tab.new")), QStringLiteral("New tab"));
+    }
     void initTestCase() {
         QCoreApplication::setOrganizationName(QStringLiteral("RelayTerminalTests"));
         QCoreApplication::setApplicationName(QStringLiteral("keymap"));
@@ -151,6 +166,32 @@ private slots:
             QCOMPARE(keymap.actionForKey(QStringLiteral("Ctrl+Enter")), QStringLiteral("agent.interrupt"));
             QVERIFY(keymap.conflicts().isEmpty());
         }
+    }
+
+    // The holder actions (#XQ8F): every pane's ssh lands in a session on the host, so the defaults
+    // split onto the host and need a local split of their own, closing a pane needs a way to end
+    // the session it leaves behind, and the sessions on a host need one place to reattach or end.
+    // The persistent Connect is retired with that: the wrapper persists a plain login now.
+    void holderActionsAreRegisteredAndPersistentConnectIsRetired() {
+        const QList<ActionDef> actions = Keymap::instance().actions();
+        const auto registered = [&actions](const QString &id) -> const ActionDef * {
+            const auto it = std::find_if(actions.cbegin(), actions.cend(),
+                                         [&id](const ActionDef &action) { return action.id == id; });
+            return it == actions.cend() ? nullptr : &*it;
+        };
+        const auto hasNoDefaultKey = [&registered](const QString &id, const QString &category) {
+            const ActionDef *action = registered(id);
+            QVERIFY2(action, qPrintable(id));
+            QCOMPARE(action->category, category);
+            QVERIFY2(action->defaults.isEmpty(), qPrintable(id));   // none of the three takes a key
+        };
+        hasNoDefaultKey(QStringLiteral("pane.splitLocal"), QStringLiteral("pane"));
+        hasNoDefaultKey(QStringLiteral("pane.closeEndRemote"), QStringLiteral("pane"));
+        hasNoDefaultKey(QStringLiteral("ssh.remoteSessions"), QStringLiteral("tab"));
+        hasNoDefaultKey(QStringLiteral("ssh.splitSameHost"), QStringLiteral("pane"));
+        QVERIFY2(std::none_of(actions.cbegin(), actions.cend(), [](const ActionDef &action) {
+                     return action.id == QStringLiteral("ssh.connectPersistent");
+                 }), "ssh.connectPersistent is retired: the wrapper persists every login (#XQ8F)");
     }
 
     void cleanupTestCase() { QFile::remove(Keymap::instance().path()); }

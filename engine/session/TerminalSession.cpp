@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "TerminalSession.h"
 
+#include "core/AnsiSerializer.h"
 #include "core/InlineImage.h"
 
 #include <QMetaObject>
@@ -276,10 +277,60 @@ void TerminalSession::deliver()
     }
     if (self && m_contentDirty.exchange(false))
         emit contentChanged();
+    if (self && m_collectEvicted)
+        drainEvicted();
     for (const Event &e : events) {
         if (self && e.kind == Event::Finished)
             emit finished(e.i);
     }
+}
+
+void TerminalSession::setCollectEvicted(bool on)
+{
+    GuiLock lock(this);
+    m_collectEvicted = on;
+    m_core->setCollectEvicted(on);
+}
+
+void TerminalSession::drainEvicted()
+{
+    if (!m_collectEvicted)
+        return;
+    EvictedText text;
+    {
+        GuiLock lock(this);
+        std::vector<Line> lines;
+        std::vector<int> clears;
+        m_core->takeEvicted(&lines, &clears);
+        if (lines.empty() && clears.empty())
+            return;
+        // The saved form the tail file uses (lineToSavedAnsi): image, media and prose links are
+        // kept, resolved by id from the core's own table while it still has them.
+        const VtCore &core = *m_core;
+        text.rows.reserve(int(lines.size()));
+        for (const Line &line : lines) {
+            text.rows << lineToSavedAnsi(line, [&core](uint32_t id, int) { return core.hyperlinkUri(id, 0, 0); });
+            text.marks << quint8(line.marks);
+            text.continuation << line.continuation;
+        }
+        text.clears = QVector<int>(clears.begin(), clears.end());
+    }
+    emit historyEvicted(text);
+}
+
+void TerminalSession::evictAll()
+{
+    {
+        GuiLock lock(this);
+        m_core->evictAll();
+    }
+    drainEvicted();
+}
+
+quint64 TerminalSession::changeCount()
+{
+    GuiLock lock(this);
+    return m_core->changeCount();
 }
 
 void TerminalSession::resize(int rows, int cols, int cellWidthPx, int cellHeightPx)

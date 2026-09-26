@@ -8,6 +8,7 @@
 #include <QDebug>
 #include <QHash>
 #include <QJsonArray>
+#include <QJsonDocument>
 #include <QRegularExpression>
 #include <QSet>
 #include <QTimer>
@@ -163,6 +164,7 @@ const QSet<QString> &writingActions() {
         QStringLiteral("app.update"), QStringLiteral("project.detach"),
         QStringLiteral("hints.reset"), QStringLiteral("conversations.rebuild"),
         QStringLiteral("helper.ask"), QStringLiteral("ssh.splitSameHost"),
+        QStringLiteral("pane.splitLocal"),
     };
     return keys;
 }

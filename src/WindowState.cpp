@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "WindowState.h"
+#include "TextJournal.h"
 
 #include <QDateTime>
 #include <QRegularExpression>
@@ -402,7 +403,8 @@ ProseBlock proseFromRecord(const QString &record) {
 // so the two can never drift apart on permissions, clamping or the empty-file rule. `prose` rides
 // the trailer above; its records count against the byte cap alongside the rows.
 bool writeScrollbackFile(const QString &path, const QStringList &lines,
-                         const QVector<ProseBlock> &prose, QString *error) {
+                         const QVector<ProseBlock> &prose, QString *error,
+                         int maxLines = kScrollbackMaxLines, qint64 maxBytes = kScrollbackMaxBytes) {
     auto fail = [error](const QString &text) {
         if (error) *error = text;
         return false;
@@ -420,12 +422,12 @@ bool writeScrollbackFile(const QString &path, const QStringList &lines,
     }
     // A pathological trailer must not crowd the rows out of the file: bound it to half the byte
     // cap, dropping the oldest records (m_folds order is print order) to get there.
-    while (records.size() > 1 && reserved > kScrollbackMaxBytes / 2) {
+    while (records.size() > 1 && reserved > maxBytes / 2) {
         reserved -= qint64(records.constFirst().toUtf8().size()) + 1;
         records.removeFirst();
     }
-    const QStringList kept = clampScrollback(lines, kScrollbackMaxLines,
-                                             kScrollbackMaxBytes - proseTrailerSeparator().size() - 1 - reserved);
+    const QStringList kept = clampScrollback(lines, maxLines,
+                                             maxBytes - proseTrailerSeparator().size() - 1 - reserved);
     if (kept.isEmpty()) {
         // Nothing to bring back: leaving the previous file would restore stale output. Prose
         // without rows is inert paint — the blocks' anchor rows are what makes them show.
@@ -455,14 +457,14 @@ struct ScrollbackFileText {
     QStringList records;   // the trailer's raw record lines, separator not included
 };
 
-ScrollbackFileText readScrollbackParts(const QString &path) {
+ScrollbackFileText readScrollbackParts(const QString &path, qint64 maxBytes = kScrollbackMaxBytes) {
     if (path.isEmpty()) return {};
     QFile file(path);
     if (!file.exists() || !file.open(QIODevice::ReadOnly)) return {};
     // A file that grew past the cap (an older Relay, or an edit) is read from its tail only. The
     // trailer sits at the tail, so its records survive the cut; the rows above them may not.
-    if (file.size() > kScrollbackMaxBytes) file.seek(file.size() - kScrollbackMaxBytes);
-    QStringList lines = QString::fromUtf8(file.read(kScrollbackMaxBytes + 1)).split(QLatin1Char('\n'));
+    if (file.size() > maxBytes) file.seek(file.size() - maxBytes);
+    QStringList lines = QString::fromUtf8(file.read(maxBytes + 1)).split(QLatin1Char('\n'));
     if (!lines.isEmpty() && lines.constLast().isEmpty()) lines.removeLast();   // the trailing newline
     ScrollbackFileText text;
     const int separator = lines.indexOf(proseTrailerSeparator());
@@ -475,14 +477,14 @@ ScrollbackFileText readScrollbackParts(const QString &path) {
     return text;
 }
 
-QStringList readScrollbackFile(const QString &path, int maxLines) {
-    return clampScrollback(readScrollbackParts(path).rows, std::min(maxLines, kScrollbackMaxLines),
-                           kScrollbackMaxBytes);
+QStringList readScrollbackFile(const QString &path, int maxLines, int capLines = kScrollbackMaxLines,
+                               qint64 capBytes = kScrollbackMaxBytes) {
+    return clampScrollback(readScrollbackParts(path, capBytes).rows, std::min(maxLines, capLines), capBytes);
 }
 
-QVector<ProseBlock> readProseFile(const QString &path) {
+QVector<ProseBlock> readProseFile(const QString &path, qint64 capBytes = kScrollbackMaxBytes) {
     QVector<ProseBlock> prose;
-    const QStringList records = readScrollbackParts(path).records;
+    const QStringList records = readScrollbackParts(path, capBytes).records;
     for (const QString &record : records) {
         if (prose.size() >= kScrollbackMaxProseBlocks) break;
         ProseBlock block = proseFromRecord(record);
@@ -501,15 +503,27 @@ bool writeScrollback(const QString &id, const QStringList &lines, const QVector<
         if (error) *error = QStringLiteral("No writable place for this pane's scrollback.");
         return false;
     }
-    return writeScrollbackFile(path, lines, prose, error);
+    return writeScrollbackFile(path, lines, prose, error, kPaneTextMaxLines, kPaneTextMaxBytes);
 }
 
 QStringList readScrollback(const QString &id, int maxLines) {
-    return readScrollbackFile(scrollbackPath(id), maxLines);
+    return readScrollbackFile(scrollbackPath(id), maxLines, kPaneTextMaxLines, kPaneTextMaxBytes);
 }
 
 QVector<ProseBlock> readScrollbackProse(const QString &id) {
-    return readProseFile(scrollbackPath(id));
+    return readProseFile(scrollbackPath(id), kPaneTextMaxBytes);
+}
+
+bool absorbScrollback(const QString &id) {
+    const QString path = scrollbackPath(id);
+    if (path.isEmpty() || !QFileInfo::exists(path)) return false;
+    const QStringList rows = readScrollbackParts(path, kPaneTextMaxBytes).rows;
+    textjournal::Writer writer(id);
+    if (!writer.valid()) return false;
+    // The tail's rows were saved one per terminal row; which of them wrapped is not recorded in
+    // the file, so each becomes a line of its own.
+    for (const QString &row : rows) writer.appendRow(row, false, 0);
+    return writer.seal();
 }
 
 void removeRestoreChrome(QStringList *lines, const QStringList &marks) {
@@ -594,14 +608,23 @@ int pruneScrollback(const QStringList &keep) {
     if (dir.isEmpty()) return 0;
     int removed = 0;
     const auto files = QDir(dir).entryInfoList({QStringLiteral("*.txt")}, QDir::Files);
-    for (const QFileInfo &file : files)
-        if (!keep.contains(file.completeBaseName()) && QFile::remove(file.absoluteFilePath())) ++removed;
+    for (const QFileInfo &file : files) {
+        if (keep.contains(file.completeBaseName())) continue;
+        // The pane is gone for good: its tail joins the rows its journal already holds (#HEY7).
+        absorbScrollback(file.completeBaseName());
+        if (QFile::remove(file.absoluteFilePath())) ++removed;
+    }
     return removed;
 }
 
 void removeAllScrollback() {
     const QString dir = scrollbackDirectory();
-    if (!dir.isEmpty()) QDir(dir).removeRecursively();
+    if (dir.isEmpty()) return;
+    // Restoring is off, or a fresh window set was asked for: nothing comes back into a pane,
+    // but the text is still kept (#HEY7).
+    const auto files = QDir(dir).entryInfoList({QStringLiteral("*.txt")}, QDir::Files);
+    for (const QFileInfo &file : files) absorbScrollback(file.completeBaseName());
+    QDir(dir).removeRecursively();
 }
 
 }  // namespace windowstate

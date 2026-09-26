@@ -61,6 +61,21 @@ public:
     virtual int rows() const = 0;
     virtual int columns() const = 0;
     virtual void setScrollbackLines(int lines) = 0;
+    // Rows that leave the scrollback for good (card #HEY7, CellTypes.h EvictedText): with
+    // collection on, the core keeps them, in order, until takeEvicted() hands them over, and
+    // records where a clear happened. Off by default, so a core nobody drains grows nothing. A
+    // core that cannot tell (GhosttyCore) keeps the defaults and the journal gets only the tail.
+    // `rows` of the struct are left empty here: the lines themselves go into `lines`, and the
+    // caller serializes them with the link table this core resolves (hyperlinkUri).
+    virtual void setCollectEvicted(bool on) { (void)on; }
+    virtual void takeEvicted(std::vector<Line> *lines, std::vector<int> *clears) { (void)lines; (void)clears; }
+    // Moves every scrollback row into the evicted list and empties the ring, as a clear does but
+    // without recording one: the terminal is being replaced (a shell restart) and its rows go
+    // to the journal rather than nowhere.
+    virtual void evictAll() {}
+    // Bumped by every change to what the terminal holds (output, resize, clear), so a saver can
+    // tell an unchanged terminal without serializing it. 0 = this core does not count.
+    virtual quint64 changeCount() const { return 0; }
     // True when the parser is between sequences (no partial ESC/CSI/OSC/UTF-8),
     // so host bytes (writeToDisplay) can be fed without corrupting program output.
     virtual bool atGround() const = 0;

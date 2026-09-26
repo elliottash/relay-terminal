@@ -781,6 +781,12 @@ void SubagentTabsView::setBackKeys(const QString &keys) {
                                       : QStringLiteral("Back to the main agent's prompt box (Esc holds a running agent first); %1 closes this pane").arg(keys));
 }
 
+void SubagentTabsView::openModelBox() {
+    if (!m_modelBox || m_modelBox->isHidden()) return;   // no current tab: nothing to open
+    m_modelBox->setFocus(Qt::ShortcutFocusReason);
+    m_modelBox->showPopup();
+}
+
 int SubagentTabsView::indexOf(const QString &id) const {
     for (int i = 0; i < m_bar->count(); ++i) if (m_bar->tabData(i).toString() == id) return i;
     return -1;

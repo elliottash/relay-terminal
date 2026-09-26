@@ -21,6 +21,8 @@
 #include <QTreeWidget>
 #include <QVBoxLayout>
 
+#include <utility>
+
 using namespace relay::settingsexport;
 
 namespace relay {
@@ -187,6 +189,13 @@ SettingsImportDialog::SettingsImportDialog(const QString &path, QWidget *parent)
         return;
     }
     rebuild();
+}
+
+void SettingsImportDialog::setHooks(Hooks newHooks)
+{
+    hooks = std::move(newHooks);
+    m_decisions.clear();
+    if (!m_bundle.isEmpty()) rebuild();
 }
 
 void SettingsImportDialog::rebuild()

@@ -96,6 +96,10 @@ public:
     bool toggleFold(const QString &uri) override;
 
     void setOutputCallbackEnabled(bool enabled) override;
+    void setCollectEvicted(bool on) override;
+    void drainEvictedRows() override;
+    void evictAllRows() override;
+    quint64 contentGeneration() const override;
 
 private:
     TerminalSession *m_session = nullptr;

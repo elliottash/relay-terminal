@@ -4,6 +4,8 @@
 #pragma once
 
 #include <QString>
+#include <QStringList>
+#include <QVector>
 
 #include <cstdint>
 #include <string>
@@ -102,6 +104,19 @@ struct Line {
     // terminal never wrote to are still dropped from the end. This is what a selection copies
     // for a row the next row wraps out of (#8SBD); everything else wants text().
     QString untrimmedText(int from = 0, int to = -1) const;
+};
+
+// Rows that left the scrollback for good (card #HEY7): overwritten at the ring's limit, cut by a
+// smaller limit, or cleared. Such a row is final — it is never popped back onto the screen or
+// rewrapped again — so the pane can append it to its text journal (src/TextJournal.h) and nothing
+// else will ever hold it. `rows` are in the saved form (lineToSavedAnsi), oldest first;
+// `clears[k]` is the index in `rows` a clear happened before (rows.size() for one after them all).
+struct EvictedText {
+    QStringList rows;
+    QVector<quint8> marks;
+    QVector<bool> continuation;
+    QVector<int> clears;
+    bool isEmpty() const { return rows.isEmpty() && clears.isEmpty(); }
 };
 
 enum class CursorShape : uint8_t { Block, Underline, Bar };

@@ -416,6 +416,7 @@ int Writer::linkIndex(const QString &uri) {
 
 void Writer::writeLine(const Line &line) {
     if (!valid()) return;
+    if (m_skip && m_skip(line.text)) return;
     const QDateTime t = now();
     // An idle segment is sealed before anything new goes in, so a pane left open for a day does
     // not keep a day-old segment raw.

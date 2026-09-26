@@ -41,14 +41,12 @@ public:
     // `afterApply` re-applies live state (settings cache, keymap, theme) once
     // the import landed; the dialog calls it after a successful apply.
     std::function<void()> afterApply;
-    // Model/hotkey validation against this installation's catalog; set by the
-    // window before the dialog runs. Unset hooks accept every action and flag
-    // every model id as needing attention instead of silently applying it.
-    relay::settingsexport::Hooks hooks;
-
-    // `modelKnown` decides whether an imported model id is served by this
-    // install; `actionKnown` decides whether a hotkey action exists here.
     explicit SettingsImportDialog(const QString &path, QWidget *parent = nullptr);
+    // Model/hotkey validation against this installation's catalog: `isKnownModel`
+    // decides whether an imported model id is served here, `isKnownAction`
+    // whether a hotkey action exists. The rows are planned again with them, so
+    // an unknown id gets its "Apply anyway" box. Unset hooks check nothing.
+    void setHooks(relay::settingsexport::Hooks hooks);
 
 private:
     void rebuild();
@@ -58,6 +56,7 @@ private:
     void updateStatusLine();
     relay::settingsexport::ImportPlan planFromUi() const;
 
+    relay::settingsexport::Hooks hooks;
     QString m_path;
     QJsonObject m_bundle;
     QMap<QString, relay::settingsexport::Resolution> m_decisions;
