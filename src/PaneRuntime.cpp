@@ -3,6 +3,7 @@
 #include "PaneChrome.h"   // the remote chip this pane owns (setRemotePersistent, #XQ8F)
 #include "AppPaths.h"     // relay::scratchpaths: this pane's session scratch root (#DVV2)
 #include <QProcess>        // the master keepalive runs detached
+#include <QScrollArea>     // the running line opened to its whole text (#JDN4)
 
 bool Pane::restoreAgentPrompt() {
     if (!m_editor->toPlainText().isEmpty() || inQueueSelection()
@@ -170,6 +171,21 @@ bool Pane::eventFilter(QObject *object, QEvent *event) {
             // already being withdrawn has no × to click.
             const QPoint pos = static_cast<QMouseEvent *>(event)->pos();
             const QModelIndex index = queueLane->indexAt(pos);
+            // Card #JDN4: ▾ opens a row to its whole text and ▴ folds it, without selecting it.
+            if (index.isValid()) {
+                const QRect rowRect = queueLane->visualRect(index);
+                if (QueueRowDelegate::expandable(rowRect, index, queueLane->fontMetrics())
+                    && QueueRowDelegate::expandRect(rowRect, index.data(QueueRowDelegate::SendNowRole).toBool(),
+                                                    queueLane->fontMetrics()).contains(pos)) {
+                    const QString rowId = index.data(QueueRowDelegate::RowIdRole).toString();
+                    if (!m_expandedQueueRows.remove(rowId)) m_expandedQueueRows.insert(rowId);
+                    QTimer::singleShot(0, this, [this] { rebuildQueueStrip(); });
+                    if (rowId.startsWith(QStringLiteral("entry:")))
+                        hint(QStringLiteral("queue.expand.mouse"),
+                             QStringLiteral("Next time: ↑ opens a queued item whole in the prompt box"));
+                    return true;
+                }
+            }
             if (queueLane == m_queueList && index.isValid() && index.data(QueueRowDelegate::SendNowRole).toBool()
                 && QueueRowDelegate::sendNowRect(queueLane->visualRect(index)).contains(pos)) {
                 sendQueueRowNow(index.data(QueueRowDelegate::RowIdRole).toString());
@@ -1824,8 +1840,8 @@ relay::panestate::Inputs Pane::remoteState() const {
                          : queueHeldBySelection() ? QStringLiteral("Held while the next item is edited on the desktop")
                                                   : QString();
         for (const QueueRow &row : queueRows()) {
-            if (row.kind == QLatin1String("running")) { in.running = row.preview; continue; }
-            relay::panestate::Row out{row.id, row.kind, row.preview, row.state, false};
+            if (row.kind == QLatin1String("running")) { in.running = row.preview; in.runningFull = row.full; continue; }
+            relay::panestate::Row out{row.id, row.kind, row.preview, row.state, false, row.full};
             for (const QueueEntry &entry : m_entries)
                 if (QStringLiteral("entry:%1").arg(entry.id) == row.id) { out.written = entry.written(); break; }
             in.rows << out;
@@ -2138,10 +2154,59 @@ void Pane::rebuildQueueStrip() {
         }
         layout->addLayout(header);
         const QString running = runningLabel();
+        // Card #JDN4: the strip is at most half the pane (bubbleSpan() / 2), so what an open line
+        // may take is shared out of that: the running line up to a quarter, the lanes the rest.
+        const int stripBudget = std::max(bubbleRow(), bubbleSpan() / 2);
+        int runningUsed = 0;
         if (!running.trimmed().isEmpty()) {
-            auto *label = new QLabel(QStringLiteral("▸ running  ") + fontMetrics().elidedText(running.simplified(), Qt::ElideRight, std::max(160, width() - 180)));
+            // Card #JDN4: ▾ opens the running line to the whole message, wrapped in place; ▴ folds
+            // it. A new running item starts folded.
+            if (running != m_queueRunningExpandedFor) { m_queueRunningExpandedFor = running; m_queueRunningExpanded = false; }
+            const QString whole = running.trimmed();
+            const int room = std::max(160, width() - 180);
+            const bool more = m_queueRunningExpanded || whole.contains(QLatin1Char('\n'))
+                           || fontMetrics().horizontalAdvance(whole.simplified()) > room;
+            const bool open = more && m_queueRunningExpanded;
+            auto *line = new QHBoxLayout;
+            line->setContentsMargins(0, 0, 0, 0);
+            auto *label = new QLabel;
             label->setObjectName(QStringLiteral("queueRunning"));
-            layout->addWidget(label);
+            label->setTextFormat(Qt::PlainText);
+            if (open) {
+                label->setText(QStringLiteral("▸ running  ") + whole);
+                label->setWordWrap(true);
+                label->setAlignment(Qt::AlignTop | Qt::AlignLeft);
+                label->setTextInteractionFlags(Qt::TextSelectableByMouse);
+                // Past its share of the strip it scrolls there rather than pushing the lanes away.
+                auto *scroll = new QScrollArea;
+                scroll->setObjectName(QStringLiteral("queueRunningScroll"));
+                scroll->setFrameShape(QFrame::NoFrame);
+                scroll->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+                scroll->setWidgetResizable(true);
+                scroll->setWidget(label);
+                const int textWidth = std::max(160, width() - 60);
+                const int cap = std::clamp(stripBudget / 4, 3 * fontMetrics().lineSpacing(), 12 * fontMetrics().lineSpacing());
+                scroll->setFixedHeight(std::min(label->heightForWidth(textWidth), cap) + 4);
+                runningUsed = scroll->height();
+                line->addWidget(scroll, 1);
+            } else {
+                label->setText(QStringLiteral("▸ running  ") + fontMetrics().elidedText(whole.simplified(), Qt::ElideRight, room - (more ? 30 : 0)));
+                line->addWidget(label, 1);
+            }
+            if (more) {
+                auto *toggle = new QToolButton;
+                toggle->setObjectName(QStringLiteral("queueRunningExpand"));
+                toggle->setAutoRaise(true);
+                toggle->setFocusPolicy(Qt::NoFocus);
+                toggle->setText(open ? QStringLiteral("▴") : QStringLiteral("▾"));
+                toggle->setToolTip(open ? QStringLiteral("Show one line") : QStringLiteral("Show the whole message"));
+                connect(toggle, &QToolButton::clicked, this, [this] {
+                    m_queueRunningExpanded = !m_queueRunningExpanded;
+                    QTimer::singleShot(0, this, [this] { rebuildQueueStrip(); });
+                });
+                line->addWidget(toggle, 0, Qt::AlignTop);
+            }
+            layout->addLayout(line);
         }
         m_queueStrip->installEventFilter(this);
         if (!m_queueList) {
@@ -2154,6 +2219,8 @@ void Pane::rebuildQueueStrip() {
             m_queueList->setDragDropMode(QAbstractItemView::InternalMove);
             m_queueList->setDefaultDropAction(Qt::MoveAction);
             m_queueList->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+            m_queueList->setVerticalScrollMode(QAbstractItemView::ScrollPerPixel);   // an open row is tall (#JDN4)
+            m_queueList->setResizeMode(QListView::Adjust);
             connect(m_queueList->model(), &QAbstractItemModel::rowsMoved, this, [this] { syncEntriesFromList(); });
             connect(m_queueList->model(), &QAbstractItemModel::rowsInserted, this, [this] { if (!m_fillingQueueList) syncEntriesFromList(); });
         }
@@ -2171,6 +2238,8 @@ void Pane::rebuildQueueStrip() {
             m_terminalQueueList->setDragDropMode(QAbstractItemView::InternalMove);
             m_terminalQueueList->setDefaultDropAction(Qt::MoveAction);
             m_terminalQueueList->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+            m_terminalQueueList->setVerticalScrollMode(QAbstractItemView::ScrollPerPixel);   // an open row is tall (#JDN4)
+            m_terminalQueueList->setResizeMode(QListView::Adjust);
             connect(m_terminalQueueList->model(), &QAbstractItemModel::rowsMoved, this, [this] { syncEntriesFromList(); });
             connect(m_terminalQueueList->model(), &QAbstractItemModel::rowsInserted, this, [this] { if (!m_fillingQueueList) syncEntriesFromList(); });
             // Clicking a terminal row picks the same composite row the keyboard lands on, so
@@ -2288,6 +2357,19 @@ void Pane::rebuildQueueStrip() {
         };
         fillLane(true);
         fillLane(false);
+        // Card #JDN4: the rows opened to their whole text, re-applied to the new items; a row
+        // that has left the queue leaves the set. A worker row's whole text is what the worker
+        // kept of it, not its 120-character preview.
+        QSet<QString> stillOpen;
+        for (QListWidget *lane : {m_queueList, m_terminalQueueList})
+            for (int i = 0; i < lane->count(); ++i) {
+                QListWidgetItem *item = lane->item(i);
+                const QString rowId = item->data(Row::RowIdRole).toString();
+                if (rowId.startsWith(QStringLiteral("item:")))
+                    if (const QString text = workerRowText(rowId.mid(5)); !text.isEmpty()) item->setData(Row::FullTextRole, text);
+                if (m_expandedQueueRows.contains(rowId)) { item->setData(Row::ExpandedRole, true); stillOpen.insert(rowId); }
+            }
+        m_expandedQueueRows = stillOpen;
         m_fillingQueueList = false;
         if (current) m_queueList->setCurrentItem(current);
         else { m_queueList->clearSelection(); m_queueList->setCurrentRow(-1); }
@@ -2298,8 +2380,21 @@ void Pane::rebuildQueueStrip() {
                           + int(std::count_if(m_entries.cbegin(), m_entries.cend(), std::mem_fn(&QueueEntry::agent)));
         const int terminalRows = int(m_entries.size()) - int(std::count_if(m_entries.cbegin(), m_entries.cend(), std::mem_fn(&QueueEntry::agent)));
         const int rows = agentRows + terminalRows;
-        m_queueList->setFixedHeight(std::min<int>(6, std::max<int>(1, agentRows)) * rowHeight + 4);
-        m_terminalQueueList->setFixedHeight(std::min<int>(6, std::max<int>(1, terminalRows)) * rowHeight + 4);
+        // Six rows' worth, as before; a lane with an open row may take what the strip has left
+        // (card #JDN4), and scrolls by pixel past that.
+        const int openCap = std::max(3 * rowHeight, stripBudget - runningUsed - 4 * rowHeight);
+        auto laneHeight = [rowHeight, openCap](QListWidget *lane, int laneRows) {
+            int open = 0, total = 0;
+            for (int i = 0; i < lane->count(); ++i) {
+                const bool expanded = lane->item(i)->data(Row::ExpandedRole).toBool();
+                open += expanded ? 1 : 0;
+                total += expanded ? std::max(rowHeight, lane->sizeHintForRow(i)) : rowHeight;
+            }
+            if (!open) return std::min<int>(6, std::max<int>(1, laneRows)) * rowHeight + 4;
+            return std::min(total, openCap) + 4;
+        };
+        m_queueList->setFixedHeight(laneHeight(m_queueList, agentRows));
+        m_terminalQueueList->setFixedHeight(laneHeight(m_terminalQueueList, terminalRows));
         m_queueList->setVisible(agentRows > 0);
         m_terminalQueueList->setVisible(terminalRows > 0);
         if (current) m_queueList->scrollToItem(current);

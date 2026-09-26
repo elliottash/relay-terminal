@@ -1167,6 +1167,73 @@ class PaneViewTests(unittest.TestCase):
 
         self.drive(main())
 
+    def test_a_long_queue_line_opens_to_its_whole_text_and_stays_open(self):
+        """Card #JDN4: ▾ on a queued row and on the running line shows the whole message — past
+        the label's 400 characters, to its real last words — wrapped, in place. It neither selects
+        the row nor opens its sheet, a state tick does not fold it, and ▴ folds it back."""
+        state = fixture("busy_queue")
+        whole = "✦ " + " ".join(f"word{n}" for n in range(330)) + "\nTHE REAL END"
+        state["queue"]["rows"][2]["label"] = whole.replace("\n", " ")[:399] + "…"
+        state["queue"]["rows"][2]["full"] = whole
+        state["queue"]["running"] = {"label": "✦ first line second line",
+                                     "full": "✦ first line\nsecond line"}
+        row_id = state["queue"]["rows"][2]["id"]
+        row = f"document.querySelector('.rp-row[data-row-id=\"{row_id}\"]')"
+
+        async def main():
+            browser = Browser()
+            await browser.start()
+            try:
+                await self.open(browser, "busy_queue", query="&input=touch")
+                self.assertTrue(await browser.evaluate(f"window.paneDemo.update({json.dumps(state)})"))
+                # Folded: the label as sent, one line, with the control offered.
+                self.assertTrue((await browser.evaluate(f"{row}.querySelector('.rp-row-label').textContent"))
+                                .endswith("…"))
+                self.assertFalse(await browser.evaluate(f"{row}.querySelector('.rp-row-more').hidden"))
+                self.assertEqual(await browser.evaluate(
+                    f"getComputedStyle({row}.querySelector('.rp-row-label')).whiteSpace"), "pre")
+                # A short row that fits has no control.
+                self.assertTrue(await browser.evaluate(
+                    "document.querySelector('.rp-row[data-row-id=\"entry:9\"] .rp-row-more').hidden"))
+                selected = await browser.evaluate(
+                    "[...document.querySelectorAll('.rp-row')].map(e => e.getAttribute('aria-selected')).join()")
+                await browser.evaluate(f"{row}.querySelector('.rp-row-more').click()")
+                label = f"{row}.querySelector('.rp-row-label')"
+                self.assertTrue((await browser.evaluate(f"{label}.textContent")).endswith("\nTHE REAL END"))
+                self.assertEqual(await browser.evaluate(f"getComputedStyle({label}).whiteSpace"), "pre-wrap")
+                self.assertEqual(await browser.evaluate(f"{row}.querySelector('.rp-row-more').getAttribute('aria-expanded')"),
+                                 "true")
+                self.assertEqual(await browser.evaluate(
+                    "[...document.querySelectorAll('.rp-row')].map(e => e.getAttribute('aria-selected')).join()"),
+                    selected, "expanding a row selected it")
+                self.assertFalse(await browser.evaluate("!document.querySelector('.rp-sheet').parentElement.hidden"),
+                                 "expanding a row opened its action sheet")
+                self.assertEqual(await self.sent(browser), [], "expanding a row sent something")
+                # Ticks at the running turn's rate leave it open.
+                for n in range(5):
+                    later = dict(state, seq=state["seq"] + 1 + n, turn=dict(state["turn"], clock=f"0:{n:02d}"))
+                    await browser.evaluate(f"window.paneDemo.update({json.dumps(later)})")
+                self.assertTrue((await browser.evaluate(f"{label}.textContent")).endswith("THE REAL END"))
+                # The running line opens the same way.
+                self.assertFalse(await browser.evaluate("document.querySelector('.rp-queue-running .rp-row-more').hidden"))
+                await browser.evaluate("document.querySelector('.rp-queue-running .rp-row-more').click()")
+                self.assertEqual(await browser.evaluate("document.querySelector('.rp-running-label').textContent"),
+                                 "✦ first line\nsecond line")
+                # ▴ folds both back to the label.
+                await browser.evaluate(f"{row}.querySelector('.rp-row-more').click()")
+                await browser.evaluate("document.querySelector('.rp-queue-running .rp-row-more').click()")
+                self.assertTrue((await browser.evaluate(f"{label}.textContent")).endswith("…"))
+                self.assertEqual(await browser.evaluate("document.querySelector('.rp-running-label').textContent"),
+                                 "✦ first line second line")
+                # And tapping the row body still selects it.
+                await browser.evaluate(f"{row}.click()")
+                self.assertEqual(await browser.evaluate(f"{row}.getAttribute('aria-selected')"), "true")
+                self.assertEqual(browser.console, [])
+            finally:
+                await browser.stop()
+
+        self.drive(main())
+
     def test_question_closed_and_the_end_of_the_turn_take_the_ask_away(self):
         state = fixture("busy_queue")
         wrapped = {"t": "agent", "pane": state["pane"], "event": self.QUESTION}

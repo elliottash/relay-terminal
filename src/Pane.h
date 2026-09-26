@@ -206,7 +206,42 @@ public:
     static constexpr int SendNowRole = Qt::UserRole + 5;
     static constexpr int ModelRole = Qt::UserRole + 6;         // a `/model` switch (card #7QH0)
     static constexpr int PendingTextRole = Qt::UserRole + 7;   // what a pending row says, when not "withdrawing…"
+    static constexpr int ExpandedRole = Qt::UserRole + 8;      // opened to its whole text (card #JDN4)
+    static constexpr int FullTextRole = Qt::UserRole + 9;      // that whole text, when not the display text
     static QRect sendNowRect(const QRect &row) { return QRect(row.right() - 48, row.top(), 22, row.height()); }
+    // Card #JDN4: ▾ left of → and ×, on the first line, opens a row to its whole text; ▴ folds it.
+    static int lineHeight(const QFontMetrics &fm) { return fm.height() + 8; }
+    static QRect expandRect(const QRect &row, bool sendNow, const QFontMetrics &fm) {
+        return QRect(row.right() - (sendNow ? 74 : 48), row.top(), 22, std::min(row.height(), lineHeight(fm)));
+    }
+    static QString fullText(const QModelIndex &index) {
+        const QString full = index.data(FullTextRole).toString();
+        return (full.isEmpty() ? index.data(Qt::DisplayRole).toString() : full).trimmed();
+    }
+    // Where the text starts, and how wide it may be once ▾ has its place.
+    static int textLeft(const QRect &r, const QModelIndex &index, const QFontMetrics &fm) {
+        int left = r.left() + 4;
+        if (index.data(KindRole).toString() == QStringLiteral("steer")) left += fm.horizontalAdvance(QStringLiteral("↪ next tool call")) + 8;
+        return left + 22;
+    }
+    static QString suffixText(const QModelIndex &index) {
+        if (!index.data(PendingRole).toBool()) return {};
+        const QString pendingText = index.data(PendingTextRole).toString();
+        return pendingText.isEmpty() ? QStringLiteral("  withdrawing…") : pendingText;
+    }
+    static int textRoom(const QRect &r, const QModelIndex &index, const QFontMetrics &fm, bool withExpand) {
+        const bool sendNow = index.data(SendNowRole).toBool();
+        return std::max(20, r.right() - (sendNow ? 54 : 28) - (withExpand ? 26 : 0) - textLeft(r, index, fm)
+                                - fm.horizontalAdvance(suffixText(index)));
+    }
+    // Whether the row has more than its one line shows: a line break, or words past the edge.
+    static bool expandable(const QRect &r, const QModelIndex &index, const QFontMetrics &fm) {
+        if (index.data(PendingRole).toBool()) return false;
+        if (index.data(ExpandedRole).toBool()) return true;
+        const QString full = fullText(index);
+        return full.contains(QLatin1Char('\n')) || full != index.data(Qt::DisplayRole).toString().trimmed()
+            || fm.horizontalAdvance(full.simplified()) > textRoom(r, index, fm, false);
+    }
     using QStyledItemDelegate::QStyledItemDelegate;
     bool helpEvent(QHelpEvent *event, QAbstractItemView *view, const QStyleOptionViewItem &option,
                    const QModelIndex &index) override {
@@ -242,25 +277,44 @@ public:
         painter->setPen(pending ? relay::theme::TextMuted
                                 : (steer || agent) ? relay::theme::Agent : relay::theme::Shell);
         const bool model = index.data(ModelRole).toBool();
-        painter->drawText(QRect(left, r.top(), 18, r.height()), Qt::AlignCenter,
+        // Card #JDN4: an open row is taller than one line; its glyphs and controls stay on the first.
+        const int line = std::min(r.height(), lineHeight(option.fontMetrics));
+        painter->drawText(QRect(left, r.top(), 18, line), Qt::AlignCenter,
                           model ? QStringLiteral("↻") : agent ? QStringLiteral("✦") : QStringLiteral("$"));
         left += 22;
-        const QString pendingText = index.data(PendingTextRole).toString();
-        const QString suffix = !pending ? QString() : pendingText.isEmpty() ? QStringLiteral("  withdrawing…") : pendingText;
+        const QString suffix = suffixText(index);
         const bool sendNow = index.data(SendNowRole).toBool();
-        const int room = std::max(20, r.right() - (sendNow ? 54 : 28) - left - option.fontMetrics.horizontalAdvance(suffix));
+        const bool more = expandable(r, index, option.fontMetrics);
+        const bool open = more && index.data(ExpandedRole).toBool();
+        const int room = textRoom(r, index, option.fontMetrics, more);
         painter->setPen(pending ? relay::theme::TextMuted : (steer ? relay::theme::Agent : relay::theme::Text));
-        const QString text = option.fontMetrics.elidedText(index.data(Qt::DisplayRole).toString().simplified(), Qt::ElideRight, room) + suffix;
-        painter->drawText(QRect(left, r.top(), r.right() - 26 - left, r.height()), Qt::AlignVCenter | Qt::AlignLeft, text);
+        if (open) {
+            painter->drawText(QRect(left, r.top() + 4, room, r.height() - 8), Qt::AlignTop | Qt::AlignLeft | Qt::TextWordWrap,
+                              fullText(index));
+        } else {
+            const QString text = option.fontMetrics.elidedText(index.data(Qt::DisplayRole).toString().simplified(), Qt::ElideRight, room) + suffix;
+            painter->drawText(QRect(left, r.top(), r.right() - 26 - left, line), Qt::AlignVCenter | Qt::AlignLeft, text);
+        }
         if (!pending) {
             painter->setPen(relay::theme::TextMuted);
-            if (sendNow) painter->drawText(sendNowRect(r), Qt::AlignCenter, QStringLiteral("→"));
-            painter->drawText(QRect(r.right() - 22, r.top(), 18, r.height()), Qt::AlignCenter, QStringLiteral("×"));
+            if (more) painter->drawText(expandRect(r, sendNow, option.fontMetrics), Qt::AlignCenter,
+                                        open ? QStringLiteral("▴") : QStringLiteral("▾"));
+            if (sendNow) painter->drawText(QRect(sendNowRect(r).topLeft(), QSize(22, line)), Qt::AlignCenter, QStringLiteral("→"));
+            painter->drawText(QRect(r.right() - 22, r.top(), 18, line), Qt::AlignCenter, QStringLiteral("×"));
         }
         painter->restore();
     }
     QSize sizeHint(const QStyleOptionViewItem &option, const QModelIndex &index) const override {
-        return {QStyledItemDelegate::sizeHint(option, index).width(), option.fontMetrics.height() + 8};
+        const int width = QStyledItemDelegate::sizeHint(option, index).width();
+        if (!index.data(ExpandedRole).toBool()) return {width, lineHeight(option.fontMetrics)};
+        // An open row is as tall as its whole text wrapped to the width it is drawn at; the list
+        // scrolls by pixel, so a long one is read by scrolling the strip, not cut off.
+        const auto *view = qobject_cast<const QAbstractItemView *>(option.widget);
+        const int viewWidth = view ? view->viewport()->width() : option.rect.width();
+        const QRect row(0, 0, std::max(200, viewWidth), lineHeight(option.fontMetrics));
+        const QRect text = option.fontMetrics.boundingRect(QRect(0, 0, textRoom(row, index, option.fontMetrics, true), 1 << 20),
+                                                           Qt::AlignTop | Qt::AlignLeft | Qt::TextWordWrap, fullText(index));
+        return {width, std::max(lineHeight(option.fontMetrics), text.height() + 8)};
     }
 };
 
@@ -9497,18 +9551,19 @@ public:
     // "entry:<queue id>". kind: "running", "steer", "agent" or "command". state: "running",
     // "waiting" (a steer before the next tool call), "withdrawing", "queued", "editing" (selected
     // in the prompt box) or "paused".
-    struct QueueRow { QString id, kind, preview, state; };
+    struct QueueRow { QString id, kind, preview, state, full; };   // full: untruncated, line breaks kept (#JDN4)
 
     // The rows the queue strip shows, in delivery order: what is running, then the steers, then
     // the queued items. For publishing the queue elsewhere (a paired phone); nothing reads it yet.
     QList<QueueRow> queueRows() const {
         QList<QueueRow> rows;
         if (const QString running = runningLabel(); !running.trimmed().isEmpty())
-            rows.append({QStringLiteral("running"), QStringLiteral("running"), running.simplified(), QStringLiteral("running")});
+            rows.append({QStringLiteral("running"), QStringLiteral("running"), running.simplified(), QStringLiteral("running"), running});
         for (const auto &steer : m_steering)
             rows.append({QStringLiteral("steer:") + steer.requestId, QStringLiteral("steer"), steer.text.simplified(),
                          steer.withdraw ? QStringLiteral("withdrawing")
-                                        : steer.requestId == m_selectedSteer ? QStringLiteral("editing") : QStringLiteral("waiting")});
+                                        : steer.requestId == m_selectedSteer ? QStringLiteral("editing") : QStringLiteral("waiting"),
+                         steer.text});
         // A `/model` steered into the turn (card #7QH0) lands at the next tool call, with the steers.
         if (m_modelSteer)
             rows.append({QString::fromLatin1(kModelSteerRow), QStringLiteral("model"), QStringLiteral("/model ") + m_modelSteer->name,
@@ -9519,18 +9574,21 @@ public:
         // context names no surface has none of these and the list is exactly what it was.
         for (const WorkerRow &row : workerSteers())
             rows.append({QStringLiteral("item:") + row.id, QStringLiteral("steer"), row.preview.simplified(),
-                         row.id == m_selectedWorkerRow ? QStringLiteral("editing") : QStringLiteral("waiting")});
+                         row.id == m_selectedWorkerRow ? QStringLiteral("editing") : QStringLiteral("waiting"),
+                         workerRowText(row.id)});
         for (const WorkerRow &row : workerQueued())
             rows.append({QStringLiteral("item:") + row.id, QStringLiteral("agent"), row.preview.simplified(),
                          row.id == m_selectedWorkerRow ? QStringLiteral("editing")
                          : m_queuePaused                ? QStringLiteral("paused")
-                                                        : QStringLiteral("queued")});
+                                                        : QStringLiteral("queued"),
+                         workerRowText(row.id)});
         for (int i = 0; i < m_entries.size(); ++i) {
             const QueueEntry &entry = m_entries[i];
             rows.append({QStringLiteral("entry:%1").arg(entry.id),
                          entry.isModel() ? QStringLiteral("model") : entry.agent ? QStringLiteral("agent") : QStringLiteral("command"),
                          entry.label().simplified(),
-                         i == m_selected ? QStringLiteral("editing") : m_entriesPaused ? QStringLiteral("paused") : QStringLiteral("queued")});
+                         i == m_selected ? QStringLiteral("editing") : m_entriesPaused ? QStringLiteral("paused") : QStringLiteral("queued"),
+                         entry.label()});
         }
         return rows;
     }
@@ -17755,6 +17813,11 @@ private:
     QListWidget *m_queueList = nullptr, *m_terminalQueueList = nullptr, *m_atList = nullptr;
     bool m_queueLanesStacked = false;   // #XCXD: the dual-lane layout the strip was last built in
     bool m_rebuildingQueueStrip = false; // #XCXD: rebuilds must not nest — a resize during one reflows later
+    // Card #JDN4: queue lines opened to their whole text, by queueRows() id, and the running
+    // line's own — kept on the pane because the strip is rebuilt from scratch many times a turn.
+    QSet<QString> m_expandedQueueRows;
+    bool m_queueRunningExpanded = false;
+    QString m_queueRunningExpandedFor;   // the running text it was opened on; a new one starts folded
     // Switchboard: the `#K7Q2` picker and the card rows behind it (protocol 17.2, 17.6).
     QListWidget *m_cardList = nullptr;
     relay::board::IndexFeed m_cardIndex;

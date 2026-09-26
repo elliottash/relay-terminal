@@ -2306,6 +2306,7 @@ void aPromptOnAWorkedCardWritesNothingToTheBoard()
 #include "h2kq_cases.h"
 #include "234z_cases.h"
 #include "recall_prompt_cases.h"
+#include "jdn4_queue_expand_cases.h"
 
 int main(int argc, char **argv)
 {
@@ -2401,6 +2402,12 @@ int main(int argc, char **argv)
             cases::xcxdReviewCases();
             cases::xcxdUiCases();
             cases::xcxdContextCases();
+        });
+    }
+    if (app.arguments().contains(QStringLiteral("--jdn4-only"))) {
+        return runRepeated("jdn4", "queueexpand: all cases passed", [&app] {
+            relay::theme::applyTheme(app);
+            cases::jdn4QueueExpandCases();
         });
     }
     if (app.arguments().contains(QStringLiteral("--model-queue-only"))) {
