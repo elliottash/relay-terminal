@@ -3,7 +3,6 @@ id: M91Y
 type: work
 status: planned
 labels: [feature, skills, onboarding]
-waiting_on: owner
 parent: SZ1H
 blocked_by: [K26R]
 rank: zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz
@@ -39,3 +38,6 @@ Refreshed 2026-09-26 against `053f4458`. **Blocked by #K26R** (content identity,
 5. Repeat runs report what changed since the last run (new sources, broken requirements, stale skills, new candidates); a Relay reminder can schedule them.
 
 **Verify.** `tests/test_skill_inventory.py` over a four-source fixture (Relay, Claude, Codex, Warp) with exact and near duplicates and a broken requirement; the skill's own Try-it case (per #4EMF) drives one review in a fixture and asserts no source file changed; a manual first-run pass once #6VMF exists.
+
+## Decisions
+2026-09-26, owner ("I agree with the recs. proceed"): register external skills in place, copying only to edit or consolidate; model-free inventory at first launch, semantic review after a provider exists; first-run entry rides #6VMF's import row, with `/skill-maintenance` and Globals › Skills until then. The Plan's steps now stand as written; remaining gate is #K26R.
