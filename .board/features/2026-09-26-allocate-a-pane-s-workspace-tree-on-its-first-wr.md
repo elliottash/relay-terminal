@@ -35,3 +35,14 @@ Every pane in a queue-mode project takes a workspace tree as soon as it opens, e
 **Tests.** A worker unit test: read tools run with no allocation, and the first write allocates exactly once. A LiveGui test: a pane opens, the agent reads, `pane_leases()` is empty; the agent writes and one lease appears. The existing quota and restore tests keep passing.
 
 **Expected effect.** Tree count tracks panes that actually changed code, not open panes; disk and quota pressure drop accordingly.
+**Board workers (the tab helper, `RELAY_PANE_ID=switchboard`).** Same rule, and today they break it the worst way. Found on #4F5W, 2026-09-26:
+- The tab's `BoardWorker` sends a `configure` with no `pane_token`, and the worker calls `workspace_context.prepare` at configure time (`backend/worker.py`, the `configure` branch). So every Board helper takes a slot when the tab opens, before anyone asks it anything. After the 10:16 restart this hit the 50/50 quota, the configure failed, and the Board sat on "Loading the Board…". #4F5W now loads the Board anyway, but the slot is still taken.
+- With no token of its own, the worker falls back to `RELAY_SESSION_TOKEN` from the environment, which it inherits from the GUI or another pane. Observed: three Board workers under the GUI's leftover token `306e779c` sharing lease `wt6cfc25b9ea2d7cf5` (created 14:20:45 when one started a Codex guest), and one under pane `cabc279e`'s token, so it reacquired **that pane's** tree `wtf5c8365fe5d0a4c9` and would run its tools there.
+
+Fix, as part of this card:
+5. The Board worker's `configure` (`RelayWindow::startBoardWorker`, `src/RelayWindow.h`) sends `tree_status: {state: "deferred"}`. At configure it resolves the canonical project and Board root and allocates nothing, which is `prepare(..., planning_only=True)` today. Opening a Board, reading cards and every `board_*` write needs no tree: the Board is the canonical `.board/`, which workspaces exclude.
+6. Its first mutating tool (write_file, edit_file, run_command, a guest's edit or shell) goes through the same `ensure_tree()` as a pane.
+7. It gets a token of its own for that lease: a per-tab helper token, stable across restarts, so a reopened tab reacquires its own retained tree. It never inherits `RELAY_SESSION_TOKEN`: `startBoardWorker` removes it from the child environment, and the worker refuses to allocate under a token the GUI did not send.
+8. Closing the tab (`releaseBoardWorker`) releases the helper's lease, as closing a pane does.
+
+Tests: a worker test in which a Board `configure` plus `board_open` on a queue project allocates nothing and returns the cards; the helper's first `run_command` allocates exactly one tree under the helper token. A GUI or LiveGui check that N tabs with Boards open hold 0 leases until one of their agents writes.
