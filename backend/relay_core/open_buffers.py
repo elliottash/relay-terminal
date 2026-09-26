@@ -23,8 +23,8 @@ What the GUI sends (protocol §35):
 
 What this worker sends: `buffer_request {id, op, path, …}` (op `read` or `patch`), and it waits
 `LOCAL_TIMEOUT` seconds for the answer (`REMOTE_TIMEOUT` for a patch to a file on an ssh host,
-whose save the answer waits for). No answer, or `not_open`, means the tool does what it always
-did: the disk, guarded by the revision it read.
+whose save the answer waits for). An unanswered patch refuses the write: the person may have
+begun typing after the last `open_buffers` update. Only `not_open` allows the guarded disk write.
 """
 from __future__ import annotations
 
@@ -130,8 +130,8 @@ class OpenBuffers:
     def request(self, fields: dict, *, remote: bool = False) -> dict | None:
         """Emit one `buffer_request` and wait for its `buffer_result`.
 
-        Returns the GUI's answer, or None when nothing answered in time — the caller then does
-        what it would have done with no editor open. Stop raises `Cancelled`, as every wait does.
+        Returns the GUI's answer, or None when nothing answered in time — the caller must refuse
+        a write to a file still listed as open. Stop raises `Cancelled`, as every wait does.
         """
         with self._lock:
             self._next += 1

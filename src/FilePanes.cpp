@@ -1283,7 +1283,8 @@ struct FilePreview::Private {
     QWidget *agentBar = nullptr;
     QLabel *agentText = nullptr;
     QToolButton *agentUndo = nullptr, *agentList = nullptr, *agentDismiss = nullptr;
-    QTimer *agentFade = nullptr;       // takes the changed lines' highlight off again
+    QWidget *diffBar = nullptr;
+    QLabel *diffText = nullptr;
 
     // ----- the docked agent (card #PBZ4) ---------------------------------------------------------
     ArtifactDock *dock = nullptr;
@@ -1418,9 +1419,34 @@ FilePreview::FilePreview(QWidget *parent) : QWidget(parent), d(new Private) {
     d->conflictBar->hide();
     layout->addWidget(d->conflictBar);
 
+    // The latest incoming change stays visible while the person types. Red retains what left
+    // the file; green names what arrived. The same surface is used for native agent patches and
+    // for writes by a guest agent or shell command that reach the file watcher.
+    d->diffBar = new QWidget;
+    d->diffBar->setObjectName(QStringLiteral("filePreviewIncomingDiff"));
+    {
+        auto *bar = new QHBoxLayout(d->diffBar);
+        bar->setContentsMargins(0, 0, 0, 0);
+        bar->setSpacing(4);
+        d->diffText = new QLabel;
+        d->diffText->setObjectName(QStringLiteral("filePreviewIncomingDiffText"));
+        d->diffText->setTextFormat(Qt::RichText);
+        d->diffText->setWordWrap(true);
+        auto *dismiss = headerButton(QStringLiteral("×"), QStringLiteral("Hide incoming diff highlights"));
+        dismiss->setObjectName(QStringLiteral("filePreviewIncomingDiffDismiss"));
+        bar->addWidget(d->diffText, 1);
+        bar->addWidget(dismiss);
+        connect(dismiss, &QToolButton::clicked, this, [this] {
+            d->diffBar->hide();
+            m_textView->setExtraSelections({});
+        });
+    }
+    d->diffBar->hide();
+    layout->addWidget(d->diffBar);
+
     // What an agent changed in this buffer (#F8R7, task v5): the newest change named, Undo for
     // it, and the list of every change since the file was opened. It stays until dismissed; the
-    // changed lines themselves are highlighted for a few seconds.
+    // changed lines stay highlighted until the next incoming diff or dismissal.
     d->agentBar = new QWidget;
     d->agentBar->setObjectName(QStringLiteral("filePreviewAgent"));
     {
@@ -1472,10 +1498,6 @@ FilePreview::FilePreview(QWidget *parent) : QWidget(parent), d(new Private) {
     }
     d->agentBar->hide();
     layout->addWidget(d->agentBar);
-    d->agentFade = new QTimer(this);
-    d->agentFade->setSingleShot(true);
-    d->agentFade->setInterval(4000);
-    connect(d->agentFade, &QTimer::timeout, this, [this] { m_textView->setExtraSelections({}); });
 
     // A file on a host has no watcher: while it is on screen the pane asks the host for its stat
     // every few seconds, and fetches it only when that moved (#F8R7, task cb).
@@ -1710,7 +1732,6 @@ FilePreview::~FilePreview() {
     delete d->watcher;
     delete d->settle;
     delete d->remotePoll;
-    delete d->agentFade;
     // The dock and its console go while `d` is still here: its context's callbacks read it.
     delete d->dock;
     d->dock = nullptr;
@@ -1773,6 +1794,8 @@ bool FilePreview::open(const QString &path) {
         return false;
     const QFileInfo info(path);
     if (path.isEmpty() || !info.exists() || !info.isFile() || !info.isReadable()) return false;
+    d->diffBar->hide();
+    m_textView->setExtraSelections({});
     setEditable(false);
     hideConflict();
     d->deleted = false;
@@ -1855,6 +1878,9 @@ bool FilePreview::openRemote(const QString &url) {
                                 QStringLiteral("Throw away your unsaved edits to %1?").arg(name),
                                 QMessageBox::Cancel | QMessageBox::Discard, QMessageBox::Cancel) != QMessageBox::Discard)
         return false;
+
+    d->diffBar->hide();
+    m_textView->setExtraSelections({});
 
     if (url != m_path) {
         d->agentChanges.clear();
@@ -2477,7 +2503,9 @@ void FilePreview::reconcileWith(const relay::merge::Snapshot &disk) {
         return;
     }
     if (!isDirty()) {
+        const QString before = m_textView->toPlainText();
         replaceBuffer(disk.text);
+        showIncomingDiff(before, disk.text);
         setBase(disk);
         document->setModified(false);
         if (d->conflict == ConflictMode::Changed) hideConflict();
@@ -2496,20 +2524,27 @@ void FilePreview::reconcileWith(const relay::merge::Snapshot &disk) {
         hideConflict();
         setNotice(QStringLiteral("%1 on %2 now has exactly your text.").arg(name, where));
         return;
-    case Outcome::TakeDisk:
+    case Outcome::TakeDisk: {
+        const QString before = m_textView->toPlainText();
         replaceBuffer(r.text);
+        showIncomingDiff(before, r.text);
         setBase(disk);
         document->setModified(false);
         hideConflict();
         return;
-    case Outcome::Merged:
+    }
+    case Outcome::Merged: {
+        const QString before = m_textView->toPlainText();
         replaceBuffer(r.text);
+        showIncomingDiff(before, r.text);
         setBase(disk);
         hideConflict();
         setNotice(QStringLiteral("%1 changed on %2 · merged into your unsaved edits (Ctrl+Z takes the merge back out).").arg(name, where));
         return;
+    }
     case Outcome::Conflict:
         d->disk = disk;
+        showIncomingDiff(d->base.text, disk.text, false);
         showConflict(ConflictMode::Changed, int(r.merge.conflicts.size()));
         return;
     }
@@ -2539,6 +2574,58 @@ void FilePreview::replaceBuffer(const QString &text) {
         m_markdownView->setMarkdown(text);
         rendered->setValue(at);
     }
+}
+
+void FilePreview::showIncomingDiff(const QString &before, const QString &after, bool markBuffer) {
+    const QVector<relay::merge::TextEdit> edits = relay::merge::editsBetween(before, after);
+    if (edits.isEmpty()) return;
+    QTextDocument *document = m_textView->document();
+    QList<QTextEdit::ExtraSelection> marks;
+    QStringList previews;
+    qsizetype shift = 0;
+    for (const relay::merge::TextEdit &edit : edits) {
+        const qsizetype start = edit.position + shift;
+        const qsizetype end = start + edit.inserted.size();
+        shift += edit.inserted.size() - edit.removed;
+        auto preview = [](const QString &text) {
+            QString shortText = text.left(180).toHtmlEscaped();
+            shortText.replace(QLatin1Char('\n'), QStringLiteral("↵ "));
+            if (text.size() > 180) shortText += QStringLiteral("…");
+            return shortText;
+        };
+        if (edit.removed) {
+            previews << QStringLiteral("<span style='background:#5a1b27;color:#ffced3'>− %1</span>")
+                            .arg(preview(before.mid(edit.position, edit.removed)));
+            if (markBuffer && !after.isEmpty()) {
+                // Deleted text has no characters in the live buffer. A red wave at its old
+                // position points to the red old-text preview above the editor.
+                QTextEdit::ExtraSelection mark;
+                const int anchor = int(std::min(start, qsizetype(after.size() - 1)));
+                mark.cursor = QTextCursor(document);
+                mark.cursor.setPosition(anchor);
+                mark.cursor.setPosition(anchor + 1, QTextCursor::KeepAnchor);
+                mark.format.setUnderlineColor(QColor(QStringLiteral("#e35d6a")));
+                mark.format.setUnderlineStyle(QTextCharFormat::WaveUnderline);
+                marks.append(mark);
+            }
+        }
+        if (!edit.inserted.isEmpty()) {
+            previews << QStringLiteral("<span style='background:#173b2a;color:#bdf4ce'>+ %1</span>")
+                            .arg(preview(edit.inserted));
+            if (markBuffer) {
+                QTextEdit::ExtraSelection mark;
+                mark.cursor = QTextCursor(document);
+                mark.cursor.setPosition(int(start));
+                mark.cursor.setPosition(int(end), QTextCursor::KeepAnchor);
+                mark.format.setBackground(QColor(51, 177, 102, 85));
+                marks.append(mark);
+            }
+        }
+        if (previews.size() >= 6) break;   // a cue for the latest change, not a second document
+    }
+    d->diffText->setText(previews.join(QStringLiteral(" &nbsp; ")));
+    d->diffBar->show();
+    m_textView->setExtraSelections(marks);
 }
 
 void FilePreview::setBase(const relay::merge::Snapshot &snapshot) {
@@ -2905,7 +2992,6 @@ void FilePreview::noteAgentChange(const QString &before, const QString &after, c
     change.saved = saved;
     // Where the change landed, in the buffer as it is now: positions in `after` are the edits'
     // positions shifted by what the edits before them added or removed.
-    QList<QTextEdit::ExtraSelection> marks;
     qsizetype shift = 0;
     int first = -1, last = -1;
     for (const relay::merge::TextEdit &edit : edits) {
@@ -2920,13 +3006,6 @@ void FilePreview::noteAgentChange(const QString &before, const QString &after, c
         const int toLine = cursor.blockNumber();
         first = first < 0 ? fromLine : std::min(first, fromLine);
         last = std::max(last, toLine);
-        QTextEdit::ExtraSelection mark;
-        mark.cursor = cursor;
-        QColor tint = palette().color(QPalette::Highlight);
-        tint.setAlpha(60);
-        mark.format.setBackground(tint);
-        mark.format.setProperty(QTextFormat::FullWidthSelection, true);
-        marks.append(mark);
     }
     change.firstLine = std::max(first, 0) + 1;
     change.lastLine = std::max(last, first) + 1;
@@ -2937,8 +3016,7 @@ void FilePreview::noteAgentChange(const QString &before, const QString &after, c
         d->agentChanges.removeFirst();
         d->agentSteps.removeFirst();
     }
-    m_textView->setExtraSelections(marks);
-    d->agentFade->start();
+    showIncomingDiff(before, after);
     showAgentBar();
 }
 
@@ -3007,6 +3085,7 @@ bool FilePreview::undoAgentChange() {
     }
     d->agentChanges.removeLast();
     d->agentSteps.removeLast();
+    d->diffBar->hide();
     m_textView->setExtraSelections({});
     // The change had gone to disk with nothing else unsaved: its undo goes to disk the same way.
     bool written = true;

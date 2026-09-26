@@ -489,6 +489,9 @@ private:
     // Turn the buffer into `text` with the fewest edits, as one undo step, keeping the cursor and
     // the scroll; a rendered Markdown view is redrawn from it.
     void replaceBuffer(const QString &text);
+    // Show the latest incoming edit while the person continues typing. Removed text is kept in
+    // the red preview; inserted text is marked green in the live buffer.
+    void showIncomingDiff(const QString &before, const QString &after, bool markBuffer = true);
     void setBase(const relay::merge::Snapshot &snapshot);
     bool writeBuffer();      // the local QSaveFile write, with no revision check
     enum class ConflictMode { None, Changed, Save };

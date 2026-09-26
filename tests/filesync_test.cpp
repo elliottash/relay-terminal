@@ -152,7 +152,26 @@ private slots:
         QTRY_COMPARE(preview.text(), QStringLiteral("my one\ntwo\nthree\nfour\nFIVE\nsix\n"));
         QVERIFY(preview.isDirty());
         QVERIFY(!preview.hasConflict());
+        auto *diff = preview.findChild<QLabel *>(QStringLiteral("filePreviewIncomingDiffText"));
+        auto *diffBar = preview.findChild<QWidget *>(QStringLiteral("filePreviewIncomingDiff"));
+        QVERIFY(diff && diffBar && !diffBar->isHidden());
+        QVERIFY(diff->text().contains(QStringLiteral("#ffced3")));   // removed text, red
+        QVERIFY(diff->text().contains(QStringLiteral("#bdf4ce")));   // incoming text, green
+        QVERIFY(diff->text().contains(QStringLiteral("five")));
+        QVERIFY(diff->text().contains(QStringLiteral("FIVE")));
+        QVERIFY(!editor->extraSelections().isEmpty());
+        const QString evidence = qEnvironmentVariable("RELAY_DIFF_EVIDENCE");
+        if (!evidence.isEmpty()) {
+            preview.resize(900, 560);
+            preview.show();
+            QCoreApplication::processEvents();
+            QVERIFY(preview.grab().save(evidence));
+        }
         QCOMPARE(editor->textCursor().position(), caret);   // the change was below the caret
+        typeAt(editor, 2, QStringLiteral("still typing "));
+        QVERIFY(preview.text().contains(QStringLiteral("still typing three")));
+        QVERIFY(!diffBar->isHidden());                       // the cue does not interrupt typing
+        editor->document()->undo();                          // undo that new typing for checks below
         QCOMPARE(preview.base().text, QStringLiteral("one\ntwo\nthree\nfour\nFIVE\nsix\n"));
         // One undo takes the merge out, the next takes the typing out.
         editor->document()->undo();
@@ -168,6 +187,7 @@ private slots:
         QTest::qWait(300);
         QVERIFY(!preview.hasConflict());
         QVERIFY(!preview.isDirty());
+        QVERIFY(!diffBar->isHidden());                         // saving does not erase the diff
     }
 
     void anOverlappingChangeStopsAtTheConflictBar() {
@@ -345,6 +365,11 @@ private slots:
         QCOMPARE(preview.agentChanges().size(), 1);
         QCOMPARE(preview.agentChanges().last().turnId, QStringLiteral("turn-1"));
         QCOMPARE(preview.agentChanges().last().firstLine, 2);
+        auto *diff = preview.findChild<QLabel *>(QStringLiteral("filePreviewIncomingDiffText"));
+        QVERIFY(diff && diff->text().contains(QStringLiteral("TWO")));
+        QVERIFY(diff->text().contains(QStringLiteral("#ffced3")));
+        QVERIFY(diff->text().contains(QStringLiteral("#bdf4ce")));
+        QVERIFY(!editorOf(preview)->extraSelections().isEmpty());
         // Taking it back is saved back too.
         QVERIFY(preview.undoAgentChange());
         QCOMPARE(preview.text(), QString::fromUtf8(kBase));

@@ -49,8 +49,8 @@ MAX_FILE = 131072
 
 # Card #F8R7: a write worked out against an open editor's unsaved text can only be applied there.
 UNSAVED_HEADER = "Open in Relay with unsaved edits: this diff is against the editor's text.\n"
-NO_EDITOR_ANSWER = ("The file is open in Relay with unsaved edits and the editor did not answer, so "
-                    "nothing was written. Try again, or ask the user to save the file first.")
+NO_EDITOR_ANSWER = ("The file is open in Relay and the editor did not answer, so nothing was written. "
+                    "Try again after the editor responds; the user may be typing in it now.")
 MAX_OUTPUT = 32768
 # Card #0C0V: what one command result, file read or search puts into the model's context, which is
 # resent on every later step. The user's fold still gets MAX_OUTPUT and the whole file; the model
@@ -1083,10 +1083,10 @@ class ToolExecutor:
 
     def _through_buffer(self, prepared: Prepared, key: str | None, *, remote: bool = False) -> dict | None:
         """write_file / edit_file on a file open in Relay: the editor applies it (src/FilePanes.cpp,
-        FilePreview::applyAgentPatch) — exactly when its text is the one this was worked out
+        FilePreview::answerBufferRequest) — exactly when its text is the one this was worked out
         against, merged when the user's unsaved edits are elsewhere in the file, and refused with
-        the lines in question when they overlap. None when the file is not open or nothing
-        answered, and the caller writes the disk as it always did."""
+        the lines in question when they overlap. None only when the file is no longer open;
+        an unanswered editor request refuses the write because its dirty bit can change."""
         entry = self.buffers.entry(key) if self.buffers is not None else None
         if entry is None:
             return None
@@ -1102,11 +1102,14 @@ class ToolExecutor:
                           replace_all=bool(args.get("replace_all", False)))
         reply = self.buffers.request(fields, remote=remote)
         if reply is None:
-            return None
+            # The list said this file was open. Its clean/dirty bit is only a snapshot: the
+            # person may have started typing while we waited for the editor. A disk fallback
+            # here would silently race their buffer, even if prepare saw a clean file.
+            raise ValueError(NO_EDITOR_ANSWER)
         if not reply.get("ok"):
             error = reply.get("error")
-            if error in ("not_open", "not_text", "not_representable", "unsupported") and not prepared.buffer:
-                return None   # the editor cannot hold it; the disk write follows, and its watcher sees it
+            if error == "not_open" and not prepared.buffer:
+                return None   # the pane closed after its last open_buffers update
             if error == "conflict":
                 raise ValueError(conflict_text({**reply, "path": args["path"]}))
             message = reply.get("message") if isinstance(reply.get("message"), str) else ""
@@ -1253,8 +1256,8 @@ class ToolExecutor:
                         return {"entries": sorted(entries, key=lambda x: x['name']), "truncated": True}
                     entries.append({"name": entry.name, "type": "symlink" if entry.is_symlink() else "directory" if entry.is_dir(follow_symlinks=False) else "file"})
             return {"entries": sorted(entries, key=lambda x: x['name']), "truncated": False}
-        # A file open in Relay's editor is changed there, as one undo step (card #F8R7). No answer
-        # from the editor, or no editor, is the disk write below, guarded by the revision read.
+        # A file open in Relay's editor is changed there, as one undo step (card #F8R7).
+        # Only a file no longer open goes to the guarded disk write below.
         if (routed := self._through_buffer(prepared, local_key(path))) is not None:
             return routed
         if prepared.buffer:

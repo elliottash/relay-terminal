@@ -217,11 +217,24 @@ class OpenBufferToolTests(unittest.TestCase):
         self.run_tool("write_file", {"path": "paper.tex", "content": "disk\n"})
         self.assertEqual(self.file.read_text(), "disk\n")
 
-    def test_a_silent_editor_with_a_clean_buffer_falls_back_to_disk(self):
+    def test_a_silent_editor_cannot_overwrite_typing_started_after_prepare(self):
         self.open("one\ntwo\nthree\n", dirty=False)
         self.editor.silent = True
-        self.run_tool("write_file", {"path": "paper.tex", "content": "disk\n"})
-        self.assertEqual(self.file.read_text(), "disk\n")
+        prepared = self.tools.prepare("write_file", {"path": "paper.tex", "content": "agent\n"})
+        # The open_buffers clean bit was true at prepare time. The user types before the
+        # unresponsive editor times out; falling back to disk would clobber that session.
+        self.editor.texts[str(self.file)] = "one\ntwo\nUSER\n"
+        with self.assertRaisesRegex(ValueError, "editor did not answer"):
+            self.tools.execute(prepared)
+        self.assertEqual(self.file.read_text(), "one\ntwo\nthree\n")
+        self.assertEqual(self.editor.texts[str(self.file)], "one\ntwo\nUSER\n")
+
+    def test_an_open_editor_that_cannot_represent_the_patch_refuses_disk_write(self):
+        self.open("one\ntwo\nthree\n", dirty=False)
+        self.editor.reply = {"ok": False, "error": "not_representable", "message": "Use an editor-compatible patch."}
+        with self.assertRaisesRegex(ValueError, "editor-compatible"):
+            self.run_tool("write_file", {"path": "paper.tex", "content": "agent\n"})
+        self.assertEqual(self.file.read_text(), "one\ntwo\nthree\n")
 
 
 if __name__ == "__main__":
