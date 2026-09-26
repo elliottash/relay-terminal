@@ -10,7 +10,7 @@ rank: zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz
 created: '2026-09-25'
 verify: {artifact: system, primary: script, also: [probe], effort: high, criteria: The acceptance file passes on a clean export of main and the staged GUI shows real queue state; defects found are fixed by their owners and the run repeated.}
 source: 'Approved #3MH4 implementation workstream, 2026-09-26'
-links: {plans: [], commits: [585291ffd8ed, 5d9029b33d2e, 7897e1c57de2, 65ca8c46204b, c8dce2511c2f, 9873de343f1a], evidence: [docs/qa_evidence/2026-09-26-verify-3MH4/], related: [3MH4, AMQQ, 80X1, DV5Y, 2DP8, HEY7], github: null}
+links: {plans: [], commits: [585291ffd8ed, 5d9029b33d2e, 7897e1c57de2, 65ca8c46204b, c8dce2511c2f, 9873de343f1a, f304e689cd90], evidence: [docs/qa_evidence/2026-09-26-verify-3MH4/], related: [3MH4, AMQQ, 80X1, DV5Y, 2DP8, HEY7], github: null}
 ---
 # C1: Independent parallel development verification
 
@@ -45,8 +45,12 @@ Recheck after owner fixes (`65ca8c46` B1 for 4–7, `a0141e41` B2 for 8–9, `e7
 
 ![Ctrl+T: the second pane's shell starts in its own leased worktree](docs/qa_evidence/2026-09-26-verify-3MH4/06-ctrl-t-second-pane-in-own-worktree.png)
 
+Final recheck including B1's `c8dce251` (subagent a10, Claude family), 2026-09-26. The backend at `f304e689` is byte-identical to `c8dce251`'s; the only later changes are the test file and unrelated GUI/packaging commits. Read the diff: `actionable_kind(job)` derives the one wake kind from every outbox row of the job, and queue-mode Board snapshots are recorded synchronously inside `_end_turn` before the terminal event. The full acceptance file on a clean export of `f9c7d590` gave 33 passed, 1 failed, 2 skipped: the gate test still encoded the pre-`65ca8c46` pending `failed` row, which B1 had named on #AMQQ and the earlier recheck missed. It now asserts the decided behaviour and more (one pending row per failed job, of the service's actionable kind, carrying the job id and a reason; `failed` kept in history). Worker-immediate-exit durability was not covered anywhere at the process level, only by module-level tests of `sync_board_writes`, so a new regression drives a real worker's Board comment in a second queue-mode project, SIGKILLs the worker the instant `agent_finished` arrives, and proves the metadata job is queued, its snapshot commit retained under `refs/landq/jobs/<id>/submitted` on the target tip with the write, and landed by a publisher run with no worker alive. Against a clean export of `0abbd923` (c8dce251's parent) with the same test file, it fails with "the turn ended before its Board write was queued", so it is not green by construction. No production defect found. GUI evidence from `e7f541a4` is reused: `git diff e7f541a4 HEAD -- src engine` touches only palette items, model catalog, PDF preview and Ctrl+J stepping, none of the lease, shell-start or Live code.
+
 ## Tests
 `PYTHONPATH=backend python3 -m pytest -q -p no:cacheprovider tests/test_parallel_landing_acceptance.py` — 30 passed in 66.40s on a clean export of `c692bf22`
 `manual: docs/qa_evidence/2026-09-26-verify-3MH4/` — Xvfb, isolated XDG profile and private tmux socket, relay built at 4af516ea
 `PYTHONPATH=backend python3 -m pytest -q -p no:cacheprovider tests/test_parallel_landing_acceptance.py -k "landed_workspace_does_not or failed_gate_wakes or native_and_guest_panes_land or board_write_in_a_second or paused or protocol_sections or pause_drains or activation_and_rollback"` — 9 passed in 26.64s on a clean export of e7f541a4
 `RELAY_C1_RELAY_BINARY=<slot0 build/relay, tree 357b1553> python3 -m pytest -q tests/test_parallel_landing_acceptance.py -k LiveGui` — 2 passed in 8.48s
+`PYTHONPATH=backend python3 -m pytest -q -p no:cacheprovider tests/test_parallel_landing_acceptance.py` — 35 passed, 2 skipped (LiveGui, opt-in) in 64.02s on a clean export of f304e689 (backend identical to c8dce251); the same on f9c7d590 before the two test corrections: 33 passed, 1 failed (the gate test's stale expectation), 2 skipped
+`PYTHONPATH=backend python3 -m pytest -q tests/test_parallel_landing_acceptance.py -k "survives_the_workers_death or failing_and_zero_test"` — 2 failed on a clean export of 0abbd923 (pre-c8dce251) with the f304e689 test file: the new durability check fails there as intended
