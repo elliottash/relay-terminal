@@ -61,8 +61,8 @@ checkout and all of its files; the queue changes how future work is allocated an
 
 This is the `.relay/project.toml` prepared for `relay-terminal`. It is **not committed and not
 active**: it lands on `main` as step 1 of the real cutover, and `activate` accepts it from the
-target tip. It parses under the shipped `projectconf.normalize_config` (policy hash
-`f1b468a7afbe` on 2026-09-26). Its `main.install` and `main.smoke` were rehearsed against an
+target tip. Validate it with the shipped `projectconf.normalize_config` and record its policy
+hash at cutover. Its `main.install` and `main.smoke` were rehearsed against an
 existing `build-fast/`. `cmake --install` took 1.24 s and produced `bin/relay` plus
 `share/relay/{app,backend,remote,rendezvous,scripts,shell,theme}`, 86,294,432 bytes in all.
 `bin/relay --version` printed `relay 0.1.0` offscreen and the installed backend imported. That
@@ -78,13 +78,13 @@ target = "main"
 [workspace]
 # Board and evidence stay in the canonical project root, never in author trees.
 exclude = [".board", "docs/qa_evidence"]
-max_workspaces = 24
+max_workspaces = 50
 init = []
 
 [verification]
 timeout_seconds = 5400
-# The candidate tree's path changes per job, and a CMake build directory is pinned to one
-# source path. So each gate mirrors the candidate into a fixed, service-owned source directory
+# Queue and try candidates can have different paths, and a CMake build directory is pinned to
+# one source path. Each gate mirrors the candidate into a fixed, service-owned source directory
 # (rsync --checksum keeps the mtimes of unchanged files, so the warm build stays incremental),
 # then configures, builds and tests there. flock serializes this gate with a concurrent
 # `relay-land try`. `--no-tests=error` fails an empty ctest run.
@@ -94,12 +94,13 @@ set -eu
 root="${RELAY_VERIFY_ROOT:-${XDG_CACHE_HOME:-$HOME/.cache}/relay/verify/relay-terminal}"
 mkdir -p "$root/src" "$root/build"
 exec 9>"$root/.lock"; flock 9
-rsync -a --checksum --delete --exclude=/.git --exclude=/build --exclude='/build-*' ./ "$root/src/"
+rsync -a --checksum --delete --delete-excluded --exclude=/.git --exclude=/build --exclude='/build-*' ./ "$root/src/"
 [ -f "$root/build/CMakeCache.txt" ] || cmake -S "$root/src" -B "$root/build" -DCMAKE_BUILD_TYPE=Release
 cmake --build "$root/build" --parallel "${RELAY_JOBS:-2}"
 ctest --test-dir "$root/build" --output-on-failure --no-tests=error -j "${RELAY_JOBS:-2}"
+cd "$root/src"
+scripts/test.sh
 """],
-  ["sh", "-c", "cd \"${RELAY_VERIFY_ROOT:-${XDG_CACHE_HOME:-$HOME/.cache}/relay/verify/relay-terminal}/src\" && scripts/test.sh"],
 ]
 
 [verification.environment]
@@ -114,7 +115,7 @@ cpus = 8
 [main]
 build = [
   ["cmake", "-S", "{source}", "-B", "{build}", "-DCMAKE_BUILD_TYPE=Release"],
-  ["cmake", "--build", "{build}", "--parallel", "--target", "relay"],
+  ["sh", "-c", "cmake --build \"{build}\" --parallel \"${RELAY_JOBS:-2}\" --target relay"],
 ]
 # cmake --install copies bin/relay and every runtime asset under share/relay.
 install = [["cmake", "--install", "{build}", "--prefix", "{dest}"]]
@@ -127,7 +128,7 @@ keep = 3
 timeout_seconds = 7200
 
 [reconcile]
-enabled = false
+enabled = true
 max_attempts = 2
 tokens_per_case = 200000
 tokens_per_day = 10000000
@@ -146,14 +147,16 @@ Why it looks like this:
   none is used here.
 - **`--delete` in the mirror** keeps an ignored or deleted source file from a previous
   candidate out of the next one's build. A stale ignored Python module otherwise stays
-  importable and can pass a gate it should fail.
+  importable and can pass a gate it should fail. The same lock covers both C++ and Python
+  checks, so a concurrent try cannot replace the source while either suite is running.
 - **Gate breadth is the owner's decision.** As written, every publication runs the full
   `ctest` and `scripts/test.sh` suites, the same suites this repo tells sessions not to run by
   hand. That is the safe default for the sole publication path, but it is the slowest. A
   narrower accepted gate is a policy change: it lands on `main`, then someone runs
   `capture-policy`.
-- **`reconcile.enabled = false`** until the owner turns it on. Conflicts then return to their
-  authors instead of spending High-tier tokens.
+- **`reconcile.enabled = true`** implements the owner's approved automatic reconciliation.
+  Each run draws from the configured High tier using subscription weights, at high effort.
+  Unsafe or exhausted attempts return to the author agent without an owner approval step.
 - **`[main]` builds only the `relay` target** and installs with `cmake --install`. The
   install rules in `CMakeLists.txt` copy the backend, shell integration, remote, rendezvous,
   app, themes and helper scripts. The smoke commands prove that the installed binary starts
