@@ -4362,6 +4362,11 @@ public:
             ? (link.directory ? QStringLiteral("Enter opens the explorer, Ctrl+Enter navigates here, Alt+Enter adds to the prompt, Shift+Enter opens in the file manager")
                               : QStringLiteral("Enter opens in Relay, Ctrl+Enter navigates to its folder, Alt+Enter adds to the prompt, Shift+Enter opens externally"))
             : QStringLiteral("Enter opens, Alt+Enter adds to the prompt");
+        showWalkStatus(QStringLiteral("%1 of %2 · %3\n%4 · Arrows navigate, Esc leaves")
+                           .arg(index + 1).arg(count).arg(where, keys));
+    }
+    // The walk's selected target, for both walks (links, and tool calls since #XPEB).
+    void showWalkStatus(const QString &text) {
         // The selected target is state, not a queued toast: every arrow must replace it
         // immediately, and it stays visible until the walk ends.
         if (!m_walkStatus) {
@@ -4371,13 +4376,13 @@ public:
             m_walkStatus->setWordWrap(true);
             m_walkStatus->setAttribute(Qt::WA_TransparentForMouseEvents);
             connect(&m_walkStatusTimer, &QTimer::timeout, this, [this] {
-                // The engine also ends a walk on a mouse click or terminal input.
-                if (!outputLinkWalkActive()) endOutputLinkWalk();
+                // The engine also ends a walk on a mouse click or terminal input. The label is
+                // shared with the tool-call walk (card #XPEB), whichever of the two is running.
+                if (!outputLinkWalkActive() && !outputFoldWalkActive()) { endOutputLinkWalk(); endOutputFoldWalk(); }
                 else placeOutputLinkStatus();
             });
         }
-        m_walkStatus->setText(QStringLiteral("%1 of %2 · %3\n%4 · Arrows navigate, Esc leaves")
-                                 .arg(index + 1).arg(count).arg(where, keys));
+        m_walkStatus->setText(text);
         placeOutputLinkStatus();
         m_walkStatus->show();
         m_walkStatusTimer.start(100);
@@ -4399,6 +4404,81 @@ public:
         m_walkStatusTimer.stop();
         if (m_walkStatus) m_walkStatus->hide();
         if (m_backend) m_backend->endLinkWalk();
+    }
+
+    // ---- Ctrl+J: the same walk over this pane's tool-call, reasoning and ✦ turn lines (#XPEB)
+    // Up (or Ctrl+J again) steps to the older line, Down to the newer; Enter opens or shuts a fold
+    // in place and keeps the walk going, Right only opens it, Left only shuts it, Shift+Enter does
+    // the same to every fold of that turn, and a line that is not a fold (a ✦ turn line, a call
+    // that opens a file or a diff pane) opens as its click would. Esc, or typing, leaves.
+    relay::TerminalView *foldWalkView() const {
+        auto *engine = dynamic_cast<relay::VTermBackend *>(m_backend);
+        return engine ? engine->view() : nullptr;
+    }
+    static QStringList foldWalkPrefixes() {
+        return {QString(relay::calllines::kFoldPrefix), QString(relay::calllines::kOpenPrefix),
+                QStringLiteral("relay://turn/"), QStringLiteral("relay://subagent/")};
+    }
+    bool outputFoldWalkActive() const {
+        const relay::TerminalView *view = foldWalkView();
+        return view && view->anchorWalkActive();
+    }
+    void stepOutputFold(int delta) {
+        relay::TerminalView *view = foldWalkView();
+        if (!view) {
+            status(QStringLiteral("This pane's engine cannot read the screen; start a pane with the Relay engine to step through tool calls."));
+            return;
+        }
+        if (outputLinkWalkActive()) endOutputLinkWalk();
+        relay::TerminalView::AnchorStop stop;
+        if (!view->stepAnchor(foldWalkPrefixes(), delta, &stop)) {
+            endOutputFoldWalk();
+            status(QStringLiteral("No tool calls or reasoning in this pane's output."));
+            return;
+        }
+        m_walkFold = stop.uri;
+        const bool fold = stop.uri.startsWith(relay::calllines::kFoldPrefix);
+        const QString keys = !fold ? QStringLiteral("Enter opens")
+            : view->foldExpanded(stop.uri) ? QStringLiteral("Enter or ← folds, Shift+Enter folds the turn")
+                                           : QStringLiteral("Enter or → unfolds, Shift+Enter unfolds the turn");
+        showWalkStatus(QStringLiteral("%1 of %2 · %3\n%4 · ↑ older, ↓ newer, Esc leaves")
+                           .arg(view->anchorWalkIndex() + 1).arg(view->anchorWalkCount())
+                           .arg(stop.text.isEmpty() ? stop.uri : stop.text, keys));
+    }
+    // `how`: 0 toggles, +1 only unfolds, -1 only folds. `wholeTurn` applies it to every fold of
+    // the current line's turn, the direction taken from the current line.
+    void activateOutputFold(int how, bool wholeTurn = false) {
+        relay::TerminalView *view = foldWalkView();
+        const QString uri = m_walkFold;
+        if (!view || uri.isEmpty() || !outputFoldWalkActive()) return;
+        if (!uri.startsWith(relay::calllines::kFoldPrefix)) {
+            // Not a fold: what its click does, and the walk is over.
+            endOutputFoldWalk();
+            openOutputTarget(uri, -1, false);
+            return;
+        }
+        const bool open = how > 0 ? true : how < 0 ? false : !view->foldExpanded(uri);
+        QStringList targets{uri};
+        if (wholeTurn) {
+            const relay::calllines::Ref here = relay::calllines::parseUri(uri);
+            targets.clear();
+            for (const QString &other : view->anchorWalkUris()) {
+                const relay::calllines::Ref ref = relay::calllines::parseUri(other);
+                if (ref.valid && ref.fold && ref.pane == here.pane && ref.turn == here.turn && !targets.contains(other))
+                    targets << other;
+            }
+        }
+        for (const QString &target : std::as_const(targets))
+            if (view->foldExpanded(target) != open) view->toggleFold(target);
+        stepOutputFold(0);   // the line stays selected, and the toast says what Enter does now
+    }
+    void endOutputFoldWalk() {
+        m_walkFold.clear();
+        if (!outputLinkWalkActive()) {
+            m_walkStatusTimer.stop();
+            if (m_walkStatus) m_walkStatus->hide();
+        }
+        if (relay::TerminalView *view = foldWalkView()) view->endAnchorWalk();
     }
     void placeOutputLinkStatus() {
         if (!m_walkStatus) return;
@@ -7566,6 +7646,9 @@ private:
             }
         }
         m_backend->setFoldContent(uri, themed);
+        // A fold the walk opened answers after the key (the detail comes from the worker): put
+        // the walked line back on screen and let the toast say what Enter does now (#XPEB).
+        if (!m_walkFold.isEmpty() && outputFoldWalkActive()) stepOutputFold(0);
     }
 
     // A fold anchor with no content yet was clicked: fetch the call's detail. A merged run needs
@@ -7573,6 +7656,11 @@ private:
     void foldRequested(const QString &uri) {
         const relay::calllines::Ref ref = relay::calllines::parseUri(uri);
         if (!ref.valid || !ref.fold) return;
+        // Opened by the mouse (or Ctrl+Shift+Return): the walk does it from the prompt box (#XPEB).
+        if (!outputFoldWalkActive())
+            hint(QStringLiteral("folds.step"),
+                 relay::ShortcutHints::nextTime(Keymap::instance().shortcutText(QStringLiteral("folds.step")),
+                                                QStringLiteral("step through tool calls and reasoning")));
         // The reasoning fold answers from the pane's own buffer, with no worker round trip however
         // old the turn (issue T8CN).
         if (ref.call == QLatin1String("thinking") || ref.call.startsWith(QLatin1String("thinking-"))) {
@@ -14677,6 +14765,13 @@ private:
     bool handleComposerKey(QKeyEvent *key) {
         const auto mods = key->modifiers() & (Qt::ControlModifier | Qt::ShiftModifier | Qt::AltModifier | Qt::MetaModifier);
         const int k = key->key();
+        // A walk over the output (Ctrl+L's links, Ctrl+J's tool calls) owns Enter, Esc and the
+        // arrows, and the window acts on them. This filter sees the box's keys before the window's
+        // does, and its Esc would stop the agent or arm Rewind and never reach the walk (#XPEB).
+        if ((k == Qt::Key_Escape || k == Qt::Key_Return || k == Qt::Key_Enter || k == Qt::Key_Up
+             || k == Qt::Key_Down || k == Qt::Key_Left || k == Qt::Key_Right)
+            && (outputLinkWalkActive() || outputFoldWalkActive()))
+            return false;
         // `!` or `*` typed (not pasted) as the first character switches this submission to the
         // terminal or the agent, like Claude Code's `!`. Backspace in the empty box undoes it.
         // `!` and `*` work from every mode: in Terminal mode `*` sends this one line to the agent,
@@ -18088,6 +18183,7 @@ private:
     QLabel *m_walkStatus = nullptr;
     QTimer m_walkStatusTimer;
     relay::TerminalBackend::Link m_walkLink;   // the link Ctrl+Shift+L is sitting on
+    QString m_walkFold;                        // the line Ctrl+J is sitting on (#XPEB)
     QTimer m_programPoll;
     HideReason m_hideReason = HideReason::None;
     bool m_altScreen = false, m_waiting = false, m_remoteHandled = false, m_remoteProgram = false;

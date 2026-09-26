@@ -151,6 +151,36 @@ bool RelayWindow::eventFilter(QObject *object, QEvent *event) {
                 break;
             }
         }
+        // The same for the walk over tool calls and reasoning (card #XPEB): Up and Down move,
+        // Enter opens or shuts the fold in place and stays in the walk, Right only opens, Left
+        // only shuts, Shift+Enter does it to the whole turn, Esc leaves. Ctrl+J steps on.
+        if (m_active && m_active->outputFoldWalkActive()) {
+            Pane *walking = m_active;
+            switch (key->key()) {
+            case Qt::Key_Return: case Qt::Key_Enter:
+            case Qt::Key_Escape:
+            case Qt::Key_Up: case Qt::Key_Left:
+            case Qt::Key_Down: case Qt::Key_Right: {
+                event->accept();
+                if (event->type() != QEvent::KeyPress || key->isAutoRepeat()) return true;
+                const int pressed = key->key();
+                const bool shift = key->modifiers() & Qt::ShiftModifier;
+                QTimer::singleShot(0, walking, [walking, pressed, shift] {
+                    if (pressed == Qt::Key_Return || pressed == Qt::Key_Enter) walking->activateOutputFold(0, shift);
+                    else if (pressed == Qt::Key_Escape) walking->endOutputFoldWalk();
+                    else if (pressed == Qt::Key_Right) walking->activateOutputFold(1);
+                    else if (pressed == Qt::Key_Left) walking->activateOutputFold(-1);
+                    else walking->stepOutputFold(pressed == Qt::Key_Down ? 1 : -1);
+                });
+                return true;
+            }
+            default:
+                if (event->type() == QEvent::KeyPress && !key->text().isEmpty()
+                    && Keymap::instance().match(key) != QStringLiteral("folds.step"))
+                    walking->endOutputFoldWalk();
+                break;
+            }
+        }
         // The embedded priorities editor owns Alt+Up/Down for reordering (#MDL1).
         // This application-wide filter runs before the picker's own event filter;
         // let both the override and key press reach it instead of navigating panes.
@@ -195,7 +225,7 @@ bool RelayWindow::eventFilter(QObject *object, QEvent *event) {
         // included, since Ctrl+Shift is Relay's layer (#QWAS).
         const bool shifted = key->modifiers() & Qt::ShiftModifier;
         if ((((id == QStringLiteral("control.human") || id == QStringLiteral("prompt.clear")) && !shifted)
-             || (id == QStringLiteral("links.step") && !shifted)
+             || (id == QStringLiteral("links.step") && !shifted) || id == QStringLiteral("folds.step")
              || id == QStringLiteral("input.toggle") || id == QStringLiteral("agent.interrupt")
              || id == QStringLiteral("pane.runInBackground")
              || id == QStringLiteral("agent.planToggle") || id == QStringLiteral("agent.effortUp") || id == QStringLiteral("agent.effortDown")
@@ -390,6 +420,7 @@ void RelayWindow::runActionNow(const QString &id, Pane *target) {
         else if (id == QStringLiteral("terminal.native")) pane->toggleNative();
         else if (id == QStringLiteral("pane.restartShell")) pane->restartStopped();
         else if (id == QStringLiteral("links.step")) pane->stepOutputLink(-1);
+        else if (id == QStringLiteral("folds.step")) pane->stepOutputFold(-1);   // #XPEB
         // One key for both directions (#QWAS): take control, or give the keyboard back.
         else if (id == QStringLiteral("control.human")) { if (pane->isNative()) pane->showPrompt(); else pane->takeControl(); }
         else if (id == QStringLiteral("control.prompt")) pane->showPrompt();

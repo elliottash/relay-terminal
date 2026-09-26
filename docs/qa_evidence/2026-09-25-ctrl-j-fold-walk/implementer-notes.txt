@@ -1,0 +1,245 @@
+--- 01-turn-done
+>* © project - cpu00%-mem00% x= + QO\|/4¢ © Reel io\;_aorx
+© Shell check the stable ()) ~/project (0) = ct x
+To run a command as administrator (user “root"), use “sudo <command>".
+
+See "man sudo root" for details.
+
+~/project $
+
+check the stable
+
+» stub
+
+>» + thought for 5 s
+
+> ran sleep +1 - 3 lines - exit 0 - 4s + 00:07:07
+
+» read 2 files - 7 lines - 00:07:07
+
+Done: the check passed and both files are read.
+
++ 3 tool calls - 9s (Ctrl+click)
+
+auto
+Shell commands or agent prompts... ? for help
+~/project < 97% left stub vy high vo
+--- 02-ctrl-j
+>+ © project - cpu00%-mem00% = + QO\|/4 Eee i v\/-—ao xXx
+© Shell check the stable ()) ~/project (0) = ct x
+To run a command as administrator (user “root"), use “sudo <command>".
+See "man sudo root" for details.
+~/project $
+check the stable
+» stub
+>» + thought for 5 s
+> ran sleep +1 - 3 lines - exit 0 - 4s + 00:07:07
+» read 2 files - 7 lines - 00:07:07
+Done: the check passed and both files are read.
+(Ctri+click)
+4of4- + 3toolcalls-9s
+Enter opens - t older, | newer, Esc leaves
+auto
+Bhell commands or agent prompts... ? for help
+~/project < 97% left stub vy high vo
+--- 03-up
+>+ © project - cpu00%-mem00% = + QO\|/4 Eee i v\/-—ao xXx
+© Shell check the stable ()) ~/project @ = ct x
+To run a command as administrator (user “root"), use “sudo <command>".
+See "man sudo root" for details.
+~/project $
+check the stable
+» stub
+>» + thought for 5 s
+> ran sleep +1 - 3 lines - exit 0 - 4s + 00:07:07
+b read 2 files «7 lines = 00:07:07
+Done: the check passed and both files are read.
++ 3 tool calls - 9s (Ctrl+click)
+3 of 4-» read 2 files - 7 lines - 00:07:07
+Enter or > unfolds, Shift+Enter unfolds the turn - t older, | newer, Esc leaves
+auto
+Bhell commands or agent prompts... ? for help
+~/project < 97% left stub vy high vo
+--- 04-enter-unfolds
+>+ © project - cpu00%-mem00% = + QO\|/4 Eee i v\/-—ao xXx
+© Shell check the stable ()) ~/project (0) = ct x
+To run a command as administrator (user “root"), use “sudo <command>".
+See "man sudo root" for details.
+~/project $
+check the stable
+» stub
+>» + thought for 5 s
+> ran sleep +1 - 3 lines - exit 0 - 4s + 00:07:07
+read README.md + 3 lines
+read notes.md - 4 lines
+Done: the check passed and both files are read.
++ 3 tool calls - 9s (Ctrl+click)
+3 of 4-» read 2 files - 7 lines - 00:07:07
+Enter or + folds, Shift+Enter folds the turn - t older, | newer, Esc leaves
+auto
+Bhell commands or agent prompts... ? for help
+~/project < 97% left stub vy high vo
+--- 05-up-right
+>+ © project - cpu00%-mem00% = + OQ 45 8G 2 -O xX
+© Shell check the stable ()) ~/project (0) = ct x
+To run a command as administrator (user “root"), use “sudo <command>".
+See "man sudo root" for details.
+~/project $
+check the stable
+» stub
+>» + thought for 5 s
+command
+$ sleep 4; printf ‘gauge ok\nfeed ok\nstable ok\n'
+output
+gauge ok
+feed ok
+stable ok
+Open in pane
+vy read 2 files - 7 lines - 00:07:07
+read README.md - 3 lines
+read notes.md - 4 lines
+Done: the check passed and both files are read.
++ 3 tool calls - 9 s (Ctrl+click)
+2 of 4-» ran sleep +1 - 3 lines - exit 0 - 4s - 00:07:07
+Enter or + folds, Shift+Enter folds the turn - t older, | newer, Esc leaves
+auto
+Shell commands or agent prompts... ? for help
+~/project < 97% left stub vy high vo
+--- 06-up-thinking
+>+ © project - cpu00%-mem00% = + QO\|/4¢ © Reel io\;_aorx
+© Shell check the stable ()) ~/project (0) = ct x
+To run a command as administrator (user “root"), use “sudo <command>".
+See "man sudo root" for details.
+~/project $
+check the stable
+» stub
+b + thought for 5 s
+y ran sleep +1 - 3 lines - exit 0 - 4s - 00:07:07
+command
+$ sleep 4; printf ‘gauge ok\nfeed ok\nstable ok\n'
+output
+gauge ok
+feed ok
+stable ok
+Open in pane
+vy read 2 files - 7 lines - 00:07:07
+read README.md - 3 lines
+read notes.md - 4 lines
+Done: the check passed and both files are read.
++ 3 tool calls - 9s (Ctrl+click)
+1 of 4-» + thought for 5s
+Enter or > unfolds, Shift+Enter unfolds the turn - t older, | newer, Esc leaves
+auto
+Bhell commands or agent prompts... ? for help
+~/project < 97% left stub vy high vo
+--- 07-shift-enter
+>* © project - cpu00%-mem00% x= + QO\|/4¢ © Reel io\;_aorx
+© Shell check the stable ()) ~/project @ = ct x
+To run a command as administrator (user “root"), use “sudo <command>".
+See "man sudo root" for details.
+~/project $
+check the stable
+» stub
+What the ask needs
+1. step 1: check the gauge, the feed and the stable module
+2. step 2: check the gauge, the feed and the stable module
+3. step 3: check the gauge, the feed and the stable module
+4. step 4: check the gauge, the feed and the stable module
+5. step 5: check the gauge, the feed and the stable module
+6. step 6: check the gauge, the feed and the stable module
+7. step 7: check the gauge, the feed and the stable module
+8. step 8: check the gauge, the feed and the stable module
+9. step 9: check the gauge, the feed and the stable module
+10. step 10: check the gauge, the feed and the stable module
+11. step 11: check the gauge, the feed and the stable module
+12. step 12: check the gauge, the feed and the stable module
+13. step 13: check the gauge, the feed and the stable module
+14. step 14: check the gauge, the feed and the stable module
+15. step 15: check the gauge, the feed and the stable module
+16. step 16: check the gauge, the feed and the stable module
+. 16 more lines + open in pane
+open in pane
+y ran sleep +1 - 3 lines - exit 0 - 4s - 00:07:07
+command
+$ sleep 4; printf ‘gauge ok\nfeed ok\nstable ok\n'
+output
+1 of 4-» + thought for 5s
+Enter or + folds, Shift+Enter folds the turn - t older, | newer, Esc leaves
+auto
+Shell commands or agent prompts... ? for help
+~/project < 97% left stub vy high vo
+--- 08-esc
+>+ © project - cpu00%-mem00% = + QO\|/4 Eee i v\/-—ao xXx
+© Shell check the stable ()) ~iproject G) = Cf x
+To run a command as administrator (user “root"), use “sudo <command>".
+See "man sudo root" for details.
+~/project $
+check the stable
+» stub
+y + thought for 5 s
+What the ask needs
+1. step 1: check the gauge, the feed and the stable module
+2. step 2: check the gauge, the feed and the stable module
+3. step 3: check the gauge, the feed and the stable module
+4. step 4: check the gauge, the feed and the stable module
+5. step 5: check the gauge, the feed and the stable module
+6. step 6: check the gauge, the feed and the stable module
+7. step 7: check the gauge, the feed and the stable module
+8. step 8: check the gauge, the feed and the stable module
+9. step 9: check the gauge, the feed and the stable module
+10. step 10: check the gauge, the feed and the stable module
+11. step 11: check the gauge, the feed and the stable module
+12. step 12: check the gauge, the feed and the stable module
+13. step 13: check the gauge, the feed and the stable module
+14. step 14: check the gauge, the feed and the stable module
+15. step 15: check the gauge, the feed and the stable module
+16. step 16: check the gauge, the feed and the stable module
+. 16 more lines + open in pane
+open in pane
+y ran sleep +1 - 3 lines - exit 0 - 4s - 00:07:07
+command
+$ sleep 4; printf ‘gauge ok\nfeed ok\nstable ok\n'
+output
+gauge ok
+feed ok
+stable ok
+auto
+Shell commands or agent prompts... ? for help
+~/project < 97% left stub vy high vo
+--- 09-ctrl-j-esc
+>+ © project - cpu00%-mem00% = + QO\|/4 Eee i v\/-—ao xXx
+© Shell check the stable ()) ~iproject G) = Cf x
+~/project $
+check the stable
+» stub
+y + thought for 5 s
+What the ask needs
+1. step 1: check the gauge, the feed and the stable module
+2. step 2: check the gauge, the feed and the stable module
+3. step 3: check the gauge, the feed and the stable module
+4. step 4: check the gauge, the feed and the stable module
+5. step 5: check the gauge, the feed and the stable module
+6. step 6: check the gauge, the feed and the stable module
+7. step 7: check the gauge, the feed and the stable module
+8. step 8: check the gauge, the feed and the stable module
+9. step 9: check the gauge, the feed and the stable module
+10. step 10: check the gauge, the feed and the stable module
+11. step 11: check the gauge, the feed and the stable module
+12. step 12: check the gauge, the feed and the stable module
+13. step 13: check the gauge, the feed and the stable module
+14. step 14: check the gauge, the feed and the stable module
+15. step 15: check the gauge, the feed and the stable module
+16. step 16: check the gauge, the feed and the stable module
+. 16 more lines + open in pane
+open in pane
+y ran sleep +1 - 3 lines - exit 0 - 4s - 00:07:07
+command
+$ sleep 4; printf ‘gauge ok\nfeed ok\nstable ok\n'
+output
+gauge ok
+feed ok
+stable ok
+open in pane
+auto
+Shell commands or agent prompts... ? for help
+~/project < 97% left stub vy high vo

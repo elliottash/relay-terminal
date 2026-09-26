@@ -197,6 +197,25 @@ public:
     int linkWalkIndex() const { return m_linkCursor.index(); }
     int linkWalkCount() const { return m_linkCursor.count(); }
 
+    // The same walk over the lines a host anchored itself (card #XPEB): every OSC 8 run whose URI
+    // starts with one of `prefixes` — a Relay pane's tool-call, reasoning and "✦ N tool calls"
+    // lines — one stop per URI, oldest first. The first step lands on the newest; -1 goes older,
+    // +1 newer, 0 re-reads (and re-highlights) the current one. The line is scrolled into view,
+    // underlined and selected, and `stop` gets its URI and its text. What a stop *does* is the
+    // host's: toggleFold() for a fold anchor, its own link routing for anything else. False when
+    // the output holds no such line.
+    struct AnchorStop {
+        QString uri;
+        QString text;
+    };
+    bool stepAnchor(const QStringList &prefixes, int delta, AnchorStop *stop);
+    void endAnchorWalk();
+    bool anchorWalkActive() const { return m_anchorCursor.active(); }
+    int anchorWalkIndex() const { return m_anchorCursor.index(); }
+    int anchorWalkCount() const { return m_anchorCursor.count(); }
+    // Every stop's URI, oldest first, while a walk runs (a host acting on several at once).
+    QStringList anchorWalkUris() const;
+
     // ---- folds: the detail of an agent tool call, unfolded inside the grid (#TK9C)
     //
     // Relay prints each tool call as one concise line wrapped in an OSC 8
@@ -419,6 +438,7 @@ private:
         Link link;
     };
     void collectLinks();
+    void collectAnchors(const QStringList &prefixes);
     // The links of one replacement block, scanned from the block's own logical
     // lines — the walk's half of what linkAt() does for the mouse (#J4WK).
     void collectFoldLinks(int foldIndex, const QString &cwd, const QString &home,
@@ -661,6 +681,9 @@ private:
     // Keyboard walk over the links (Ctrl+Shift+L)
     std::vector<WalkLink> m_linkWalk;
     relay::links::Cursor m_linkCursor;
+    // Keyboard walk over the host's anchored lines (Ctrl+J in Relay, card #XPEB)
+    std::vector<WalkLink> m_anchorWalk;   // link.target holds the URI, link.text the line
+    relay::links::Cursor m_anchorCursor;
     relay::links::CardLookup m_cardLookup;
     relay::links::Probe m_linkProbe;                  // #S5SH: the host's filesystem, not this one
     std::function<QString()> m_linkDirectory;

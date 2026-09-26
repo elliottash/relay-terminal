@@ -847,6 +847,116 @@ private slots:
         QVERIFY(t.links.isEmpty());
     }
 
+    // Ctrl+J in Relay (card #XPEB): the host's anchored lines, walked like links.
+    void theAnchorWalkStepsThroughTheHostsLines()
+    {
+        QFETCH_GLOBAL(QString, core);
+        Term t(core, QStringLiteral("/bin/cat"));
+        t.view->setFoldPrefix(QStringLiteral("relay://call/"));
+        const QStringList prefixes{QStringLiteral("relay://call/"), QStringLiteral("relay://turn/")};
+        t.backend->writeToDisplay("\x1b]8;;relay://call/p/1/a\x1b\\* ran python\x1b]8;;\x1b\\\r\n");
+        // Enough output that the first line is in the scrollback.
+        for (int i = 0; i < 20; ++i)
+            t.backend->writeToDisplay(QByteArray("filler ") + QByteArray::number(i) + "\r\n");
+        // A card row: its #K7Q2 is a link of its own, splitting the anchor into two runs.
+        t.backend->writeToDisplay("\x1b]8;;relay://call/p/1/b\x1b\\* card \x1b]8;;relay://card/K7Q2\x1b\\#K7Q2"
+                                  "\x1b]8;;relay://call/p/1/b\x1b\\ updated\x1b]8;;\x1b\\\r\n");
+        t.backend->writeToDisplay("plain https://example.com\r\n");
+        t.backend->writeToDisplay("\x1b]8;;relay://turn/p/1\x1b\\+ 2 tool calls\x1b]8;;\x1b\\\r\n");
+        QVERIFY(t.waitScreen(QStringLiteral("2 tool calls")));
+        QTest::qWait(60);
+
+        TerminalView::AnchorStop stop;
+        QVERIFY(t.view->stepAnchor(prefixes, -1, &stop));      // the newest line first
+        QCOMPARE(stop.uri, QStringLiteral("relay://turn/p/1"));
+        QCOMPARE(stop.text, QStringLiteral("+ 2 tool calls"));
+        QVERIFY(t.view->anchorWalkActive());
+        QCOMPARE(t.view->anchorWalkCount(), 3);                // the card row is one stop, the URL none
+        QCOMPARE(t.backend->selectedText(), QStringLiteral("+ 2 tool calls"));
+        QVERIFY(t.view->stepAnchor(prefixes, -1, &stop));
+        QCOMPARE(stop.uri, QStringLiteral("relay://call/p/1/b"));
+        QCOMPARE(stop.text, QStringLiteral("* card #K7Q2 updated"));
+        QVERIFY(t.view->stepAnchor(prefixes, -1, &stop));      // up into the scrollback
+        QCOMPARE(stop.uri, QStringLiteral("relay://call/p/1/a"));
+        QCOMPARE(t.backend->selectedText(), QStringLiteral("* ran python"));
+        QTest::qWait(60);                                      // the scroll lands on the next frame
+        QVERIFY(t.view->visibleRowsText().contains(QStringLiteral("* ran python")));
+        QCOMPARE(t.view->anchorWalkUris(),
+                 (QStringList{QStringLiteral("relay://call/p/1/a"), QStringLiteral("relay://call/p/1/b"),
+                              QStringLiteral("relay://turn/p/1")}));
+
+        // Opening the fold keeps the walk on its line, and 0 re-reads it.
+        t.view->setFoldContent(stop.uri, foldBody({QStringLiteral("detail")}));
+        QTest::qWait(80);
+        QVERIFY(t.view->foldExpanded(stop.uri));
+        QVERIFY(t.view->stepAnchor(prefixes, 0, &stop));
+        QCOMPARE(stop.uri, QStringLiteral("relay://call/p/1/a"));
+        QTest::qWait(60);
+        QVERIFY(t.view->visibleRowsText().contains(QStringLiteral("* ran python")));
+        QVERIFY(t.view->visibleRowsText().join(QLatin1Char('\n')).contains(QStringLiteral("detail"))); // indented
+        QVERIFY(t.view->toggleFold(stop.uri));
+        QVERIFY(!t.view->foldExpanded(stop.uri));
+        QVERIFY(t.view->stepAnchor(prefixes, 1, &stop));       // Down goes newer again
+        QCOMPARE(stop.uri, QStringLiteral("relay://call/p/1/b"));
+
+        // One walk at a time: starting the link walk ends this one, and the reverse.
+        TerminalView::Link link;
+        QVERIFY(t.view->stepLink(-1, &link));
+        QVERIFY(!t.view->anchorWalkActive());
+        QVERIFY(t.view->stepAnchor(prefixes, -1, &stop));
+        QVERIFY(!t.view->linkWalkActive());
+        QCOMPARE(stop.uri, QStringLiteral("relay://turn/p/1"));   // a fresh walk starts at the newest
+        t.view->endAnchorWalk();
+        QVERIFY(!t.view->anchorWalkActive());
+        QVERIFY(t.backend->selectedText().isEmpty());
+
+        // Nothing to walk: false, and no walk left running.
+        QVERIFY(!t.view->stepAnchor({QStringLiteral("relay://nothing/")}, -1, &stop));
+        QVERIFY(!t.view->anchorWalkActive());
+    }
+
+    // A long open fold between two stops: stepping to the line above it brings that line back on
+    // screen, measured in visual rows — the fold's rows are not real rows (card #XPEB).
+    void theAnchorWalkScrollsPastAnOpenFold()
+    {
+        QFETCH_GLOBAL(QString, core);
+        Term t(core, QStringLiteral("/bin/cat"));
+        t.view->setFoldPrefix(QStringLiteral("relay://call/"));
+        const QStringList prefixes{QStringLiteral("relay://call/")};
+        t.backend->writeToDisplay("\x1b]8;;relay://call/p/1/a\x1b\\* thought\x1b]8;;\x1b\\\r\n");
+        t.backend->writeToDisplay("\x1b]8;;relay://call/p/1/b\x1b\\* ran sleep\x1b]8;;\x1b\\\r\n");
+        t.backend->writeToDisplay("Done.\r\n");
+        QVERIFY(t.waitScreen(QStringLiteral("Done.")));
+        QTest::qWait(60);
+        TerminalView::AnchorStop stop;
+        QVERIFY(t.view->stepAnchor(prefixes, -1, &stop));
+        QCOMPARE(stop.uri, QStringLiteral("relay://call/p/1/b"));
+        // The host's detail arrives after the key, as a worker's does, and the host re-reads the
+        // stop at once: the fold is not laid out yet, and the line must still end up on screen
+        // rather than pushed off the top by the rows that keep the prompt in sight.
+        QStringList body;
+        for (int i = 0; i < 30; ++i)
+            body << QStringLiteral("output %1").arg(i);
+        t.view->setFoldContent(QStringLiteral("relay://call/p/1/b"), foldBody(body));
+        QVERIFY(t.view->stepAnchor(prefixes, 0, &stop));
+        QTest::qWait(120);
+        QVERIFY2(t.view->visibleRowsText().contains(QStringLiteral("* ran sleep")),
+                 qPrintable(t.view->visibleRowsText().join(QLatin1Char('|'))));
+        QVERIFY(t.view->stepAnchor(prefixes, -1, &stop));
+        QCOMPARE(stop.uri, QStringLiteral("relay://call/p/1/a"));
+        QTest::qWait(80);
+        QVERIFY2(t.view->visibleRowsText().contains(QStringLiteral("* thought")),
+                 qPrintable(t.view->visibleRowsText().join(QLatin1Char('|'))));
+        QCOMPARE(t.backend->selectedText(), QStringLiteral("* thought"));
+        // From the top of the screen down past the 30 rows: the fold's own line again.
+        t.view->scrollToTop();
+        QTest::qWait(60);
+        QVERIFY(t.view->stepAnchor(prefixes, 1, &stop));
+        QTest::qWait(80);
+        QVERIFY2(t.view->visibleRowsText().contains(QStringLiteral("* ran sleep")),
+                 qPrintable(t.view->visibleRowsText().join(QLatin1Char('|'))));
+    }
+
     void aFoldStaysUnderItsLineAcrossAResize()
     {
         QFETCH_GLOBAL(QString, core);

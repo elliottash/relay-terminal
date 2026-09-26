@@ -285,6 +285,14 @@ a program owns the terminal under the default `program_keys: "shift-only"`.
 and stays the shell's. It is prompt-box-only, so no terminal program or preset loses a key, and
 it is left out of the preset tables with the Ctrl+Shift+L form.
 
+**Step through tool calls and reasoning (`folds.step`, card #XPEB, added 2026-09-25):** Ctrl+J,
+gated to the composer like plain Ctrl+L — in the terminal Ctrl+J is a line feed and stays the
+shell's. The walk stops on the agent's ▸ tool-call and reasoning lines and its ✦ turn lines: Up
+(or Ctrl+J again) goes older, Down newer, Enter unfolds or folds in place, Right only unfolds,
+Left only folds, Shift+Enter does it to the whole turn, Esc leaves; a line that is not a fold
+opens as its click would. No Ctrl+Shift twin (Ctrl+Shift+J is taken). No preset binds Ctrl+J,
+so it is left out of the preset tables and every preset inherits it.
+
 **Desktop-environment grabs:**
 - **Alt+Tab / Alt+Shift+Tab** (Relay default window.next/previous): taken by GNOME, KDE Plasma, Cinnamon and XFCE, so no preset uses them.
 - **Ctrl+Alt+T** (Warp closed.restore): launches a terminal on Ubuntu/GNOME and KDE Plasma, so it will usually never reach Relay. Warp on Linux has the same problem. Rebind if needed.

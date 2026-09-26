@@ -322,6 +322,15 @@ QList<RelayWindow::PaletteItem> RelayWindow::rootItems() {
                 walk.run = [this] { if (m_active) m_active->stepOutputLink(-1); };
                 items << walk;
             }
+            if (m_active->foldWalkView()) {
+                PaletteItem walk;
+                walk.key = QStringLiteral("folds.step"); walk.section = terminal;
+                walk.label = QStringLiteral("Step through tool calls and reasoning");
+                walk.detail = QStringLiteral("Enter unfolds in place, Esc leaves · %1")
+                                  .arg(Keymap::instance().shortcutText(QStringLiteral("folds.step")));
+                walk.run = [this] { if (m_active) m_active->stepOutputFold(-1); };
+                items << walk;
+            }
             if (m_active->terminalCan(relay::TerminalBackend::Search)) {
                 PaletteItem find;
                 find.key = QStringLiteral("terminal.find"); find.section = terminal;
@@ -700,7 +709,7 @@ QList<RelayWindow::PaletteItem> RelayWindow::rootItems() {
             {terminal, QStringLiteral("menu:mode input.toggle prompt.clear voice.toggle agent.screenshotPane "
                                    "control.human terminal.interrupt program.delegate "
                                    "control.program.agent control.program.human terminal.find "
-                                   "terminal.promptPrevious terminal.promptNext links.step terminal.clear").split(' ')},
+                                   "terminal.promptPrevious terminal.promptNext links.step folds.step terminal.clear").split(' ')},
             {panes, QStringLiteral("tab.new window.new pane.splitRight pane.splitDown pane.splitLeft pane.splitUp "
                                    "pane.splitLocal tab.next tab.previous pane.equalize pane.moveLeft pane.moveRight "
                                    "pane.moveUp pane.moveDown pane.moveToNewTab pane.moveToBackground pane.runInBackground "

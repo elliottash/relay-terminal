@@ -400,6 +400,12 @@ private:
         // clear-screen and belongs to the shell.
         add("links.step", "terminal", "Step through files, folders and links in the output (Enter opens, Esc leaves; Ctrl+L from the prompt box)",
             {QStringLiteral("Ctrl+Shift+L"), QStringLiteral("Ctrl+L")});
+        // The same walk over the agent's tool-call, reasoning and ✦ turn lines (card #XPEB,
+        // owner 2026-09-25: "lets do ctrl J"). From the prompt box only, like plain Ctrl+L: in
+        // the terminal Ctrl+J is a line feed and belongs to the shell. No Ctrl+Shift twin
+        // (Ctrl+Shift+J is taken) and no preset binds Ctrl+J, so all four keep it.
+        add("folds.step", "agent", "Step through tool calls and reasoning in the output (Enter unfolds, Esc leaves; from the prompt box)",
+            {QStringLiteral("Ctrl+J")});
         add("agent.clearQueue", "agent", "Clear queued agent prompts", {});
         // Ctrl+Q empties the prompt box, and Ctrl+Z in the box brings the text back (#CPRQ). Plain
         // Ctrl+Q acts only from the prompt box: under a program it is the program's (XON in a

@@ -1713,6 +1713,7 @@ void TerminalView::mousePressEvent(QMouseEvent *e)
     const CellPos pos = cellAt(e->pos());
     if (e->button() == Qt::LeftButton) {
         endLinkWalk();
+        endAnchorWalk();
         m_pressedLink = Link();
         m_pressedFold.clear();
         // A fold anchor answers the click itself, before the "open this link"
@@ -3605,15 +3606,29 @@ void TerminalView::showWalkLink(const WalkLink &walk)
         scheduleFrame();
         return;
     }
-    // Put the link in the viewport, a third of the way down when it has to scroll.
+    // Put the link in the viewport, a third of the way down when it has to scroll. With a fold
+    // open the window is counted in visual rows: the core's viewport can hold every real row
+    // while the fold's own rows have pushed this one off the screen (card #XPEB). A fold whose
+    // content has only just arrived is laid out now, not at the next frame, so its rows count.
+    if (m_foldAnchorsDirty)
+        resolveFoldAnchors();
     int top = m_session->withCore([](VtCore &core) { return core.viewportTop(); });
-    if (walk.row < top || walk.endRow > top + m_rows - 1) {
+    const bool offScreen = foldsVisible()
+        ? m_folds.visualOfReal(walk.row) < m_visualTop
+              || m_folds.visualOfReal(walk.endRow) > m_visualTop + m_rows - 1
+        : walk.row < top || walk.endRow > top + m_rows - 1;
+    if (offScreen) {
         scrollToRow(std::max(0, walk.row - m_rows / 3));
         if (foldsVisible()) {
             m_forceFull = true;
             pullFrame(); // settle the core's viewport before rows are counted off it
         }
         top = m_session->withCore([](VtCore &core) { return core.viewportTop(); });
+    } else if (foldsVisible()) {
+        // On screen already: hold the window here. A view following the bottom would move to
+        // keep the prompt in sight on the next frame, and a fold that has just grown above the
+        // prompt carries the walked line off the top as it does (#XPEB).
+        setVisualTop(m_visualTop);
     }
     const int row = walk.row - top;
     const int endRow = walk.endRow - top;
@@ -3637,8 +3652,10 @@ bool TerminalView::stepLink(int delta, Link *link)
 {
     // The list is built when the walk starts and kept while it lasts, so repeated presses
     // move through the same links even as the program keeps printing.
-    if (!m_linkCursor.active())
+    if (!m_linkCursor.active()) {
+        endAnchorWalk(); // one walk at a time (card #XPEB)
         collectLinks();
+    }
     m_linkCursor.setCount(int(m_linkWalk.size()));
     const int index = m_linkCursor.step(delta);
     if (index < 0 || index >= int(m_linkWalk.size())) {
@@ -3660,6 +3677,112 @@ void TerminalView::endLinkWalk()
     m_linkWalk.clear();
     m_session->withCore([](VtCore &core) { core.selectionClear(); });
     clearVisualSelection(); // a link walked inside a block was selected here, not in the core (#J4WK)
+    m_hoverSegments.clear();
+    m_hoverRow = m_hoverStart = m_hoverEnd = -1;
+    m_hoverCellRow = m_hoverCellCol = -2;
+    m_forceFull = true;
+    scheduleFrame();
+}
+
+// The anchored lines of card #XPEB. The runs come from the core, which walks the whole
+// scrollback for them (the fold layer's own lookup), so the list is built once per walk.
+void TerminalView::collectAnchors(const QStringList &prefixes)
+{
+    m_anchorWalk.clear();
+    std::vector<VtCore::HyperlinkRun> runs;
+    QStringList rows;
+    int firstRow = 0, columns = 80;
+    m_session->withCore([&](VtCore &core) {
+        for (const QString &prefix : prefixes) {
+            if (prefix.isEmpty())
+                continue;
+            const std::vector<VtCore::HyperlinkRun> some = core.hyperlinkRuns(prefix);
+            runs.insert(runs.end(), some.begin(), some.end());
+        }
+        columns = std::max(1, core.columns());
+        rows = core.historyText(kWalkScrollbackLines);
+        firstRow = std::max(0, core.historyRows() - int(rows.size()));
+        rows += core.screenText().split(QLatin1Char('\n'));
+    });
+    std::sort(runs.begin(), runs.end(), [](const VtCore::HyperlinkRun &a, const VtCore::HyperlinkRun &b) {
+        return a.startRow != b.startRow ? a.startRow < b.startRow : a.startCol < b.startCol;
+    });
+    auto textOf = [&](const WalkLink &w) {
+        QString text;
+        for (int row = w.row; row <= w.endRow; ++row) {
+            const int i = row - firstRow;
+            if (i < 0 || i >= rows.size())
+                continue;
+            const int from = row == w.row ? w.col : 0;
+            const int to = row == w.endRow ? w.endCol + 1 : columns;
+            text += rows[i].mid(from, std::max(0, to - from));
+        }
+        return text.trimmed();
+    };
+    for (const VtCore::HyperlinkRun &run : runs) {
+        // One line split by a link of its own (a card row's `#K7Q2`, card #1NW3) is two runs of
+        // one URI: they are one stop. The same URI far away is a replayed copy, its own stop.
+        if (!m_anchorWalk.empty()) {
+            WalkLink &last = m_anchorWalk.back();
+            if (last.link.target == run.uri && run.startRow <= last.endRow + 1) {
+                last.endRow = run.endRow;
+                last.endCol = run.endCol;
+                continue;
+            }
+        }
+        WalkLink walk;
+        walk.row = run.startRow;
+        walk.col = run.startCol;
+        walk.endRow = run.endRow;
+        walk.endCol = run.endCol;
+        walk.link.target = run.uri;
+        m_anchorWalk.push_back(walk);
+    }
+    if (int(m_anchorWalk.size()) > kWalkMaxLinks)
+        m_anchorWalk.erase(m_anchorWalk.begin(), m_anchorWalk.end() - kWalkMaxLinks);
+    for (WalkLink &walk : m_anchorWalk)
+        walk.link.text = textOf(walk);
+}
+
+bool TerminalView::stepAnchor(const QStringList &prefixes, int delta, AnchorStop *stop)
+{
+    if (m_frame.altScreen)
+        return false; // a full-screen program's screen holds none of the host's lines
+    if (!m_anchorCursor.active()) {
+        endLinkWalk(); // one walk at a time: both highlight through the selection
+        collectAnchors(prefixes);
+    }
+    m_anchorCursor.setCount(int(m_anchorWalk.size()));
+    const int index = m_anchorCursor.step(delta);
+    if (index < 0 || index >= int(m_anchorWalk.size())) {
+        endAnchorWalk();
+        return false;
+    }
+    const WalkLink &walk = m_anchorWalk[size_t(index)];
+    showWalkLink(walk);
+    if (stop) {
+        stop->uri = walk.link.target;
+        stop->text = walk.link.text;
+    }
+    return true;
+}
+
+QStringList TerminalView::anchorWalkUris() const
+{
+    QStringList uris;
+    for (const WalkLink &walk : m_anchorWalk)
+        uris << walk.link.target;
+    return uris;
+}
+
+void TerminalView::endAnchorWalk()
+{
+    if (!m_anchorCursor.active() && m_anchorWalk.empty())
+        return;
+    m_anchorCursor.cancel();
+    m_anchorWalk.clear();
+    m_session->withCore([](VtCore &core) { core.selectionClear(); });
+    clearVisualSelection();
     m_hoverSegments.clear();
     m_hoverRow = m_hoverStart = m_hoverEnd = -1;
     m_hoverCellRow = m_hoverCellCol = -2;
