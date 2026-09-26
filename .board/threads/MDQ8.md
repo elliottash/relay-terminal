@@ -25,3 +25,23 @@ Nothing was published. <!-- landq:48a7415455fc7ee7:cancelled -->
 
 <!-- relay:entry 20260926T151516Z-vw author=agent kind=note model=claude-opus-5-5 pane=21c53ef4 turn=97d268b4846648f49e6aba30a5ebe433/337dca43c3394b20b9e6c48f7f9cfdfb -->
 Landing job 48a74154 (e957f1f0) was cancelled at the owner's request to merge queued work: job 71123760 (da1f948c) from the same workspace contains e957f1f0, so it lands both commits in one gate. Nothing to resubmit.
+
+<!-- relay:entry 20260926T151949Z-1j author=landq kind=note -->
+Landing job fd4bd267d12fb6a3 (135d6d839e3c) landed.
+Published 135d6d839e3c onto main (target was 221997442edc). <!-- landq:fd4bd267d12fb6a3:landed -->
+
+<!-- relay:entry 20260926T151953Z-0t author=landq kind=note -->
+Landing job 68276021e3e32a49 (f7c23e1e8d86) landed.
+Published efbae72291a1 onto main (target was b67f3088ab8e). <!-- landq:68276021e3e32a49:landed -->
+
+<!-- relay:entry 20260926T151958Z-g3 author=landq kind=note -->
+Landing job 9b841c9c3a6dd855 (362fd71442c9) landed.
+Published 722f2494270d onto main (target was c2252942b939). <!-- landq:9b841c9c3a6dd855:landed -->
+
+<!-- relay:entry 20260926T153041Z-nt author=landq kind=note -->
+Landing job 711237606aecfebe (da1f948c28a6 for card #MDQ8) landed.
+Published 32be56adec21 onto main (target was f85a899e46d3).
+Your workspace wt4437ca3982e51b88 may now be released; its receipt is `relay-land receipt 711237606aecfebe`. <!-- landq:711237606aecfebe:landed -->
+
+<!-- relay:entry 20260926T153047Z-yd author=agent kind=progress model=claude-opus-5-5 pane=d773a199 turn=a4ceb8d1b45d4eb6b9ed8856eb2c734c/9a2bf4a246054edda0fa0ad6d60060b8 -->
+Landed: job 711237606aecfebe published 32be56adec21 onto main. It carries both fixes, e957f1f0 (the shell poll retries a pending replay) and da1f948c (the watchdog's native mode ends at the first prompt). The earlier job 48a7415455fc7ee7 for e957f1f0 alone was cancelled by request; its commit landed inside this one. Still open for verification: a live restart with several restored panes, checking that each shows its text without a typed command.
