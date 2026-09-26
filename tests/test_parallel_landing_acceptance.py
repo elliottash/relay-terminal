@@ -352,6 +352,20 @@ class AuthorsAndReceipts(AcceptanceCase):
         self.assertIn("# dirty tail", (cwd / "app.py").read_text())
         self.assertTrue((cwd / "notes.txt").exists())
 
+    def test_a_landed_workspace_does_not_report_unlanded_work(self):
+        p = self.project()
+        p.activate()
+        ws = p.workspace("lands")
+        self.assertFalse(p.cli("workspace", "status", ws["workspace_id"])[1]["unlanded"])
+        sha = p.edit(ws, "app.py", "return 13\n", "return 13  # landed\n", "landed")
+        self.assertTrue(p.cli("workspace", "status", ws["workspace_id"])[1]["unlanded"])
+        p.cli("submit", sha, "--request-id", "l1", "--workspace-id", ws["workspace_id"])
+        p.cli("run", "--once", "--no-main")
+        self.assertFalse(p.cli("workspace", "status", ws["workspace_id"])[1]["unlanded"],
+                         "a workspace whose tip landed still reports unlanded work")
+        p.edit(ws, "app.py", "return 14\n", "return 14  # later\n", "later")
+        self.assertTrue(p.cli("workspace", "status", ws["workspace_id"])[1]["unlanded"])
+
     def test_duplicate_submit_is_one_job_even_from_racing_processes(self):
         p = self.project()
         p.activate()
@@ -864,11 +878,11 @@ class Handoffs(AcceptanceCase):
         service.run_once(main=False)
         self.assertEqual("failed", service.queue.status(job["id"])["status"])
         kinds = [c["kind"] for c in calls]
-        self.assertIn("failed", kinds)
-        self.assertEqual(len(kinds), len(set(kinds)), "one notification woke the author twice")
+        self.assertEqual(1, len(kinds), "one failed gate woke the author %d times: %s"
+                         % (len(kinds), kinds))
         self.assertTrue(all(c["session"] == "wake-me" for c in calls))
-        failed = next(c for c in calls if c["kind"] == "failed")
-        self.assertIn("Fix it in your workspace", failed["text"])
+        self.assertIn("test_f29", json.dumps(calls[0]["payload"]) + calls[0]["text"],
+                      "the author's handoff does not carry the gate diagnostic")
         pending = service.queue.outbox()
         self.assertEqual(1, len(pending), pending)
         self.assertEqual(1, pending[0]["attempts"])
@@ -1139,13 +1153,12 @@ class CutoverAndRollback(AcceptanceCase):
         self.assertEqual(before, self.comparable(checkout_state(p.repo)))
         ws = p.workspace("pending-author")
         sha = p.edit(ws, "app.py", "return 26\n", "return 26  # pending\n", "pending")
-        # Rollback refuses while the run loop is up, and stays paused.
-        daemon = self.spawn(p.cli_argv("run", "--no-main", "--interval", "0.2"), p.env())
-        self.wait_for(lambda: p.service().daemon_state().get("running"), what="daemon")
-        p.cli("pause")
-        # Work submitted while paused is recorded and waits; the idle daemon publishes nothing.
+        # Pending work, recorded before the pause; the paused daemon publishes nothing.
         job = p.cli("submit", sha, "--request-id", "pending", "--workspace-id",
                     ws["workspace_id"])[1]
+        p.cli("pause")
+        daemon = self.spawn(p.cli_argv("run", "--no-main", "--interval", "0.2"), p.env())
+        self.wait_for(lambda: p.service().daemon_state().get("running"), what="daemon")
         time.sleep(1.0)
         self.assertEqual("queued", p.cli("status", job["id"])[1]["status"])
         self.assertEqual(p.base, p.main())
@@ -1216,13 +1229,40 @@ class CutoverAndRollback(AcceptanceCase):
         self.assertEqual(0, pauser.wait(timeout=60))
         self.assertEqual("landed", service.queue.status(job["id"])["status"])
         after_pause = p.main()
-        later = git(p.repo, "commit-tree", git(p.repo, "rev-parse", sha + "^{tree}"), "-p", sha,
-                    "-m", "submitted while paused")
-        queued = p.cli("submit", later, "--request-id", "paused-1")[1]
         rc, out = p.cli("run", "--once", "--no-main")
         self.assertIn("paused", out.get("skipped", ""), out)
         self.assertEqual(after_pause, p.main())
-        self.assertEqual("queued", p.cli("status", queued["id"])[1]["status"])
+
+    def test_paused_is_a_hold_that_refuses_new_work_and_keeps_old_work(self):
+        p = self.project()
+        p.activate()
+        kept_ws = p.workspace("kept")
+        kept_sha = p.edit(kept_ws, "app.py", "return 27\n",
+                          "return 27  # kept\n", "kept")
+        kept = p.cli("submit", kept_sha, "--request-id", "kept", "--workspace-id",
+                     kept_ws["workspace_id"])[1]
+        p.cli("pause")
+        # Every door for new work refuses with the reason: allocation, both submit paths, Board.
+        rc, out = p.cli("workspace", "create", "while-paused", codes=(2,))
+        self.assertIn("paused", out["error"])
+        later = git(p.repo, "commit-tree", git(p.repo, "rev-parse", kept_sha + "^{tree}"),
+                    "-p", kept_sha, "-m", "submitted while paused")
+        rc, out = p.cli("submit", later, "--request-id", "paused-cli", codes=(2,))
+        self.assertIn("paused", out["error"])
+        with self.assertRaises(integration_service.ServiceError):
+            p.service().submit(later, request_id="paused-api")
+        p.card_path.write_text(p.card_path.read_text().replace("executing", "planned"))
+        rc, out = p.cli("board-submit", ".board/features/2026-09-26-acceptance.md",
+                        "--session", "s", codes=(2,))
+        self.assertIn("paused", out["error"])
+        self.assertEqual(["kept"], [j["request_id"] for j in p.cli("status")[1]])
+        self.assertEqual(p.base, p.main())
+        # What was recorded is kept, and activate resumes it.
+        self.assertEqual("queued", p.cli("status", kept["id"])[1]["status"])
+        self.assertTrue(Path(kept_ws["execution_cwd"]).is_dir())
+        p.cli("activate")
+        p.cli("run", "--once", "--no-main")
+        self.assertEqual("landed", p.cli("status", kept["id"])[1]["status"])
 
     def land_py(self, p, *args, codes=(0,)):
         proc = subprocess.run([PY, str(ROOT / "scripts" / "land.py"), *args], cwd=p.repo,
@@ -1346,6 +1386,10 @@ class Worker:
         self.proc.wait(timeout=30)
 
 
+BOARD_TRIGGER = "C1-BOARD-WRITE"
+BOARD_MARK = "C1 pane board write reaches the queue"
+
+
 class StubModel:
     """An OpenAI-compatible streaming endpoint that answers every turn with one short line and
     records what the author was told. Nothing leaves the machine."""
@@ -1360,12 +1404,24 @@ class StubModel:
 
             def do_POST(self):
                 body = json.loads(self.rfile.read(int(self.headers.get("Content-Length") or 0)))
-                prompts.append(json.dumps(body.get("messages", []))[-4000:])
-                chunks = [{"choices": [{"index": 0, "delta": {"role": "assistant",
-                                                              "content": "Noted."}}]},
-                          {"choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}],
-                           "usage": {"prompt_tokens": 10, "completion_tokens": 2,
-                                     "total_tokens": 12}}]
+                messages = body.get("messages", [])
+                prompts.append(json.dumps(messages)[-4000:])
+                usage = {"prompt_tokens": 10, "completion_tokens": 2, "total_tokens": 12}
+                last = messages[-1] if messages else {}
+                if last.get("role") == "user" and BOARD_TRIGGER in json.dumps(last.get("content")):
+                    # The turn's one tool call: a Board comment on the project's card.
+                    args = json.dumps({"id": "AB12", "kind": "progress", "text": BOARD_MARK})
+                    chunks = [{"choices": [{"index": 0, "delta": {"role": "assistant",
+                               "tool_calls": [{"index": 0, "id": "call_c1", "type": "function",
+                                               "function": {"name": "board_comment",
+                                                            "arguments": args}}]}}]},
+                              {"choices": [{"index": 0, "delta": {},
+                                            "finish_reason": "tool_calls"}], "usage": usage}]
+                else:
+                    chunks = [{"choices": [{"index": 0, "delta": {"role": "assistant",
+                                                                  "content": "Noted."}}]},
+                              {"choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}],
+                               "usage": usage}]
                 data = "".join("data: %s\n\n" % json.dumps(c) for c in chunks) + "data: [DONE]\n\n"
                 self.send_response(200)
                 self.send_header("Content-Type", "text/event-stream")
@@ -1483,6 +1539,10 @@ class NativeAndGuestPanes(AcceptanceCase):
         # The author's turn reads the diagnostic and ends; only then is the row acknowledged.
         native.wait(lambda e: e.get("event") == "handoff_delivered"
                     and e.get("job_id") == bad["id"], timeout=60)
+        time.sleep(4)          # one more poll interval: a second handoff would be queued by now
+        queued = [e for e in native.seen + list(native.events.queue)
+                  if e.get("event") == "handoff_queued" and e.get("job_id") == bad["id"]]
+        self.assertEqual(1, len(queued), "one failed gate started %d author turns" % len(queued))
         self.assertTrue(any(bad["id"] in prompt for prompt in self.model.prompts),
                         "the author's model never saw the handoff")
         self.wait_for(lambda: not [h for h in p.service().handoffs(pending_only=True)
@@ -1493,6 +1553,29 @@ class NativeAndGuestPanes(AcceptanceCase):
         again.wait(lambda e: e.get("event") == "configured")
         self.assertEqual(n_ws["workspace_id"], self.lease("native-tok")["workspace_id"])
         again.stop()
+
+    def test_a_native_panes_board_write_in_a_second_project_is_published(self):
+        p = self.p
+        self.assertFalse((p.repo / "scripts" / "land.py").exists())   # not the Relay repo
+        native = self.start_worker("board-tok")
+        native.wait(lambda e: e.get("event") == "configured")
+        native.send({"type": "ask", "text": "%s: note progress on #AB12" % BOARD_TRIGGER,
+                     "id": "ask-board"})
+        native.wait(lambda e: e.get("event") == "agent_finished", timeout=60)
+        thread = p.repo / ".board/threads/AB12.md"
+        self.assertIn(BOARD_MARK, thread.read_text(), "the write did not reach the canonical Board")
+        lease = self.lease("board-tok")
+        self.assertFalse((Path(lease["execution_cwd"]) / ".board").exists())
+
+        def metadata_job():
+            jobs = p.cli("status")[1]
+            return next((j for j in jobs if j["kind"] == "metadata"), None)
+
+        job = self.wait_for(metadata_job, timeout=60, what="the turn's Board write in the queue")
+        p.cli("run", "--once", "--no-main")
+        self.assertEqual("landed", p.cli("status", job["id"])[1]["status"])
+        self.assertIn(BOARD_MARK, p.show(p.main(), ".board/threads/AB12.md"))
+        native.stop()
 
     def test_a_paused_project_refuses_development_launch_instead_of_sharing_the_checkout(self):
         self.p.cli("pause")
@@ -1508,13 +1591,152 @@ class NativeAndGuestPanes(AcceptanceCase):
                                str(runtime), "--cwd", str(self.p.repo), "--session", "g-paused",
                                "--home", str(self.home)], cwd=str(BACKEND), env=self.env,
                               text=True, capture_output=True, timeout=60)
-        # Refused, and the reason is readable (stdout JSON, or the last stderr line the pane
-        # shows); no workspace was allocated and no shared-checkout command line was printed.
+        # Refused with the launcher's JSON contract, not a traceback; no workspace was
+        # allocated and no shared-checkout command line was printed.
         self.assertNotEqual(0, proc.returncode)
-        self.assertIn("paused", proc.stdout + proc.stderr.strip().splitlines()[-1])
-        self.assertNotIn('"command"', proc.stdout)
+        self.assertNotIn("Traceback", proc.stderr)
+        answer = json.loads(proc.stdout)
+        self.assertFalse(answer["ok"])
+        self.assertIn("paused", answer["error"])
+        self.assertNotIn("command", answer)
         self.assertEqual([], [w for w in self.p.service().trees.list()
                               if w["session"] == "g-paused"])
+
+
+
+# --------------------------------------------------------------------------------------------
+# The real GUI binary (opt-in: RELAY_C1_RELAY_BINARY names a built `relay`)
+# --------------------------------------------------------------------------------------------
+
+GUI_BINARY = os.environ.get("RELAY_C1_RELAY_BINARY", "")
+
+
+@unittest.skipUnless(GUI_BINARY and shutil.which("Xvfb") and shutil.which("xdotool")
+                     and shutil.which("tmux"), "set RELAY_C1_RELAY_BINARY; needs Xvfb, xdotool, tmux")
+class LiveGui(AcceptanceCase):
+    """Two panes of one window on a queue-mode project, under Xvfb with an isolated profile and
+    a private tmux socket (the local holder path: no systemd user session here)."""
+
+    def setUp(self):
+        super().setUp()
+        self.p = self.project()
+        self.p.activate()
+        display = next(n for n in range(300, 400) if not Path("/tmp/.X11-unix/X%d" % n).exists())
+        self.display = ":%d" % display
+        xvfb = self.spawn(["Xvfb", self.display, "-screen", "0", "1400x900x24", "-nolisten", "tcp"],
+                          _scrubbed())
+        self.wait_for(lambda: Path("/tmp/.X11-unix/X%d" % display).exists(), what="Xvfb")
+        self.tmux = Path(tempfile.mkdtemp(prefix="c1t", dir="/tmp"))   # socket path < 108 bytes
+        self.addCleanup(shutil.rmtree, self.tmux, True)
+        self.addCleanup(lambda: subprocess.run(["tmux", "-S", str(self.socket()), "kill-server"],
+                                               capture_output=True))
+        runtime = self.root / "run"
+        runtime.mkdir(mode=0o700)
+        for name in ("home", "data"):
+            (self.root / name).mkdir()
+        self.env = self.p.env({"DISPLAY": self.display, "HOME": str(self.root / "home"),
+                               "XDG_DATA_HOME": str(self.root / "data"),
+                               "XDG_RUNTIME_DIR": str(runtime), "TMUX_TMPDIR": str(self.tmux),
+                               "RELAY_DATA_DIR": str(ROOT), "RELAY_KEYRING": "off",
+                               "QT_QPA_PLATFORM": "xcb"})
+        self.addCleanup(xvfb.kill)
+
+    def launch(self, *extra, restore=False):
+        # `-w` opens a window on that directory; a plain start restores the saved layout.
+        where = [] if restore else ["-w", str(self.p.repo)]
+        self.relay = self.spawn([GUI_BINARY, *extra, *where], self.env, cwd=str(self.p.repo))
+        return self.relay
+
+    def quit(self):
+        self.relay.send_signal(signal.SIGTERM)
+        self.assertIsNotNone(self.relay.wait(timeout=60))
+
+    def socket(self):
+        return self.tmux / ("tmux-%d" % os.getuid()) / "relay"
+
+    def pane_leases(self):
+        return {w["session"]: w for w in self.p.service().trees.list(include_removed=True)
+                if len(w["session"]) == 36 and w["session"].count("-") == 4}
+
+    def shell_cwd(self, session):
+        out = subprocess.run(["tmux", "-S", str(self.socket()), "list-panes", "-a", "-F",
+                              "#{session_name} #{pane_pid}"], capture_output=True, text=True).stdout
+        for line in out.splitlines():
+            name, _, pid = line.partition(" ")
+            if name == "relay-" + session[:8]:
+                return Path(os.readlink("/proc/%s/cwd" % pid)).resolve()
+        return None
+
+    def key(self, keys):
+        env = {**_scrubbed(), "DISPLAY": self.display}
+        window = subprocess.run(["xdotool", "search", "--onlyvisible", "--name", "Relay"],
+                                env=env, capture_output=True, text=True).stdout.split()
+        self.assertTrue(window, "no Relay window")
+        subprocess.run(["xdotool", "windowfocus", "--sync", window[0]], env=env, timeout=30)
+        subprocess.run(["xdotool", "key", keys], env=env, timeout=30)
+
+    def test_each_pane_shell_starts_in_its_own_lease_and_leases_end_with_their_panes(self):
+        self.launch("--fresh")
+        first = self.wait_for(lambda: list(self.pane_leases()), timeout=60, what="first pane")
+        one = first[0]
+        self.wait_for(lambda: self.shell_cwd(one), timeout=60, what="first shell")
+        self.key("ctrl+t")
+        two = self.wait_for(lambda: [t for t in self.pane_leases() if t != one],
+                            timeout=60, what="second pane")[0]
+        self.wait_for(lambda: self.shell_cwd(two), timeout=60, what="second shell")
+        leases = self.pane_leases()
+        for token in (one, two):
+            self.assertEqual(Path(leases[token]["path"]).resolve(), self.shell_cwd(token),
+                             "pane %s's shell is not in its own workspace" % token[:8])
+        self.assertNotEqual(leases[one]["path"], leases[two]["path"])
+        # Closing the second pane ends its lease; quitting ends the first one's.
+        self.key("ctrl+w")
+        self.wait_for(lambda: self.pane_leases()[two]["status"] != "active", timeout=30,
+                      what="the closed pane's lease to end")
+        self.quit()
+        self.wait_for(lambda: self.pane_leases()[one]["status"] != "active", timeout=30,
+                      what="the quit pane's lease to end")
+        for token in (one, two):
+            self.assertIn(self.pane_leases()[token]["status"], ("released", "retained"))
+
+    def test_a_restored_pane_takes_back_its_own_workspace_with_its_work(self):
+        self.launch()
+        token = self.wait_for(lambda: list(self.pane_leases()), timeout=60, what="pane")[0]
+        self.wait_for(lambda: self.shell_cwd(token), timeout=60, what="shell")
+        lease = self.pane_leases()[token]
+        tree = Path(lease["path"])
+        (tree / "app.py").write_text((tree / "app.py").read_text() + "# committed, unlanded\n")
+        git(tree, "commit", "-qam", "unlanded work")
+        tip = git(tree, "rev-parse", "HEAD")
+        (tree / "scratch.txt").write_text("dirty, uncommitted\n")
+        self.quit()
+        self.wait_for(lambda: self.pane_leases()[token]["status"] != "active", timeout=30,
+                      what="the lease to end at quit")
+        self.assertEqual("retained", self.pane_leases()[token]["status"])
+        # The restored layout brings the pane back on the same token and the same tree.
+        before = set(self.pane_leases())
+        self.launch(restore=True)
+        self.wait_for(lambda: self.pane_leases()[token]["status"] == "active", timeout=60,
+                      what="the restored pane to reacquire its tree")
+        self.wait_for(lambda: self.shell_cwd(token), timeout=60, what="restored shell")
+        self.assertEqual(tree.resolve(), self.shell_cwd(token))
+        self.assertEqual(lease["path"], self.pane_leases()[token]["path"])
+        self.assertEqual(tip, git(tree, "rev-parse", "HEAD"))
+        self.assertEqual("dirty, uncommitted\n", (tree / "scratch.txt").read_text())
+        self.assertEqual(before, set(self.pane_leases()), "the restored pane took a new tree")
+        self.quit()
+
+
+class ProtocolDocument(unittest.TestCase):
+
+    def test_protocol_sections_have_unique_numbers(self):
+        import re
+        from collections import Counter
+        text = (ROOT / "docs" / "AGENT-SESSIONS-PROTOCOL.md").read_text()
+        numbers = Counter(re.findall(r"^## (\d+)\. ", text, re.M))
+        self.assertEqual({}, {n: c for n, c in numbers.items() if c > 1},
+                         "two protocol sections share a number")
+        self.assertIn("workspace_context prepare", text)
 
 
 if __name__ == "__main__":

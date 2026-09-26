@@ -39,7 +39,14 @@ GUI: the real `relay` binary, built exactly at `4af516ea` through `land.py try -
 
 Open defects (repros on the thread, 2026-09-26): shells under the local tmux holder inherit another pane's `RELAY_START_DIR`; pane leases are never released on close or quit, so `max_workspaces` fills; Live job ages always show `0 s`; landed workspaces read "work retained"; one failed gate wakes the author twice; pane Board writes in a second project never reach the queue; paused-mode behaviour disagrees with `pause()`'s docstring; a paused `guest_launch` prints a traceback instead of JSON; and the protocol doc has two sections numbered 37.
 
+Recheck after owner fixes (`65ca8c46` B1 for 4–7, `a0141e41` B2 for 8–9, `e7f541a4` parent for GUI 1–3), 2026-09-26. The new regressions for all nine pass on `main` `e7f541a4`: receipt-based `unlanded`; one author wake and one author turn per failed gate; a stub model's real `board_comment` in a native pane of a second project reaches the queue and lands; paused refuses allocation, both submit paths and Board snapshots while keeping recorded work; a paused `guest_launch` answers in JSON; protocol section numbers are unique. `LiveGui` (opt-in, the `e7f541a4` binary, tree `357b1553` copied from slot 0) passes both checks. Each pane's tmux shell runs in its own lease; closing a pane and quitting release their leases; a layout restore brings the pane back on its saved token and reacquires its retained tree with its commit and dirty file intact. `relay -w <dir>` opens a new pane instead of restoring, and the retained tree is kept.
+
+![Live with real job ages; landed authors' workspaces no longer read "work retained"](docs/qa_evidence/2026-09-26-verify-3MH4/05-live-real-ages-landed-not-retained.png)
+
+![Ctrl+T: the second pane's shell starts in its own leased worktree](docs/qa_evidence/2026-09-26-verify-3MH4/06-ctrl-t-second-pane-in-own-worktree.png)
+
 ## Tests
 `PYTHONPATH=backend python3 -m pytest -q -p no:cacheprovider tests/test_parallel_landing_acceptance.py` — 30 passed in 66.40s on a clean export of `c692bf22`
 `manual: docs/qa_evidence/2026-09-26-verify-3MH4/` — Xvfb, isolated XDG profile and private tmux socket, relay built at 4af516ea
-
+`PYTHONPATH=backend python3 -m pytest -q -p no:cacheprovider tests/test_parallel_landing_acceptance.py -k "landed_workspace_does_not or failed_gate_wakes or native_and_guest_panes_land or board_write_in_a_second or paused or protocol_sections or pause_drains or activation_and_rollback"` — 9 passed in 26.64s on a clean export of e7f541a4
+`RELAY_C1_RELAY_BINARY=<slot0 build/relay, tree 357b1553> python3 -m pytest -q tests/test_parallel_landing_acceptance.py -k LiveGui` — 2 passed in 8.48s
