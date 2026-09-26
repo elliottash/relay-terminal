@@ -4924,17 +4924,30 @@ public:
                     return tool;
             return nullptr;
         };
-        if (!boardInTab()) toggleBoardPane();
+        if (!boardInTab()) {
+            QString workspace = boardWorkspace();
+            if (workspace.isEmpty()) {
+                workspace = candidateProject();
+                if (workspace.isEmpty()) workspace = boardSearchRoot();
+            }
+            if (workspace.isEmpty()) {
+                notice(QStringLiteral("Open a terminal in the directory whose Board you want."));
+                return;
+            }
+            QWidget *page = m_tabs->currentWidget();
+            QWidget *anchor = m_activeLeaf ? m_activeLeaf.data() : static_cast<QWidget *>(m_active.data());
+            ToolPane *created = createBoardPane(workspace, {}, {}, QString(), {}, {},
+                                                QString(), ToolPane::Kind::Board, true);
+            if (anchor) dockBeside(anchor, created);
+            else if (page && page->layout()) page->layout()->addWidget(created);
+            attachTab(page, workspace, QString::fromLatin1(relay::projects::kReasonSwitchboard));
+        }
         ToolPane *tool = boardInTab();
         if (!tool) return;
         tool->board()->openCardSolo(id);
         setActiveLeaf(tool);
         focusLeaf(tool);
-        // A Switchboard this call just opened has no rows yet, so openCardSolo(id) had nothing to
-        // open and only the selection survives (the pane restores it when the rows land). Keep
-        // asking while they arrive, so one click on a `#K7Q2` in the output really does end on
-        // the card and not merely near it (2026-09-18).
-        if (!tool->board()->model().card(id)) waitForBoardCard(tool, id, 0);
+        updateTitles();
     }
 
     // Retries the reveal every 250 ms for up to 6 s, which covers the worker's first answer
@@ -5566,7 +5579,8 @@ public:
                               const QJsonArray &labels = {},
                               const QJsonArray &selfClosed = {},
                               const QString &grouping = QString(),
-                              ToolPane::Kind kind = ToolPane::Kind::Board) {
+                              ToolPane::Kind kind = ToolPane::Kind::Board,
+                              bool directCard = false) {
         auto *view = new relay::BoardView(workspace);
         if (!collapsed.isEmpty()) view->setCollapsedSections(collapsed);
         if (!hidden.isEmpty()) view->setHiddenSections(hidden);
@@ -5861,10 +5875,11 @@ public:
         };
         // The board is asked for as soon as the pane is in a tab: the worker is the tab's, and the
         // pane is not in one yet while this runs.
-        QTimer::singleShot(0, this, [this, guard] {
+        QTimer::singleShot(0, this, [this, guard, directCard] {
             QWidget *page = guard ? pageOf(guard) : nullptr;
             if (!page) return;
-            if (relay::BoardWorker *worker = helperWorker(page, true)) worker->open();
+            if (relay::BoardWorker *worker = helperWorker(page, true); worker && !directCard)
+                worker->open();
         });
         return tool;
     }

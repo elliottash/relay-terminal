@@ -1916,7 +1916,8 @@ class BoardCommands:
                 if card is not None:
                     result["body"] = card.body
                     result["body_truncated"] = False
-            self._send({"event": "board_card", **result, "card_id": result["id"], "id": rid})
+            self._send({"event": "board_card", **result, "card_id": result["id"], "id": rid,
+                        "config": self._config()})
         elif kind in ("board_create", "board_update", "board_move", "board_priority",
                       "board_delete", "board_comment", "board_claim"):
             self._write(kind, request, rid)

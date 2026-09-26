@@ -5,6 +5,7 @@ import shutil
 import subprocess
 import tempfile
 import unittest
+from unittest.mock import patch
 from datetime import date, datetime, timezone
 from pathlib import Path
 
@@ -63,6 +64,28 @@ class TempBoardTest(unittest.TestCase):
 
     def card(self, rel: str = "features/2026-09-17-voice.md", text: str = CARD) -> B.Card:
         return B.Card.load(write(self.root / rel, text))
+
+
+class DirectCardReadTests(TempBoardTest):
+    def test_indexed_card_does_not_parse_other_cards(self):
+        path = self.card().path
+        self.card("bugs/other.md", CARD.replace("K7Q2", "M3XJ"))
+        write(self.root / "BOARD.md",
+              "| `#K7Q2` | [Voice transcription mode](features/2026-09-17-voice.md) |\n")
+        with patch.object(B.Card, "load", wraps=B.Card.load) as load:
+            found = self.board.card_by_id("K7Q2")
+        self.assertEqual(found.path, path)
+        self.assertEqual(load.call_count, 1)
+
+    def test_stale_index_falls_back_to_card_front_matter(self):
+        self.card("bugs/other.md", CARD.replace("K7Q2", "M3XJ"))
+        path = self.card().path
+        write(self.root / "BOARD.md",
+              "| `#K7Q2` | [Old path](features/removed.md) |\n")
+        with patch.object(B.Card, "load", wraps=B.Card.load) as load:
+            found = self.board.card_by_id("K7Q2")
+        self.assertEqual(found.path, path)
+        self.assertEqual(load.call_count, 1)
 
 
 # --------------------------------------------------------------------------- ids

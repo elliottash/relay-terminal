@@ -5228,6 +5228,7 @@ void BoardView::handleEvent(const QJsonObject &event)
     }
     if (type == QStringLiteral("board")) {
         m_open = true;
+        m_directCard = false;
         m_workerError.clear();
         // The conversation itself rides on the console's own worker connection now (protocol
         // 33): a pane opened while the agent is half way through an answer catches up from the
@@ -5327,6 +5328,20 @@ void BoardView::handleEvent(const QJsonObject &event)
     // card opened in one tab opens in them all (#TTYB). Only the card *details* are scoped — the
     // broadcasts above (`board`, `board_changed`) still reach every pane, so the rows move together.
     if (type == QStringLiteral("board_card") && mine) {
+        if (requestId == m_directCardRequest)
+            m_directCardRequest.clear();
+        // A #CODE reveal can be the first request this pane makes. Show its document without
+        // waiting for board_open to parse and transmit every row.
+        if (!m_open) {
+            m_open = true;
+            m_directCard = true;
+            m_config = event.value(QStringLiteral("config")).toObject();
+            m_model.setConfig(m_config);
+            m_empty->hide();
+            m_emptyRetryRow->hide();
+            m_splitter->show();
+            m_keys->show();
+        }
         QStringList statuses;
         const QList<board::Column> sections = m_model.sections();
         for (const board::Column &column : sections)
@@ -5343,7 +5358,8 @@ void BoardView::handleEvent(const QJsonObject &event)
         m_detail->setChoices(statuses, tabs);
         // A card and a signal never share the page (#AQ6X): the card takes it.
         m_signalDetail->hide();
-        ensureCardConsole();   // the first card opened is when the page asks for its agent
+        if (!m_directCard)
+            ensureCardConsole();
         // One console, several cards (card #CTRN). The page keeps **one** console and points it
         // at whatever card is open — the conversation, the routing and the persist key already
         // follow the card (`CardContext::spec`) — but the emulator did not, so switching cards
@@ -5385,6 +5401,12 @@ void BoardView::handleEvent(const QJsonObject &event)
         if (!wasOpen)
             m_detailSized = false;
         updateDetailLayout();
+        // Building the console can start the tab's helper worker. Let Qt paint the card first;
+        // the reply box arrives on the next event-loop pass, after the document is visible.
+        if (m_directCard)
+            QTimer::singleShot(20, this, [this] {
+                if (detailOpen()) ensureCardConsole();
+            });
         if (m_editOnOpen) {
             m_editOnOpen = false;
             const bool fresh = m_editOnOpenFresh;
@@ -5623,6 +5645,12 @@ void BoardView::handleEvent(const QJsonObject &event)
     // A write this pane asked for and the worker refused (a move into Needs QA without evidence,
     // a stale hash): say so where the card was dropped instead of in a status bar.
     if (type == QStringLiteral("error") && mine) {
+        if (requestId == m_directCardRequest) {
+            m_directCardRequest.clear();
+            setEmptyText(event.value(QStringLiteral("text")).toString());
+            reload();
+            return;
+        }
         if (!m_quickAddTriageRequest.isEmpty() && requestId == m_quickAddTriageRequest) {
             m_quickAddTriageRequest.clear();
             m_quickAddTriageSupported = false;
@@ -7108,8 +7136,13 @@ void BoardView::openSelected()
         return;
     }
     stampViewed(m_selected);   // local only (#FKSN): nothing goes to the worker or the card file
-    send({{QStringLiteral("type"), QStringLiteral("board_card_get")},
-          {QStringLiteral("card"), m_selected}});
+    QJsonObject request{{QStringLiteral("type"), QStringLiteral("board_card_get")},
+                        {QStringLiteral("card"), m_selected}};
+    if (!m_open) {
+        m_directCardRequest = nextRequestId();
+        request.insert(QStringLiteral("id"), m_directCardRequest);
+    }
+    send(request);
 }
 
 // `e`, the Edit button, a click on the title or a double-click in the text: the card's own words
@@ -7314,6 +7347,12 @@ void BoardView::closeDetail()
     m_follow->stop();
     m_detail->hide();
     m_signalDetail->hide();
+    if (m_directCard) {
+        m_directCard = false;
+        m_open = false;
+        rebuild();
+        reload();
+    }
     if (onNavigationChanged) onNavigationChanged();
     updateDetailLayout();
     applyPage();

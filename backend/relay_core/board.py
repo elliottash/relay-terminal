@@ -1768,9 +1768,40 @@ class Board:
         return out
 
     def card_by_id(self, card_id: str) -> Card | None:
-        for card in self.cards():
-            if card.id == card_id.upper():
-                return card
+        card_id = card_id.upper()
+        # BOARD.md is a generated path index. A card-code reveal should read one card, not
+        # parse every card on the board merely to discover its filename. Verify the id after
+        # loading because the index can lag a move or a manual edit.
+        index = self.root / BOARD_INDEX
+        try:
+            for line in index.read_text(encoding="utf-8").splitlines():
+                if not line.startswith(f"| `#{card_id}` |"):
+                    continue
+                match = re.search(r"\]\(([^)]+\.md)\)", line)
+                if not match:
+                    break
+                candidate = self.root / match.group(1)
+                if candidate.resolve().is_relative_to(self.root.resolve()) and candidate.is_file():
+                    card = Card.load(candidate)
+                    if card.id == card_id:
+                        return card
+                break
+        except (OSError, UnicodeDecodeError, BoardError):
+            pass
+        # An unindexed new card or a stale index still works. Scan just the short front
+        # matter, parsing the body only for the matching file.
+        for path in self.card_paths():
+            try:
+                with path.open(encoding="utf-8") as stream:
+                    if stream.readline().strip() != "---":
+                        continue
+                    for line in stream:
+                        if line.strip() == "---":
+                            break
+                        if line.startswith("id:") and line.partition(":")[2].strip().upper() == card_id:
+                            return Card.load(path)
+            except (OSError, UnicodeDecodeError, BoardError):
+                continue
         return None
 
     # ---- writes

@@ -407,6 +407,7 @@ private slots:
     void upAndDownWalkTheCardsAcrossSectionBreaks();
     void theViewRendersOneListFromAnEvent();
     void theViewSendsAMoveWhenACardIsDropped();
+    void cardCodeLoadsDetailBeforeBoardAndConsole();
     void theColumnHeaderSortsTheListWithinASection();
     void aRowCarriesItsPriorityFlag();
     void theFlagHeaderSortsByPriority();
@@ -1482,6 +1483,30 @@ void BoardModelTests::theViewSendsAMoveWhenACardIsDropped()
 
     view.reload();
     QCOMPARE(sent.last().value(QStringLiteral("type")).toString(), QStringLiteral("board_open"));
+}
+
+void BoardModelTests::cardCodeLoadsDetailBeforeBoardAndConsole()
+{
+    relay::BoardView view(QStringLiteral("/tmp/workspace"));
+    Consoles consoles(view);
+    QList<QJsonObject> sent;
+    view.onSend = [&sent](const QJsonObject &message) { sent << message; };
+    view.openCardSolo(QStringLiteral("K7Q2"));
+    QCOMPARE(sent.size(), 1);
+    QCOMPARE(sent.last().value("type").toString(), QStringLiteral("board_card_get"));
+    QVERIFY(!consoles.card());
+
+    QJsonObject detail = card(QStringLiteral("K7Q2"), QStringLiteral("Fast card"),
+                              QStringLiteral("The document is ready"), QStringLiteral("hash"));
+    detail.insert("id", sent.last().value("id"));
+    view.handleEvent(detail);
+    QVERIFY(view.detailOpen());
+    QCOMPARE(view.model().total(), 0); // no board rows were loaded
+    QVERIFY(!consoles.card());
+    QTRY_VERIFY(consoles.card());
+
+    view.closeDetail();
+    QCOMPARE(sent.last().value("type").toString(), QStringLiteral("board_open"));
 }
 
 // The list's column header is the sort (owner, 2026-09-19: "change switchboard sorting from a sort

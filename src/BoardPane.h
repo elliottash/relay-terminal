@@ -919,6 +919,8 @@ private:
     // Which of the two pages that sizing was for (#AQ6X): the card's or the signal's, so opening
     // the other one re-divides the splitter instead of leaving it sized for the first.
     bool m_sizedForSignal = false;
+    bool m_directCard = false;    // a card-code reveal before the board rows were requested
+    QString m_directCardRequest;  // show a failed direct read instead of an endless loading line
     bool m_replyOnOpen = false;     // `c` before the card arrived: focus its reply box then
     bool m_editOnOpen = false;      // `e` before the card arrived: start editing it then
     // That edit is a card the quick-add field has just made, whose `## Issue` is the one line
