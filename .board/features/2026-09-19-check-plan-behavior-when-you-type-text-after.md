@@ -6,7 +6,7 @@ assignee: codex
 verify: {artifact: code, primary: script, human: none, effort: medium}
 rank: zzzzzzzy
 created: '2026-09-19'
-links: {plans: [], commits: [9a57ea6202313f930577231d2786c7b84f699e5b], evidence: [], related: [], github: null}
+links: {plans: [], commits: [9a57ea6202313f930577231d2786c7b84f699e5b, 2db31afece20989d88842a1cf8a2164217cc1161], evidence: [], related: [], github: null}
 ---
 # check /plan behavior when you type text after.
 
@@ -51,4 +51,4 @@ Owner chose YES: `/plan <text>` enters plan mode and submits `<text>` as its pro
 
 ### Check: targeted native slash behavior
 
-Passed `QT_QPA_PLATFORM=offscreen ./build-fast/relay-consolemode-tests --plan-click-only` in queue workspace `wt47351d9b72045be8`: bare `/plan`, trailing whitespace, text submission after mode switch, multiline text, and route preview. Passed `./build-fast/relay-slash-tests` (11 tests). Publication job `cc97c4eb6e4351df` is queued; keep this card executing until its receipt lands.
+Passed `QT_QPA_PLATFORM=offscreen ./build-fast/relay-consolemode-tests --plan-click-only` in queue workspace `wt47351d9b72045be8`: bare `/plan`, trailing whitespace, text submission after mode switch, multiline text, and route preview. Passed `./build-fast/relay-slash-tests` (11 tests). The first publication job `cc97c4eb6e4351df` failed the accepted full gate and reconciliation rejected oversized `Pane.h`. The repaired diff removes `Pane.h` from the change. Resubmission `838f3f6aaaaad61e` failed the accepted full gate with 15/122 unrelated CTest targets failing; reconciliation exceeded its case budget. Neither job has a receipt. Keep this card executing until publication lands.
