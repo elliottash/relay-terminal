@@ -421,6 +421,30 @@ class ModelSwitchMidTurnTests(unittest.TestCase):
         after = self.index(lambda e: e['event'] == 'model_switch_refused')
         self.assertNotIn('next', next(e for e in self.rec.events[after:] if e['event'] == 'context'))
 
+    def test_a_switch_whose_overflow_sits_in_the_latest_turn_trims_that_turn(self):
+        # Session 6a5b30a5 (2026-09-26): the latest turn was a long tool loop. Compaction keeps the
+        # last turns whole, so "even compacted" the conversation still needed ~131,585 tokens and
+        # the switch to a 128,000-token window was refused — the kept turn's old tool outputs were
+        # never touched. Now they are elided like any older turn's, keeping the latest group intact.
+        agent = self.make_agent(ScriptedProvider())
+        agent.messages += [{'role': 'user', 'content': 'first request'},
+                           {'role': 'assistant', 'content': 'first answer'},
+                           {'role': 'user', 'content': 'build it'}]
+        for n in range(12):
+            agent.messages.append(tools_msg(call('run_command', {'command': f'./build {n}'}, call_id=f'c{n}')))
+            agent.messages.append({'role': 'tool', 'tool_call_id': f'c{n}', 'content': 'x' * 20000})
+        self.cmds.handle('set_model', {'base_url': 'http://127.0.0.1:2/v1', 'model': 'small',
+                                       'context_window': 32000})
+        applied = self.rec.wait(lambda e: e['event'] == 'model_applied')
+        self.assertEqual((applied['at'], applied['model'], applied['compacted']), ('now', 'small', True))
+        self.assertEqual(self.rec.of('model_switch_refused'), [])
+        elided = [m for m in agent.messages
+                  if m.get('role') == 'tool' and 'elided' in str(m.get('content'))]
+        self.assertEqual(len(elided), 11)                        # every group but the latest
+        self.assertEqual(agent.messages[-1].get('content'), 'x' * 20000)
+        used, _ = agent.context.used(agent.messages, agent.tools())
+        self.assertLess(used, 24000)                             # 32000 - room for a reply
+
     def test_a_window_smaller_than_the_system_prompt_and_tools_is_refused_at_once(self):
         seen, ref = [], []
         step, gate, entered = self.blocked_first_step(ref, seen, tools_msg(call('list_directory', {'path': '.'})))

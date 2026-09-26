@@ -576,5 +576,13 @@ def compact(messages: list[dict], provider, *, over, manual: bool, focus: str | 
             new += [{"role": "user", "content": text, "relay_kind": "carried"},
                     {"role": "assistant", "content": CARRIED_ACK}]
     prefix = len(new)
-    return {"messages": new + result[boundary:], "boundary": boundary, "prefix": prefix,
+    final = new + result[boundary:]
+    if not manual and starts and boundary == starts[-1] and over(final):
+        # The overflow sits in the one turn kept whole — a long tool loop, say (session 6a5b30a5
+        # was refused a switch at ~131,585 tokens "even compacted" because its last turn held 64
+        # raw tool results). Shorten that turn's older tool outputs, keeping the latest group,
+        # exactly as the boundary <= 1 path above does for a single-turn conversation.
+        final, more = trim_tool_outputs(final, prefix, last_group_start(final))
+        trimmed += more
+    return {"messages": final, "boundary": boundary, "prefix": prefix,
             "summary_chars": len(summary), "trimmed": trimmed, "carried": carried}
