@@ -22,3 +22,11 @@ and jupyter-console.
   repainted its prompt once in the middle of the agent's block (`In [6]: ▸ py restart`) — the
   kernel restart makes prompt_toolkit redraw at a cursor Relay had moved.
 - `08-interrupt.png`, `03`–`05`, `10`: unchanged behaviour (interrupt, chip, completion, menu).
+
+## No shell handoff from a console pane
+
+The owner's next report: the console agent "suggested a shell command rather than python" — its
+turn ended with `run_in_terminal("xdg-open ~/Pictures/burning_ship.png")`, prefilled into the
+Python console's prompt box. A console pane now sends no `context.terminal_handoff`, so the tool is
+not offered there. `stub-provider.py` logs `run_in_terminal` per request: a rerun of this driver
+had it `False` on every console turn; the same stub on a plain shell pane had it `True`.

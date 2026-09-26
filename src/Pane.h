@@ -14092,10 +14092,13 @@ private:
         if (!grant.isEmpty()) context.insert(QStringLiteral("program_control"), grant);
         // run_in_terminal (protocol 22): offered unless the setting says off. Never to a fix turn,
         // which has its own relay-run block, and never to a prompt from a paired device, which
-        // must not reach the shell through the agent either.
+        // must not reach the shell through the agent either. Nor while a console program owns the
+        // pty (#83YV): there is no shell there, and a Bash line handed over lands in IPython's
+        // prompt box (an `xdg-open …` prefilled into the Python console). Its Python goes through
+        // py_run_cell, which the console shows; shell work goes through run_command.
         const QString ceiling = relay::input::handoffCeiling(
             QSettings().value(QStringLiteral("agent/terminal_handoff")).toString());
-        if (!ceiling.isEmpty() && !entry.fix && !entry.noHandoff)
+        if (!ceiling.isEmpty() && !entry.fix && !entry.noHandoff && !m_consoleProgram.isValid())
             context.insert(QStringLiteral("terminal_handoff"), ceiling);
         request.insert(QStringLiteral("context"), context);
         const QString requestId = sendPrompt(request, prompt);

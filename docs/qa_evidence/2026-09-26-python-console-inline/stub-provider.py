@@ -74,6 +74,7 @@ class Handler(BaseHTTPRequestHandler):
                                "restart": wants_restart(payload),
                                "py_run_cell": offered(payload, "py_run_cell"),
                                "py_variables": offered(payload, "py_variables"),
+                               "run_in_terminal": offered(payload, "run_in_terminal"),
                                "tool_tail": [(m.get("tool_call_id"), str(m.get("content"))[-300:])
                                              for m in payload.get("messages", []) if m.get("role") == "tool"][-2:],
                                "user_tail": [str(m.get("content"))[-100:] for m in payload.get("messages", [])
