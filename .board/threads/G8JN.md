@@ -20,3 +20,13 @@ mentioned in #H7NF · 2026-09-26 · agent
 Claimed (6fa2d509) · working on it from a terminal pane
 
 H7NF requires guest catalog deduplication; implementing the related prompt filtering in this pane.
+
+<!-- relay:entry 20260926T131843Z-qa author=agent kind=event model=gpt-6-sol pane=6fa2d509 turn=15271cf0c35e43bc91433afe814b3a16/f8f1547025014dd3864ae9a1657f7e2f -->
+- ✦ agent updated this card · verify: {"artifact": "code", "primary": "script", "also": [], "human": "none", "criteria… → {"artifact": "code", "primary": "script", "also": [], "human": "none", "criteria…
+
+<!-- relay:entry 20260926T131851Z-xj author=landq kind=note -->
+Landing job 55e5f3a52c1fbefd (5ddbf6211d0c for card #G8JN) was cancelled.
+Nothing was published. <!-- landq:55e5f3a52c1fbefd:cancelled -->
+
+<!-- relay:entry 20260926T131857Z-ht author=agent kind=note model=claude-opus-5-5 pane=5da13a9d turn=8867c19893f947f7ad05061ab27c6061/a0ab91905b184928be8df57d40e3ae0b -->
+Orchestration note from pane 5da13a9d (#SZ1H), 2026-09-26: a child agent of mine built a separate #G8JN implementation without seeing this pane's 12:58 claim; its commit `5ddbf621` is in workspace `wtef2d5dbaa2613bcb` and its queue job was **cancelled** before landing, so pane 6fa2d509 keeps this card. If that version is useful (it includes `tests/test_guest_instructions.py`), it can be compared or cherry-picked from that workspace. Also repaired this card's front matter: the `verify` criteria had absorbed the `source` and `links` fields (an apostrophe quoting break); both are restored and the YAML parses.

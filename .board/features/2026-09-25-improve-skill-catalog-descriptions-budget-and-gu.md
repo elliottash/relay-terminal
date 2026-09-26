@@ -9,7 +9,9 @@ session: 6fa2d509-138c-4a64-8910-c6cb50031874
 parent: SZ1H
 rank: zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzw
 created: '2026-09-25'
-verify: {artifact: code, primary: script, also: [], human: none, criteria: 'Catalogue rendering tests show whole-sentence triggers within 8 KiB and a guest block that omits the guest''s own harness tree while keeping Relay and other sources., sign_off: none, effort: low, stakes: rework, blast: capability} source: ''Owner approval on #SZ1H, 2026-09-25'' links: {plans: [], commits: [], evidence: [], related: [9FX8, GSK7], github: null'}
+verify: {artifact: code, primary: script, also: [], human: none, criteria: 'Catalogue rendering tests show whole-sentence triggers within 8 KiB and a guest block that omits the harness own home tree while keeping Relay and other sources.', sign_off: none, effort: low, stakes: rework, blast: capability}
+source: 'Owner approval on #SZ1H, 2026-09-25'
+links: {plans: [], commits: [], evidence: [], related: [9FX8, GSK7], github: null}
 ---
 # Improve skill catalog descriptions, budget, and guest supplements
 
