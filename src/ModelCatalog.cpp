@@ -1315,6 +1315,23 @@ QList<Entry> liveTier(const Catalog &catalog, const QString &tier, qint64 now) {
     return out;
 }
 
+// The weight one candidate's quota windows earn it in a draw: its tightest window, the share left
+// over the hours until that window resets. -1 when the report is missing, too old to speak for now,
+// or has no window still ahead — the caller gives those the neutral peer weight (#62TG).
+static double candidateWeight(const Catalog &catalog, const QString &preset, qint64 now) {
+    const qint64 updated = catalog.limitUpdatedAt.value(preset);
+    // A quota report older than half an hour is no evidence of what is left now.
+    if (updated <= 0 || updated > now || now - updated > 1800) return -1.0;
+    double weight = -1.0;
+    for (const LimitWindow &window : catalog.limits.value(preset)) {
+        if (window.usedPercent < 0 || window.resetsAt <= now) continue;
+        const double hours = qMax(double(window.resetsAt - now) / 3600.0, 0.25);
+        const double rate = qBound(0.0, 100.0 - window.usedPercent, 100.0) / hours;
+        weight = weight < 0 ? rate : qMin(weight, rate);
+    }
+    return weight;
+}
+
 Entry drawTier(const Catalog &sourceCatalog, const QString &tier, qint64 now, double unitDraw, QJsonObject *trace) {
     if (now <= 0) now = QDateTime::currentSecsSinceEpoch();
     const Catalog catalog = withRecordedUsage(sourceCatalog, now);
@@ -1329,17 +1346,7 @@ Entry drawTier(const Catalog &sourceCatalog, const QString &tier, qint64 now, do
         const Entry *entry = catalog.find(item.key);
         if (!entry || !entry->usable || exhausted(catalog, entry->preset, now)) continue;
         if (rank < bestRank) { peers.clear(); bestRank = rank; }
-        double weight = -1.0;  // no recent applicable window: neutral against known peers
-        const qint64 updated = catalog.limitUpdatedAt.value(entry->preset);
-        // A quota report older than half an hour is no evidence of what is left now.
-        if (updated > 0 && updated <= now && now - updated <= 1800) {
-            for (const LimitWindow &window : catalog.limits.value(entry->preset)) {
-                if (window.usedPercent < 0 || window.resetsAt <= now) continue;
-                const double hours = qMax(double(window.resetsAt - now) / 3600.0, 0.25);
-                const double rate = qBound(0.0, 100.0 - window.usedPercent, 100.0) / hours;
-                weight = weight < 0 ? rate : qMin(weight, rate);
-            }
-        }
+        const double weight = candidateWeight(catalog, entry->preset, now);
         peers << Candidate{*entry, weight, weight};
     }
     if (peers.isEmpty()) return {};
@@ -1376,6 +1383,56 @@ Entry drawTier(const Catalog &sourceCatalog, const QString &tier, qint64 now, do
         position -= peer.weight;
     }
     return picked(peers.last().entry, unitDraw);
+}
+
+QList<UsageChartRow> usageChartRows(const Catalog &sourceCatalog, const QString &tier, qint64 now) {
+    if (now <= 0) now = QDateTime::currentSecsSinceEpoch();
+    const Catalog catalog = withRecordedUsage(sourceCatalog, now);
+    const QList<curation::TierEntry> list = accountTierList(catalog, tier);
+    int bestRank = std::numeric_limits<int>::max();
+    for (int i = 0; i < list.size(); ++i) {
+        const int rank = list.at(i).rank > 0 ? list.at(i).rank : i + 1;
+        bestRank = qMin(bestRank, rank);
+    }
+    QList<UsageChartRow> rows;
+    for (int i = 0; i < list.size(); ++i) {
+        const curation::TierEntry &item = list.at(i);
+        const int rank = item.rank > 0 ? item.rank : i + 1;
+        if (rank > bestRank) continue;
+        const Entry *entry = catalog.find(item.key);
+        if (!entry || !entry->usable) continue;
+        UsageChartRow row;
+        row.key = entry->key;
+        row.preset = entry->preset;
+        row.label = entry->preset;
+        row.model = entry->model;
+        row.windows = catalog.limits.value(entry->preset);
+        row.exhausted = exhausted(catalog, entry->preset, now);
+        const double weight = candidateWeight(catalog, entry->preset, now);
+        row.weight = row.exhausted ? 0.0 : weight;
+        row.stale = !row.exhausted && weight < 0;
+        rows << row;
+    }
+    // The same neutral weight and normalisation drawTier applies, so the chart shows the draw's own
+    // odds rather than a second opinion about them.
+    QList<double> known;
+    for (const UsageChartRow &row : rows)
+        if (!row.exhausted && row.weight > 0) known << row.weight;
+    std::sort(known.begin(), known.end());
+    const double neutral = known.isEmpty() ? 1.0 : known.at(known.size() / 2);
+    double total = 0;
+    int live = 0;
+    for (UsageChartRow &row : rows) {
+        if (row.exhausted) continue;
+        if (row.weight < 0) row.weight = neutral;
+        total += row.weight;
+        ++live;
+    }
+    for (UsageChartRow &row : rows) {
+        if (row.exhausted) { row.weight = 0; continue; }
+        row.probability = total > 0 ? row.weight / total : (live > 0 ? 1.0 / live : 0.0);
+    }
+    return rows;
 }
 
 // Once the tier lists exist the main list is the order: rank 1 is Main, the rest its fallbacks.

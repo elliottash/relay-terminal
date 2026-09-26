@@ -1537,6 +1537,61 @@ private Q_SLOTS:
                  QStringLiteral("glm-coding:second|glm-5.3"));
     }
 
+    // The models pane's usage chart (#62TG): every window the account reported — not only the
+    // tightest one the weight comes from — the weight the draw uses, and the share that gives. An
+    // exhausted account stays as a zero row, so the chart shows what has left the draw.
+    void usageChartRowsCarryBothWindowsAndKeepTheZeroRow() {
+        QJsonArray rows = groupPresets();
+        QJsonObject second = rows.at(1).toObject();
+        second.insert(QStringLiteral("id"), QStringLiteral("glm-coding:second"));
+        rows << second;
+        Catalog catalog = catalogFrom(rows);
+        const QString tier = QStringLiteral("main");
+        curation::setTierList(tier, {
+            {QStringLiteral("glm-coding|glm-5.3"), QStringLiteral("high"), 1},
+            {QStringLiteral("glm-coding:second|glm-5.3"), QStringLiteral("high"), 1},
+            {QStringLiteral("guest:claude|opus"), QStringLiteral("high"), 2}});
+        const qint64 now = 100000;
+        catalog.limitUpdatedAt[QStringLiteral("glm-coding")] = now - 60;
+        catalog.limits[QStringLiteral("glm-coding")] = {LimitWindow{QStringLiteral("5h"), 10, now + 3600},
+                                                        LimitWindow{QStringLiteral("weekly"), 80, now + 3600}};
+        catalog.limitUpdatedAt[QStringLiteral("glm-coding:second")] = now - 60;
+        catalog.limits[QStringLiteral("glm-coding:second")] = {LimitWindow{QStringLiteral("weekly"), 100, now + 3600}};
+
+        const QList<UsageChartRow> chart = usageChartRows(catalog, tier, now);
+        QCOMPARE(chart.size(), 2);                     // rank 2 is not drawn, so it is not charted
+        QCOMPARE(chart.at(0).preset, QStringLiteral("glm-coding"));
+        QCOMPARE(chart.at(0).model, QStringLiteral("glm-5.3"));
+        QCOMPARE(chart.at(0).windows.size(), 2);       // the 5h window is carried beside the weekly one
+        QCOMPARE(chart.at(0).windows.at(0).kind, QStringLiteral("5h"));
+        QCOMPARE(chart.at(0).windows.at(1).kind, QStringLiteral("weekly"));
+        QCOMPARE(chart.at(0).weight, 20.0);            // the weekly window is the tightest: 20% over 1 h
+        QCOMPARE(chart.at(0).probability, 1.0);        // the only live candidate takes the whole draw
+        QCOMPARE(chart.at(0).exhausted, false);
+        QCOMPARE(chart.at(1).preset, QStringLiteral("glm-coding:second"));
+        QCOMPARE(chart.at(1).exhausted, true);
+        QCOMPARE(chart.at(1).weight, 0.0);
+        QCOMPARE(chart.at(1).probability, 0.0);
+
+        // A list whose rank 1 is spent still answers with that one zero row rather than nothing.
+        curation::setTierList(tier, {{QStringLiteral("glm-coding:second|glm-5.3"), QStringLiteral("high"), 1}});
+        const QList<UsageChartRow> only = usageChartRows(catalog, tier, now);
+        QCOMPARE(only.size(), 1);
+        QCOMPARE(only.at(0).exhausted, true);
+
+        // And two live candidates split the draw the way drawTier does, by weight: 20 against 75.
+        curation::setTierList(tier, {
+            {QStringLiteral("glm-coding|glm-5.3"), QStringLiteral("high"), 1},
+            {QStringLiteral("glm-coding:second|glm-5.3"), QStringLiteral("high"), 1}});
+        catalog.limits[QStringLiteral("glm-coding:second")] = {LimitWindow{QStringLiteral("weekly"), 25, now + 3600}};
+        const QList<UsageChartRow> split = usageChartRows(catalog, tier, now);
+        QCOMPARE(split.size(), 2);
+        QCOMPARE(split.at(0).weight, 20.0);          // 80 used of the weekly window, one hour to reset
+        QCOMPARE(split.at(1).weight, 75.0);
+        QCOMPARE(split.at(0).probability, 20.0 / 95.0);
+        QCOMPARE(split.at(1).probability, 75.0 / 95.0);
+    }
+
     void nearResetAllowanceWeightsOnlyTheBestLiveRank() {
         Catalog catalog = catalogFrom(presets());
         const QString tier = QStringLiteral("main");

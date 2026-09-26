@@ -2,6 +2,182 @@
 #include "RelayWindow.h"
 #include "WindowManagerImpl.h"
 
+#include <QDialog>
+#include <QLabel>
+#include <QPainter>
+#include <QVBoxLayout>
+
+// ----- the usage chart (#62TG) ------------------------------------------------------------------
+// The models pane's usage row opens this: one row per account in the main list's draw, every window
+// the account reported (5h and weekly) as a bar with what is left and how long until it resets,
+// then the weight the router gives the account and the share it wins. The weights and shares come
+// from relay::models::usageChartRows — the same function the draw uses — so the chart cannot drift
+// from the routing it explains, and an exhausted account stays as a red zero row instead of
+// vanishing from the picture.
+namespace {
+
+// What one account's block needs: its name, a line and a bar per window, its weight-and-share line.
+int usageBlockHeight(const relay::models::UsageChartRow &row) {
+    return 20 + qMax(1, int(row.windows.size())) * 34 + 24;
+}
+
+QString usageWindowLine(const relay::models::LimitWindow &window, qint64 now) {
+    const double left = window.usedPercent < 0 ? -1.0 : qBound(0.0, 100.0 - window.usedPercent, 100.0);
+    const QString share = left < 0 ? QStringLiteral("no figure")
+                                   : QStringLiteral("%1% left").arg(QString::number(left, 'f', 0));
+    QString reset = QStringLiteral("reset unknown");
+    if (window.resetsAt > 0) {
+        const double hours = qMax(0.0, double(window.resetsAt - now) / 3600.0);
+        reset = QStringLiteral("resets in %1 h · %2")
+                    .arg(QString::number(hours, 'f', hours < 10 ? 1 : 0),
+                         QDateTime::fromSecsSinceEpoch(window.resetsAt).toString(QStringLiteral("ddd HH:mm")));
+    }
+    return QStringLiteral("%1   %2 · %3").arg(window.kind.isEmpty() ? QStringLiteral("window") : window.kind, share, reset);
+}
+
+// The chart itself. It is painted rather than laid out: bars want exact heights, and a row per
+// account does not need a widget row per account. No Q_OBJECT — nothing here is connected.
+class UsageChartView : public QWidget {
+public:
+    explicit UsageChartView(QWidget *parent = nullptr) : QWidget(parent) {
+        setMinimumWidth(780);
+        setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Minimum);
+    }
+    void setRows(const QList<relay::models::UsageChartRow> &rows, const QString &tier, qint64 now) {
+        m_rows = rows;
+        m_tier = tier;
+        m_now = now;
+        updateGeometry();
+        update();
+    }
+    QSize sizeHint() const override {
+        int height = 14;
+        for (const relay::models::UsageChartRow &row : m_rows) height += usageBlockHeight(row) + 8;
+        return QSize(940, qMax(120, height));
+    }
+
+protected:
+    void paintEvent(QPaintEvent *) override {
+        QPainter painter(this);
+        painter.setRenderHint(QPainter::Antialiasing, true);
+        const QPalette pal = palette();
+        const QColor textColour = pal.color(QPalette::WindowText);
+        const QColor dimColour = pal.color(QPalette::Disabled, QPalette::WindowText);
+        const QColor rule = pal.color(QPalette::Mid);
+        QFont bold = font();
+        bold.setBold(true);
+        QFont small = font();
+        small.setPointSizeF(qMax(7.5, font().pointSizeF() - 1.0));
+
+        const int left = 18;
+        const int nameWidth = 232;
+        const int rightWidth = 150;
+        const int textLeft = left + nameWidth + 10;
+        const int barLeft = textLeft;
+        const int barWidth = qMax(120, width() - rightWidth - 14 - barLeft);
+        const int textWidth = qMax(120, barWidth);
+
+        int y = 8;
+        for (const relay::models::UsageChartRow &row : m_rows) {
+            const QColor accent = row.exhausted ? QColor(0xb7, 0x1c, 0x1c) : textColour;
+            painter.setFont(bold);
+            painter.setPen(accent);
+            painter.drawText(QRect(left, y, nameWidth, 18), Qt::AlignLeft | Qt::AlignVCenter,
+                             painter.fontMetrics().elidedText(row.label, Qt::ElideMiddle, nameWidth));
+            painter.setFont(small);
+            painter.setPen(dimColour);
+            painter.drawText(QRect(textLeft, y, textWidth, 18), Qt::AlignLeft | Qt::AlignVCenter,
+                             painter.fontMetrics().elidedText(row.model, Qt::ElideRight, textWidth));
+
+            const QList<relay::models::LimitWindow> windows =
+                row.windows.isEmpty() ? QList<relay::models::LimitWindow>{relay::models::LimitWindow{}} : row.windows;
+            int rowY = y + 20;
+            for (const relay::models::LimitWindow &window : windows) {
+                const double leftPercent = window.usedPercent < 0 ? 0.0 : qBound(0.0, 100.0 - window.usedPercent, 100.0);
+                painter.setFont(small);
+                painter.setPen(leftPercent <= 0 ? QColor(0xb7, 0x1c, 0x1c) : dimColour);
+                painter.drawText(QRect(barLeft, rowY, textWidth, 15), Qt::AlignLeft | Qt::AlignVCenter,
+                                 painter.fontMetrics().elidedText(usageWindowLine(window, m_now), Qt::ElideRight, textWidth));
+                const QRect track(barLeft, rowY + 17, barWidth, 9);
+                painter.setPen(Qt::NoPen);
+                QColor fill = rule;
+                fill.setAlpha(90);
+                painter.setBrush(fill);
+                painter.drawRoundedRect(track, 4, 4);
+                if (leftPercent > 0) {
+                    const QColor bar = leftPercent < 20 ? QColor(0xef, 0x6c, 0x00) : QColor(0x2e, 0x7d, 0x32);
+                    painter.setBrush(bar);
+                    painter.drawRoundedRect(QRect(track.x(), track.y(),
+                                                  int(track.width() * leftPercent / 100.0), track.height()), 4, 4);
+                }
+                rowY += 34;
+            }
+
+            painter.setFont(small);
+            const QString figures = row.exhausted
+                ? QStringLiteral("exhausted · out of the draw")
+                : QStringLiteral("weight %1 · draw %2")
+                      .arg(QString::number(row.weight, 'f', 2), QStringLiteral("%1%").arg(QString::number(row.probability * 100.0, 'f', 1)));
+            painter.setPen(row.exhausted ? QColor(0xb7, 0x1c, 0x1c) : dimColour);
+            painter.drawText(QRect(barLeft, rowY - 4, textWidth, 16), Qt::AlignLeft | Qt::AlignVCenter, figures);
+            if (row.stale && !row.exhausted) {
+                painter.setPen(dimColour);
+                painter.drawText(QRect(barLeft, rowY - 4, textWidth, 16), Qt::AlignRight | Qt::AlignVCenter,
+                                 QStringLiteral("no fresh figures · neutral weight"));
+            }
+
+            y += usageBlockHeight(row);
+            painter.setPen(rule);
+            painter.drawLine(left, y - 4, width() - 14, y - 4);
+            y += 8;
+        }
+        if (m_rows.isEmpty()) {
+            painter.setFont(small);
+            painter.setPen(dimColour);
+            painter.drawText(QRect(left, 12, width() - 2 * left, 40), Qt::AlignLeft | Qt::AlignTop,
+                             QStringLiteral("No account is in the %1 list's draw yet: no subscription has reported usage.").arg(m_tier));
+        }
+    }
+
+private:
+    QList<relay::models::UsageChartRow> m_rows;
+    QString m_tier;
+    qint64 m_now = 0;
+};
+
+// The window the models pane opens. One chart, no controls: what it draws is read live when it opens,
+// and the pane's usage… button opens it again for a fresh look.
+class UsageChartDialog : public QDialog {
+public:
+    UsageChartDialog(const QList<relay::models::UsageChartRow> &rows, const QString &tier, qint64 now, QWidget *parent)
+        : QDialog(parent) {
+        setObjectName(QStringLiteral("usageChartDialog"));
+        setWindowTitle(QStringLiteral("Subscription usage and draw odds"));
+        auto *layout = new QVBoxLayout(this);
+        auto *blurb = new QLabel(
+            QStringLiteral("Every account the %1 list draws on, with each window it reports — 5h and weekly — "
+                           "the share of that window still unspent, and the time until it resets. The weight is the "
+                           "tightest window's share left over the hours until it resets; the draw column is that weight "
+                           "as a share of every account at rank 1. Red rows are exhausted and get nothing until they reset.")
+                .arg(tier),
+            this);
+        blurb->setWordWrap(true);
+        blurb->setObjectName(QStringLiteral("usageChartBlurb"));
+        layout->addWidget(blurb);
+        m_view = new UsageChartView(this);
+        m_view->setObjectName(QStringLiteral("usageChartView"));
+        m_view->setRows(rows, tier, now);
+        layout->addWidget(m_view);
+        resize(960, qBound(360, m_view->sizeHint().height() + 110, 1100));
+    }
+    UsageChartView *view() const { return m_view; }
+
+private:
+    UsageChartView *m_view = nullptr;
+};
+
+}   // namespace
+
 relay::SettingsSection RelayWindow::modelsSection(bool inModelsPane) {
         relay::SettingsSection models;
         models.id = QStringLiteral("models");
@@ -249,12 +425,42 @@ relay::SettingsSection RelayWindow::modelsSection(bool inModelsPane) {
         // Usage is read every 15 minutes and after each guest turn; this reads every subscription
         // now — Claude Code and Codex logins and accounts, the Z.AI Coding Plan, Kimi Code (#EQH0).
         // The answers arrive as the usual usage_limits events and redraw the rows below.
-        models.rows << buttonRow(QStringLiteral("models.refreshUsage"), QStringLiteral("usage"),
+        // The second button opens the chart (#62TG): the same usage account by account, with the
+        // weight and the draw share the router would give each one right now. The pane's own account
+        // names are the chart's labels, so an account that reads "logged in as ashe@ethz.ch" on its
+        // row reads the same in the chart (#EQH0).
+        QHash<QString, QString> accountLabels;
+        for (const QJsonObject &preset : std::as_const(listed)) {
+            const QString id = str(preset, "id");
+            if (id.isEmpty()) continue;
+            const QString email = str(preset, "email");
+            accountLabels.insert(id, email.isEmpty() ? id : email);
+        }
+        relay::SettingRow usageRow = buttonRow(QStringLiteral("models.refreshUsage"), QStringLiteral("usage"),
             QStringLiteral("each subscription's 5-hour and weekly use, read every 15 minutes"),
             QStringLiteral("refresh"), [this, request] {
                 request({{"type", "usage_refresh"}});
                 notice(QStringLiteral("Asking every subscription for its usage…"));
             });
+        usageRow.kind = relay::SettingRow::Buttons;
+        usageRow.buttonTexts = QStringList{QStringLiteral("refresh"), QStringLiteral("usage…")};
+        usageRow.aliases = QStringLiteral("chart odds weights quota 5h weekly draw");
+        usageRow.onButton = [this, request, catalog, accountLabels](int index) {
+            if (index == 0) {
+                request({{"type", "usage_refresh"}});
+                notice(QStringLiteral("Asking every subscription for its usage…"));
+                return;
+            }
+            QList<relay::models::UsageChartRow> rows =
+                relay::models::usageChartRows(catalog, QStringLiteral("main"));
+            for (relay::models::UsageChartRow &row : rows)
+                if (accountLabels.contains(row.preset)) row.label = accountLabels.value(row.preset);
+            auto *dialog = new UsageChartDialog(rows, QStringLiteral("main"),
+                                                QDateTime::currentSecsSinceEpoch(), this);
+            dialog->setAttribute(Qt::WA_DeleteOnClose);
+            dialog->show();
+        };
+        models.rows << usageRow;
         bool firstProvider = true;
         std::function<void(int)> addClaudeAccount;
         std::function<void(int)> addCodexAccount;

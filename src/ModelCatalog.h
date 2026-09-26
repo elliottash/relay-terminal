@@ -476,6 +476,25 @@ QList<Entry> liveTier(const Catalog &catalog, const QString &tier, qint64 now = 
 Entry drawTier(const Catalog &catalog, const QString &tier, qint64 now = 0, double unitDraw = -1,
                QJsonObject *trace = nullptr);
 
+// The models pane's usage chart (#62TG): what each account a tier draws on has left. Every window
+// the account reported (5h and weekly) is carried, so the chart shows both, not only the tightest
+// one the weight comes from, and an exhausted account stays as a zero row instead of vanishing.
+struct UsageChartRow {
+    QString key;             // the tier's key, preset|model
+    QString preset;          // guest:claude, guest:claude:ashe-ethz-ch, glm-coding …
+    QString label;           // how the pane names the account; the caller may set an email
+    QString model;
+    QList<LimitWindow> windows;
+    double weight = 0;       // the weight the draw gives it, 0 when exhausted
+    double probability = 0;  // its share of this tier's rank-1 draw, 0..1
+    bool exhausted = false;  // a window is at 100% with its reset still ahead
+    bool stale = false;      // no figures inside the half-hour window: the neutral weight
+};
+// Every rank-1 candidate of `tier`, in list order, with all of its windows, its weight and its
+// draw share — the numbers `drawTier` itself would use, from the same weight function. Exhausted
+// candidates are included, with weight and probability 0.
+QList<UsageChartRow> usageChartRows(const Catalog &catalog, const QString &tier, qint64 now = 0);
+
 // ----- one default, and /swap as a toggle (card #MDL1, rule 3) ----------------------------------
 // > A pane runs on rank 1 of the main list until you pick something else *in that pane*.
 //
