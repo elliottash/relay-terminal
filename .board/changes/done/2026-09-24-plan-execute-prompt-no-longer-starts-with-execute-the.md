@@ -8,7 +8,7 @@ duplicate_of: BCJF
 rank: zzzzzzzzzzzzzzzzzzi
 created: '2026-09-24'
 source: pane bd9e4ae0 delivering
-links: {plans: [], commits: [a0041445b6d3], evidence: [], related: [], github: null}
+links: {plans: [], commits: [a0041445b6d3, bc511a6b93f2], evidence: [], related: [], github: null}
 ---
 # plan_execute prompt no longer starts with "Execute the plan" — test fails on plain HEAD
 

@@ -10,7 +10,7 @@ rank: zzzzzzzzzzzzzzzzzzzzzzzzzzz
 created: '2026-09-25'
 verify: {artifact: code, primary: script, also: [person], human: none, criteria: relay-keymap-tests green (incl. altHomeEndScrollActsInsidePrograms) and the engine suite green on the landed commit; person presses Alt+Home / Alt+End in a console with scrollback., sign_off: none, effort: low}
 source: pane 1, 2026-09-26
-links: {plans: [], commits: [3a7cb28ff5a5], evidence: [docs/qa_evidence/2026-09-25-x55k-alt-home-end-scroll/], related: [], github: null}
+links: {plans: [], commits: [3a7cb28ff5a5, 39ba5428d103], evidence: [docs/qa_evidence/2026-09-25-x55k-alt-home-end-scroll/], related: [], github: null}
 ---
 # Alt+Home / Alt+End scroll the console to the top / bottom of its scrollback
 

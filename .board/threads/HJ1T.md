@@ -20,3 +20,9 @@ Measure a tick, then make it flip immediately and coalesce the save/notify fan-o
 
 <!-- relay:entry 20260923T231632Z-2s author=agent kind=event model=claude-opus-5-5 pane=3eb5e6f8 turn=892da1ffb4744cb1b108a8fae4c20ee8/e40b4bb9517a45d9ad20a6ac69ba016b -->
 - ✦ agent moved this card · Executing → Needs verification · Fan-out coalesced in d6f769f6; responsiveness needs a hands-on check in the restarted app. · evidence issues/changes/2026-09-23-models-pane-checkboxes-lag-every-tick-fans-out-t.md · implemented_by anthropic/claude-opus-5-5 via claude-code
+
+<!-- relay:entry 20260925T214934Z-yb author=agent kind=event mention=WBFM model=k3 pane=164b2cbb turn=6173581165764472b6c340786cfdcc26/f36bd17069e2466f8c90c945f4ee6c08 -->
+mentioned in #WBFM · 2026-09-25 · agent
+<!-- relay:entry 20260925T220154Z-hp author=agent kind=note -->
+Verification (rev 54018502): PASSED — ticks flip at once and stay flipped, burst coalesces (code + live drive). Evidence: docs/qa_evidence/2026-09-25-verify-HJ1T/. One unrelated stale test from #E8V1 noted. Moved needs-verification → needs-qa-llm.
+

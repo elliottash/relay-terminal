@@ -26,3 +26,6 @@ Owner, 2026-09-24: "dont use them". No reset has been spent on any account, and 
 
 <!-- relay:entry 20260924T040958Z-m0 author=agent kind=question model=claude-opus-5-5 pane=9af6a7f5 turn=90b3725007bf4d71860a6b377e948a26/67e22acc4e94477cb89698bd19ceafb2 -->
 Owner, 2026-09-24: "i mainly want them to track it and use that info for the subsription aware routing. is that impolemented yet?" Answer: no. The counts and use-by dates are tracked, but routing (`exhausted`, `drawTier` in src/ModelCatalog.cpp) reads only the limit windows. Question: should a banked reset count as backup capacity in the tie-break draw, so that among equally ranked accounts the one holding an unspent reset is drawn more, and more so as its use-by date nears? Nothing would be spent automatically, and an exhausted account would still be skipped until you spend its reset yourself. Recommendation: yes, with that rule.
+
+<!-- relay:entry 20260925T222630Z-46 author=agent kind=event mention=EQH0 model=claude-opus-5-5 pane=cd39c532 turn=eb540dbc335b48608bf140f752a963ce/2533e01880b34962874cd7d74c7d59de -->
+mentioned in #EQH0 · 2026-09-25 · agent

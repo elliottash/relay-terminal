@@ -3,11 +3,12 @@ id: EB4A
 type: work
 status: needs-verification
 assignee: agent
-implemented_by: kimi/kimi-k3
-session: b2bc87a9-d7f0-49f9-a9d9-15e6b0768418
+implemented_by: kimi/k3
+session: f3ec7a75-4a7e-4d77-a77f-e0216f601271
 rank: zzzzzzzzzzzzzzz
 created: '2026-09-20'
-links: {plans: [], commits: [], evidence: [docs/qa_evidence/2026-09-20-command-not-found-agent-prompts/], related: [], github: null}
+verify: {artifact: code, primary: script, also: [], human: none, sign_off: none, effort: medium, stakes: rework, blast: capability}
+links: {plans: [], commits: [b0e017e4e676, 75782d9da492], evidence: [docs/qa_evidence/2026-09-20-command-not-found-agent-prompts/, docs/qa_evidence/2026-09-25-at-mention-command-not-found/], related: [], github: null}
 ---
 # command not found bug
 

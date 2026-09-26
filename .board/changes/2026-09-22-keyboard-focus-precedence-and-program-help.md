@@ -35,13 +35,14 @@ Each tested shortcut performs the documented command in its focus context, exact
 `PYTHONPATH=backend python3 -m unittest tests.test_keybindings`
 manual: docs/qa_evidence/2026-09-22-keyboard-set/ (plain Ctrl+Q acts in the prompt box, screenshot 12)
 
-### Check 2026-09-24 15:35
-- passed · ctest:settings — ctest -R settings passed for this revision on spark-dcc9, 2026-09-24T03:23:08Z
+### Check 2026-09-25 21:01
+- failed · ctest:settings — ctest -R settings failed for this revision on spark-dcc9
 - missing-evidence · ctest:filepanes — no run of ctest -R filepanes for this revision, from any host, and no attached result
-- passed · ctest:keymap — ctest -R keymap passed for this revision on spark-dcc9, 2026-09-24T19:35:46Z
+- passed · ctest:keymap — ctest -R keymap passed for this revision on spark-dcc9, 2026-09-26T01:01:27Z
 - not-applicable · manual:docs/qa_evidence/2026-09-22-keyboard-set/ (plain Ctrl+Q acts in the prompt box, screenshot 12) — manual evidence, recorded by hand: docs/qa_evidence/2026-09-22-keyboard-set/ (plain Ctrl+Q acts in the prompt box, screenshot 12)
 - notice · ctest:filepanes — ctest -R filepanes has never run here
 - warning · manual:docs/qa_evidence/2026-09-22-keyboard-set/ (plain Ctrl+Q acts in the prompt box, screenshot 12) — manual evidence docs/qa_evidence/2026-09-22-keyboard-set/ (plain Ctrl+Q acts in the prompt box, screenshot 12) is not there
+- notice · ctest:settings — ctest -R settings failed the last time it ran, 2026-09-26T00:55:44Z
 history: thread
 ## Execution Summary
 Global shortcut dispatch now checks focused widgets' `relayLocalKeys` before the Keymap. The Settings search keeps Ctrl+N/Ctrl+P, File Explorer keeps Alt+Up, and F1 remains available to terminal programs. The keyboard pairing and focus-context tests passed; the live drive is in `docs/qa_evidence/2026-09-22-keyboard-set/`. Commits `e914d65c`, `cd7dcfcb`, `c00a2859`, `ea943915`.

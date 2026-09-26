@@ -10,7 +10,7 @@ rank: zzzzzzzzzzzzzzzzzzzr
 created: '2026-09-24'
 verify: {artifact: code, primary: script, also: [person], human: optional, criteria: 'inside a real ssh session, Alt+Esc returns the pane to its local shell prompt and toasts the exit; plain programs keep the two-press rule', sign_off: none, effort: low, stakes: rework, blast: capability}
 source: pane 1, 2026-09-25
-links: {plans: [], commits: [], evidence: [docs/qa_evidence/2026-09-25-234Z/], related: [H2KQ, XCXD, VD2M], github: null}
+links: {plans: [], commits: [83218821d6df, da4294d6aac9, f5896f3d20d2, d25ab676e527, 334674496df5], evidence: [docs/qa_evidence/2026-09-25-234Z/], related: [H2KQ, XCXD, VD2M], github: null}
 ---
 # Alt+Esc leaves an ssh or mosh session instead of forwarding Ctrl+C to the far side
 

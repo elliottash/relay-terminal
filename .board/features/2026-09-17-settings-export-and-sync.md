@@ -1,17 +1,20 @@
 ---
 id: 05J2
 type: work
-status: planned
+status: executing
 labels: [feature]
 component: [gui, worker]
 milestone: desktop-alpha
 workstream: terminal
+assignee: agent
+implemented_by: kimi/k3
+session: 131947ca-655f-4eef-8401-b4970c2f0a2d
 rank: zz05
 created: '2026-09-17'
 acceptance: settings export to a file and import on another machine; a design for optional encrypted sync is recorded
-source: '`issues/feature_intake.txt`, 2026-09-17: "no accounts, but make it where you can export your settings or otherwise make it easy to share across computers, maybe with a brave-like sync system."'
 verify: {artifact: code, primary: script, also: [person], human: optional, criteria: 'export on one machine, import on another: theme, keymap, model roles and global aliases come back; no API key or device identity is in the file', sign_off: none, effort: medium, stakes: reputation, blast: capability}
-links: {plans: [], commits: [], evidence: [], related: [], github: null}
+source: '`issues/feature_intake.txt`, 2026-09-17: "no accounts, but make it where you can export your settings or otherwise make it easy to share across computers, maybe with a brave-like sync system."'
+links: {plans: [], commits: [6ee5b1603076], evidence: [], related: [], github: null}
 ---
 # Export settings, and an optional sync across machines
 
@@ -27,20 +30,18 @@ add its own payload over that, not a second way to pair.
 API keys stay in the keyring and are never exported unless the user explicitly asks.
 
 ## Done means
-
 - Options has **Export settings…** and **Import settings…**; a file exported on one machine and imported on a
   fresh profile on another brings back the theme, keymap, model roles/priorities, Agent and Security options
   and global aliases, and they are in effect without a restart.
 - The exported file contains no API key, token, remote device identity or pinned device, and no per-machine
   state (recents, counters, migrations, window layout). A test greps the file for every keyring-held value
   and for `remote/` state and fails if one is there.
-- A malformed, newer-version or foreign file is refused with one sentence and changes nothing.
+- Import previews changes before applying. Different non-default values on both machines are shown side by side and require the user's choice; cancel or an unresolved conflict changes nothing. A malformed, newer-version or foreign file is refused with one sentence and changes nothing.
 - A design for optional end-to-end-encrypted sync over the existing pairing machinery is recorded in
   `docs/`, and the card links it. Failure looks like: a secret in the file, a setting silently dropped on
   import, or sync being built with a second pairing mechanism.
 
 ## Plan
-
 **Goal.** Ship export/import of every non-secret preference as one versioned JSON file, reachable from
 Options and the palette, and record (not build) a design for Brave-style E2E sync that reuses `remote/`
 pairing. Sync implementation becomes its own card once the design is accepted.
@@ -84,8 +85,8 @@ Where the preferences live today:
    JSON `{format:"relay-settings", version:1, exported_at, relay_version, settings:{key:value},
    files:{"keybindings.json":…, "themes/<name>.toml":…, "local-models.json":…}}` and
    `importFrom(path, Mode)` → a result listing applied/skipped keys. Refuse unknown `format`, higher
-   `version`, non-object JSON. Before import, write the current state to
-   `~/.config/RelayTerminal/relay/settings-backup-<stamp>.json`.
+   `version`, non-object JSON. After validation and conflict resolution, stage every target file and write the current state to
+   `~/.config/RelayTerminal/relay/settings-backup-<stamp>.json` before committing the staged change set. If any validation or write fails, leave the profile unchanged.
 2. Global aliases (and, if the owner says so, global memories — Q2): the worker owns those files, so
    add `backend/relay_core/settings_bundle.py` with `export_global()`/`import_global()` over
    `aliases.global_root()`, and one worker message pair (`settings_export_globals` /
@@ -94,8 +95,12 @@ Where the preferences live today:
    `theme/name`, and `refreshSettingsPanes()` (as the reset loop does). Depends on 1.
 4. UI: in `src/RelayWindowSettings.cpp` General section, a Buttons row "Export settings… · Import
    settings…" (QFileDialog), and two palette actions `settings.export` / `settings.import` registered in
-   `src/Keymap.h` with no default keys. Import shows a one-screen summary ("N options, keymap, 3 themes,
-   12 aliases; API keys are not included — set them in Options › Models") before applying. Depends on 1–3.
+   `src/Keymap.h` with no default keys. Import opens a review screen before applying: summary of added,
+   unchanged and conflicting items, with current and incoming values shown side by side. A conflict is
+   a different non-default value on both sides; resolve each with Keep current or Use imported, plus
+   bulk choices for remaining conflicts. For keybindings, aliases and endpoints, compare by their stable
+   item key rather than treating the whole file as one conflict. Preserve the current value unless the
+   user explicitly resolves a conflict. Cancel applies nothing. Show that API keys are excluded. Depends on 1–3.
 5. A headless CLI path for scripting and tests: `relay --export-settings <file>` / `--import-settings
    <file>` via `QCommandLineOption` in `src/main.cpp:430` (exits without opening a window). Optional if
    the owner prefers UI only.
@@ -103,20 +108,20 @@ Where the preferences live today:
    of devices paired with `remote/pairing.py` links + the five-digit code; the bundle from step 1
    encrypted with a chain key derived during pairing (Noise session, no new crypto); transport options
    (direct LAN/tailnet via `remote/httpd.py`, or an opaque mailbox on the existing rendezvous that stores
-   only ciphertext); conflict rule (per-key last-writer-wins with a timestamp); what never syncs (the
+   only ciphertext); conflict rule (non-default divergent values require the same user-facing resolution as import; timestamps can order non-conflicting updates but never silently overwrite a conflict); what never syncs (the
    same secret list as step 1); relation to #H0P3. Link it in `links.plans`.
 7. Docs: a short "Moving to another machine" section in the user docs next to Options, naming what is
    and is not in the file.
 
 **Risks**
+- Defaults can change between versions: keep a source version/schema marker, compare the incoming override with the destination's current defaults, and preview every resulting change rather than writing raw source defaults.
 - A new secret-bearing QSettings key slipping into exports — mitigated by the allow-list and the test in
   Verify that fails on any keyring value or `remote/*` key.
 - Theme/keymap files referencing things the other machine lacks (a theme name with no file, a local-model
   URL on `localhost`) — import must fall back, not break.
 - Cross-platform paths (macOS/Windows QSettings formats): export values as JSON types, never raw INI.
 - Owner questions:
-  1. **Import semantics** — merge (imported keys overwrite, everything else kept; recommended) or replace
-     the whole profile?
+  1. **Import semantics** — decided: merge. Imported non-default values fill defaults; identical values are no-ops; when both current and imported values are different non-default customizations, show a conflict and let the user choose. No silent overwrite.
   2. **Scope of "everything"** — include global aliases (recommended yes), global memories and
      instructions under `~/.config/relay/switchboard/memory` (recommended: opt-in checkbox, they can hold
      personal facts), and local model servers (recommended yes; they are URLs, not keys)?
@@ -125,7 +130,7 @@ Where the preferences live today:
   4. **Sync** — design only on this card and a follow-up card to build it (recommended, and what the
      `acceptance` line asks), or build it here? And should it wait on #H0P3's decision about an account
      on relay-terminal.ai?
-  5. Is the CLI flag (step 5) wanted, or UI only?
+  5. Is the CLI flag (step 5) wanted, or UI only? A headless import must stop and report unresolved conflicts, not choose for the user.
 
 **Verify**
 - New `tests/settingsexport_test.cpp` (`relay-settings-export-tests` in `CMakeLists.txt`), run with
@@ -133,9 +138,15 @@ Where the preferences live today:
   (`QStandardPaths::setTestModeEnabled`) — every allow-listed key comes back equal; state keys and
   `remote/*`, `isolation/*` are absent; a fake keyring value and `identity.key` bytes never appear in the
   file; a `version: 99` file and a non-JSON file are refused with nothing written; the backup file exists
-  after an import.
+  after an import; two different non-default values produce a preview conflict and no write until resolved;
+  Keep current and Use imported each produce the selected result; cancel and failed staging leave all settings unchanged.
 - `tests/test_settings_bundle.py` (pytest) for the worker half: global aliases round-trip into an empty
   `XDG_CONFIG_HOME`.
 - `tests/settingspane_test.cpp`: the General page has the Export/Import row.
 - By hand: export on this machine, `XDG_CONFIG_HOME=$(mktemp -d) ./build/relay --fresh`, import, and see
   the theme, a custom shortcut and an alias work immediately; `grep -i key` the exported file.
+**Preference coverage and conflict granularity (owner clarification, 2026-09-25).** Ordinary Agent, Security, appearance, theme, provider and Switchboard preferences are included when customized; model role assignments, provider/model priorities and other model choices are included, but usage/recent/availability state and API keys are excluded. Custom hotkeys from `keybindings.json` are included as per-action overrides. The import preview compares each preference key, model role/priority and hotkey action separately, showing Current and Imported values for divergent non-default choices. Thus one conflicting shortcut does not block unrelated shortcuts or the whole keymap; users can keep or import that one binding. Validate imported model identifiers and shortcuts against the destination installation and show unsupported entries as skipped or requiring attention before applying. Add round-trip and conflict tests for one model role, one priority, one ordinary preference and two custom hotkeys where only one conflicts.
+
+## Decisions
+Owner, 2026-09-25: “05J2, yes, but help the user resolve conflicts for non defaults.” Import merges profiles. When current and incoming values are distinct non-default customizations, preview both and require an explicit per-item or bulk choice before applying. Defaults and identical values merge automatically. This decision also governs the proposed sync design; sync must not silently choose last-writer-wins for such conflicts.
+Owner, 2026-09-25: “deliver 05J@ in a subagent and then lets discuss the next card” (immediately after confirming that settings, model preferences and custom hotkeys are covered). Proceed with the plan as clarified: merge imports with per-item conflict resolution; include customized settings, model preferences and custom hotkeys; keep secrets and machine state out; deliver sync as a design, not an implementation.

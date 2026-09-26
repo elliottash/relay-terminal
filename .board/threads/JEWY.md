@@ -35,3 +35,15 @@ Check · 3 passed. The status is under `## Tests`; earlier checks are in this th
 
 <!-- relay:entry 20260924T193623Z-dc author=agent kind=event model=gpt-6-sol pane=c74ef5a7 turn=cf99c92a9b1e48559ab6b383c65134c7/ac2d3a9def6e43f98e872010b7aca28b -->
 - ✦ agent moved this card · Executing → Needs verification · Ctrl+Shift+R opens Review; exact tree built and keymap, appcommands, reviewpane passed for fd0c8150. · evidence tests/keymap_test.cpp · implemented_by openai/gpt-6-sol via codex
+
+<!-- relay:entry 20260925T151515Z-r0 author=agent kind=evidence -->
+Check · 3 passed. The status is under `## Tests`; earlier checks are in this thread.
+
+<!-- relay:entry 20260926T005555Z-c8 author=agent kind=evidence -->
+Check · 3 passed. The status is under `## Tests`; earlier checks are in this thread.
+
+<!-- relay:entry 20260926T010037Z-xf author=agent kind=evidence -->
+Check · 3 passed. The status is under `## Tests`; earlier checks are in this thread.
+
+<!-- relay:entry 20260926T010141Z-74 author=agent kind=evidence -->
+Check · 3 passed. The status is under `## Tests`; earlier checks are in this thread.

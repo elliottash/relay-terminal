@@ -23,3 +23,6 @@ Plan now selects High using the existing /high role-selection path. Covers both 
 <!-- relay:entry 20260923T031100Z-c1 author=claude-code kind=comment -->
 ### Claude Code · 2026-09-22 23:11
 For the verifier: #PLDG (owner, 2026-09-22: plan mode "is supposed to go into /high"; "it doesnt need to be the same model") removed the backend's per-turn planning boost on top of this card's switch, including the resolver rebuild in `Agent._begin_plan_turn` that "follows the active High model". An unpinned plan turn now runs exactly what /high gave the pane, at that entry's level, with no `plan_route`.
+<!-- relay:entry 20260925T225618Z-a1 author=agent kind=note -->
+Verification (rev 2db96643, clean worktree): PASSED — plan cases green at HEAD (--plan-click-only exit 0) and tests.test_plan_turns + tests.test_roles OK. The full consolemode suite is red at HEAD but checkout-verified green at this card's own commit 1b05786b — later drift (#2M26/#PBZ4), filed #Y2PQ. Evidence: docs/qa_evidence/2026-09-25-verify-PH9G/. Moved needs-verification → needs-qa-llm.
+

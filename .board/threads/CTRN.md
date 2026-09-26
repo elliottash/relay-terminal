@@ -309,3 +309,15 @@ Check · 1 missing-evidence, 1 not-applicable; 3 advisory finding(s). The status
 
 <!-- relay:entry 20260924T224913Z-hy author=agent kind=evidence -->
 Check · 1 missing-evidence, 1 not-applicable; 3 advisory finding(s). The status is under `## Tests`; earlier checks are in this thread.
+
+<!-- relay:entry 20260925T151506Z-d0 author=agent kind=evidence -->
+Check · 1 failed, 1 not-applicable; 3 advisory finding(s). The status is under `## Tests`; earlier checks are in this thread.
+
+<!-- relay:entry 20260925T151655Z-kr author=agent kind=evidence -->
+Check · 1 failed, 1 not-applicable; 3 advisory finding(s). The status is under `## Tests`; earlier checks are in this thread.
+
+<!-- relay:entry 20260925T222254Z-97 author=agent kind=event mention=6YS5 model=k3 pane=9c518869 turn=c1facb76ed574045a4ed7b5f45713f08/f8575b6367ac4042913be268fa647953 -->
+mentioned in #6YS5 · 2026-09-25 · agent
+
+<!-- relay:entry 20260925T223516Z-bj author=agent kind=event mention=6BY7 model=glm-5.3 pane=switchboard turn=7bdd4488cc34018b5f751db46ca2a292/d8484eb02fb44016ac77fde66d586976 -->
+mentioned in #6BY7 · 2026-09-25 · agent

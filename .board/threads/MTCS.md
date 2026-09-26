@@ -29,3 +29,9 @@ Found the cause: the scrollback saver (AnsiSerializer) strips the OSC 8 `relay:/
 
 <!-- relay:entry 20260924T220258Z-0p author=agent kind=event model=glm-5.3 pane=a519a27c turn=fc6d7f0a8d0c4f09aae22aaaf598ce32/48b2a529ec614ad2a13296566405e8bb -->
 - ✦ agent updated this card · appended to `## Try it`
+
+<!-- relay:entry 20260925T180514Z-q8 author=agent kind=evidence -->
+Check · 1 missing-evidence; 1 advisory finding(s). The status is under `## Tests`; earlier checks are in this thread.
+
+<!-- relay:entry 20260925T181015Z-wx author=agent kind=evidence -->
+Check · 1 missing-evidence; 1 advisory finding(s). The status is under `## Tests`; earlier checks are in this thread.

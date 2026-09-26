@@ -62,3 +62,6 @@ All three phases landed (29 commits); moved to needs-verification with the QA ch
 
 <!-- relay:entry 20260920T224607Z-rz author=agent kind=decision -->
 Owner: "override the 7bm4 session". §31.9 (profile session, #7BM4), §32 and §32.10 landed together in 134068fe. The working-tree copy of all three had been overwritten by another session at 18:40; restored from land.py's marker snapshots, byte-identical to the last state the claims had seen.
+
+<!-- relay:entry 20260926T003440Z-ay author=agent kind=event mention=3MH4 model=claude-fable-5-1 pane=f35051fe turn=dbc9af56def4427c91f4fecd2d277da4/1a6acee91a96495087b757d1ef3ee4e7 -->
+mentioned in #3MH4 · 2026-09-26 · agent

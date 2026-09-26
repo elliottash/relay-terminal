@@ -10,7 +10,7 @@ rank: zzzzzzzzzzzzzzzzzzr
 created: '2026-09-24'
 verify: {artifact: code, primary: script, also: [], human: none, sign_off: none, effort: medium, stakes: rework, blast: capability}
 source: pane 0806c7fd, 2026-09-24
-links: {plans: [], commits: [], evidence: [docs/qa_evidence/2026-09-24-j0vy-n6y3-catalog-echo-and-math-gate/], related: [], github: null}
+links: {plans: [], commits: [69eb1565ec78], evidence: [docs/qa_evidence/2026-09-24-j0vy-n6y3-catalog-echo-and-math-gate/], related: [], github: null}
 ---
 # GUI echoes app_catalog to every worker in a self-sustaining loop, ~50k events in 3h, main thread 15-30% CPU idle
 

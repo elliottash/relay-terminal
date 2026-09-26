@@ -10,7 +10,7 @@ rank: zzzzzzzzzzzzzzzzzzzzzzr
 created: '2026-09-24'
 verify: {artifact: code, primary: script, also: [probe], human: optional, criteria: 'Inspect the Board UI for correct owner, date, snooze, resolution, commit, and hierarchy displays.', sign_off: none, effort: medium, stakes: rework, blast: capability}
 source: Relay pane, 2026-09-24
-links: {plans: [], commits: [510de4f150cb, 850876a27cce, 3512773d0179, 43528a3843de], evidence: [docs/qa_evidence/2026-09-25-mj76-card-metadata/notes.md], related: [], github: null}
+links: {plans: [], commits: [510de4f150cb, 850876a27cce, 3512773d0179, 43528a3843de, 97caccaec505], evidence: [docs/qa_evidence/2026-09-25-mj76-card-metadata/notes.md], related: [], github: null}
 ---
 # Card metadata: due, snooze, close reason, human owner, commit links, and a card hierarchy
 
@@ -148,6 +148,27 @@ Five steps, each landable on its own and each leaving a board with none of the n
 
 A clean archive of `43528a38` passed 703 Python tests (1 skipped). `scripts/relay-build --target relay-board-tests relay-boardpane-tests` and the two C++ tests passed. `land.py` built the exact UI commit tree.
 
+### Check 2026-09-25 21:02
+- missing-evidence · unittest:tests.test_board — no run of tests/test_board.py for this revision, from any host, and no attached result
+- missing-evidence · unittest:tests.test_board_tools — no run of tests/test_board_tools.py for this revision, from any host, and no attached result
+- missing-evidence · unittest:tests.test_land — no run of tests/test_land.py for this revision, from any host, and no attached result
+- missing-evidence · unittest:tests.test_qa_verifiers — no run of tests/test_qa_verifiers.py for this revision, from any host, and no attached result
+- not-applicable · unittest:tests.test_tests_protocol — tests/test_tests_protocol.py is not in the project any more
+- missing-evidence · ctest:board — no run of ctest -R board for this revision, from any host, and no attached result
+- passed · ctest:boardpane — ctest -R boardpane passed for this revision on spark-dcc9, 2026-09-26T01:01:55Z
+- not-applicable · manual:docs/qa_evidence/2026-09-25-mj76-card-metadata/notes.md — manual evidence, recorded by hand: docs/qa_evidence/2026-09-25-mj76-card-metadata/notes.md
+- notice · unittest:tests.test_board — tests/test_board.py: 2 of 162 are skipped for good (test_union_merge_keeps_both_sides_entries, test_check_flags_private_files_tracked_by_git)
+- notice · unittest:tests.test_board — tests/test_board.py: 33 of 162 never ran here (test_a_summary_opens_the_issue_and_the_request_is_an_attributed_quote, test_a_quote_without_a_session_names_the_user_and_the_day_only, test_a_summary_without_a_request_writes_no_quote…)
+- notice · unittest:tests.test_board — tests/test_board.py: 5 of 162 are not in the project any more (test_an_agents_md_is_created_when_the_project_has_no_instruction_file, test_an_agents_md_is_created_with_an_import_when_only_claude_md_exists, test_warp_md_is_never_touched…)
+- notice · unittest:tests.test_board_tools — tests/test_board_tools.py: 83 of 340 never ran here (test_dates_owner_and_reverse_children_round_trip, test_bad_resolution_and_parent_cycle_are_refused, test_a_summary_opens_the_issue_with_the_request_quoted_and_attributed…)
+- notice · unittest:tests.test_board_tools — tests/test_board_tools.py: 5 of 340 are not in the project any more (test_the_offered_tools_are_read_only_files_search_and_the_modes_board_tools, test_an_hour_later_the_hourly_budget_is_free_again, test_creates_are_capped_per_hour_across_panes_of_one_workspace…)
+- notice · unittest:tests.test_land — tests/test_land.py: 126 of 126 never ran here (test_commit_records_named_card_and_no_cards_skips_it, test_only_my_hunks_land_and_the_other_edit_survives, test_two_sessions_land_different_regions_of_one_file…)
+- notice · unittest:tests.test_land — tests/test_land.py: 16 of 126 are skipped for good (test_a_tree_that_does_not_compile_is_refused_while_the_tree_compiles, test_a_tree_that_compiles_lands_and_the_second_verify_is_incremental, test_the_verify_directory_is_never_the_working_tree…)
+- notice · unittest:tests.test_qa_verifiers — tests/test_qa_verifiers.py: 39 of 39 never ran here (test_the_vendor_is_the_model_not_the_aggregator, test_each_preset_signs_with_its_own_vendor, test_a_guest_signs_the_model_it_ran_and_the_harness_that_ran_it…)
+- notice · unittest:tests.test_tests_protocol — tests/test_tests_protocol.py is not in the project any more
+- notice · ctest:board — ctest -R board is slow: p95 2.61 s, p50 2.56 s
+- warning · manual:docs/qa_evidence/2026-09-25-mj76-card-metadata/notes.md — manual evidence docs/qa_evidence/2026-09-25-mj76-card-metadata/notes.md is not there
+history: thread
 ## Execution Summary
 Implemented optional close reason, human owner, due/snooze dates, dated milestones, commit sequences and card hierarchy. Board rows and card pages show the computed metadata; `land.py commit` records hashes on named cards. Code landed in `510de4f1`, `850876a2` and `3512773d`.
 Evidence: docs/qa_evidence/2026-09-25-mj76-card-metadata/notes.md

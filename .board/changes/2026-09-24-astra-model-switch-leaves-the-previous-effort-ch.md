@@ -26,9 +26,9 @@ After a pane changes from GLM Main to Astra in High, its effort menu offers Astr
 ### Check
 Pass — the exact landed tree built and passed the focused test for commits 9314675960b2 and 569116039bdf. Output: docs/qa_evidence/2026-09-24-2RYC/consolemode.txt. The shared checkout's fast build could not link because another session's unfinished PaneDirectory symbols were present there.
 
-### Check 2026-09-24 18:49
-- passed · ctest:consolemode — ctest -R consolemode passed for this revision on spark-dcc9, 2026-09-24T22:49:05Z
-- notice · ctest:consolemode — ctest -R consolemode is slow: p95 6.69 s, p50 1.62 s
+### Check 2026-09-25 11:16
+- failed · ctest:consolemode — ctest -R consolemode failed for this revision on spark-dcc9
+- notice · ctest:consolemode — ctest -R consolemode is slow: p95 50.99 s, p50 1.65 s
 history: thread
 ## Execution Summary
 The effort menu now resolves the active High/Flash role's model before falling back to the pane's Main model. This fixes GLM Main → Codex Astra High showing GLM's three levels. Regression coverage checks GLM Main → Astra High → Sol High → GLM Main. Code landed in 9314675960b2 and the test cleanup in 569116039bdf.

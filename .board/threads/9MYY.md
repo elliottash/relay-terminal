@@ -88,3 +88,6 @@ Resuming after the pane restart from the surviving phone-9myy land session; fini
 
 <!-- relay:entry 20260926T011845Z-e0 author=agent kind=event model=claude-opus-5-5 pane=131947ca turn=a75151a0b2c04ee79bad563de9b28269/7b16fc796e514abcaa77f73a5f77e6b9 -->
 - ✦ agent moved this card · Running → Needs verification, wrote `## Execution Summary`, `## Tests` · Steps 3–6 landed in 2febbf48; exact landed tree builds and relay-engine-tests passes in a verify slot; golden PNG byte-identical. · evidence docs/qa_evidence/2026-09-25-9myy-view-hot-paths/ · implemented_by anthropic/claude-opus-5-5 via claude-code
+
+<!-- relay:entry 20260926T013146Z-wa author=agent kind=event mention=6BY7 model=deepseek/deepseek-v4.1-flash pane=c26b448b turn=5ccd1f59f9334601b6b3f0412ba30839/73730002c1d74f0f8a138f5406545e56 -->
+mentioned in #6BY7 · 2026-09-26 · agent

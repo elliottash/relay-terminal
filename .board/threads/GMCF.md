@@ -45,3 +45,6 @@ The owner on the three open questions in the body: "1 yes, 2 yes, 3 yes" — the
 <!-- relay:entry 20260920T215922Z-ca author=claude-code kind=evidence -->
 ### Claude Code · 2026-09-20 21:59
 the three follow-ups landed (cd356730, 497eb591, 7d868c4c, f8becbb1); commits and results on the card. One fault found on the way is #Z4HR's: fdb662d6 added rule 10's card-body schema to board_policy.md after decision 8 tiered it, so `test_the_board_policy_block_stays_tiered` fails on main (3,893 B against a 3,072 B budget, ~520 tokens back on every board turn) — commented on #Z4HR.
+
+<!-- relay:entry 20260925T224220Z-f7 author=agent kind=event mention=BYHN model=glm-5.3 pane=switchboard turn=55b5f1933800fc34299d3ef05c9b05e3/5d68172c2e464a92bc05f284a9fda529 -->
+mentioned in #BYHN · 2026-09-25 · agent

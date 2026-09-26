@@ -9,7 +9,7 @@ session: 6aaee940-3f4f-4a9f-9ee6-42ee39a14377
 rank: zzzzzzzzzzzzzzzzzzzzzzzzzzzzi
 created: '2026-09-25'
 verify: {artifact: system, primary: script, also: [], human: optional, criteria: 'In a live window, middle-click and Ctrl+click on a Board card row and on a #ID link on a card page each dock a pinned card pane beside the Board showing that card; a plain click still opens in the same Board pane, and terminal #ID links still behave as before.', sign_off: none, effort: low}
-links: {plans: [], commits: [4d1ba7c023ad], evidence: [docs/qa_evidence/2026-09-25-hky4-middle-ctrl-click-card-pane/], related: [], github: null}
+links: {plans: [], commits: [4d1ba7c023ad, a5e732456710], evidence: [docs/qa_evidence/2026-09-25-hky4-middle-ctrl-click-card-pane/], related: [], github: null}
 ---
 # Middle-click and Ctrl+click open a card in its own pane
 

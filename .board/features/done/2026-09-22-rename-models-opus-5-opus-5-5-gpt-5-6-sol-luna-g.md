@@ -57,23 +57,26 @@ replace 5.6 sol with 6 sol, 5.6 luna with 6 luna
 `ctest -R modelcatalog`
 `ctest -R board`
 
-### Check 2026-09-23 19:18
+### Check 2026-09-25 20:08
 - missing-evidence · unittest:tests.test_presets — no run of tests/test_presets.py for this revision, from any host, and no attached result
 - not-applicable · unittest:tests.test_tier_lists — tests/test_tier_lists.py is not in the project any more
 - missing-evidence · unittest:tests.test_model_ranking — no run of tests/test_model_ranking.py for this revision, from any host, and no attached result
 - missing-evidence · unittest:tests.test_guest_harness_claude — no run of tests/test_guest_harness_claude.py for this revision, from any host, and no attached result
-- passed · unittest:tests.test_guest_harness_provider — tests/test_guest_harness_provider.py passed for this revision on spark-dcc9, 2026-09-23T23:18:12Z
+- missing-evidence · unittest:tests.test_guest_harness_provider — no run of tests/test_guest_harness_provider.py for this revision, from any host, and no attached result
 - missing-evidence · unittest:tests.test_qa_verifiers — no run of tests/test_qa_verifiers.py for this revision, from any host, and no attached result
 - missing-evidence · unittest:tests.test_board_tools — no run of tests/test_board_tools.py for this revision, from any host, and no attached result
 - not-applicable · unittest:tests.test_web_model_name — tests/test_web_model_name.py is not in the project any more
-- missing-evidence · ctest:modelcatalog — no run of ctest -R modelcatalog for this revision, from any host, and no attached result
+- passed · ctest:modelcatalog — ctest -R modelcatalog passed for this revision on spark-dcc9, 2026-09-26T00:08:01Z
 - passed · ctest:board — ctest -R board passed for this revision on spark-dcc9, 2026-09-23T19:03:58Z
 - notice · unittest:tests.test_tier_lists — tests/test_tier_lists.py is not in the project any more
-- notice · unittest:tests.test_guest_harness_provider — tests/test_guest_harness_provider.py: 1 of 71 are slow (test_guest_startup_and_changes_report_each_models_supported_efforts)
+- notice · unittest:tests.test_guest_harness_claude — tests/test_guest_harness_claude.py: 5 of 83 never ran here (test_a_restart_before_the_first_turn_of_a_resumed_session_resumes_it, test_set_model_on_a_closed_harness_restarts_it_on_the_session, test_an_effort_change_on_a_resumed_session_before_its_first_turn_resumes_it…)
+- notice · unittest:tests.test_guest_harness_provider — tests/test_guest_harness_provider.py: 12 of 83 never ran here (test_guest_quota_refusal_keeps_a_structured_reason, test_exhausted_guest_retries_on_another_login_without_spending_a_reset, test_guest_tool_before_quota_refusal_is_not_replayed…)
+- notice · unittest:tests.test_guest_harness_provider — tests/test_guest_harness_provider.py: 1 of 83 are slow (test_guest_startup_and_changes_report_each_models_supported_efforts)
+- notice · unittest:tests.test_guest_harness_provider — tests/test_guest_harness_provider.py: 3 of 83 are not in the project any more (test_a_model_picked_after_the_stand_in_replaces_it, test_the_helper_worker_follows_the_priority_list_instead_of_starting_a_guest, test_with_nothing_usable_it_configures_anyway_and_a_turn_says_why)
 - notice · unittest:tests.test_qa_verifiers — tests/test_qa_verifiers.py: 39 of 39 never ran here (test_the_vendor_is_the_model_not_the_aggregator, test_each_preset_signs_with_its_own_vendor, test_a_guest_signs_the_model_it_ran_and_the_harness_that_ran_it…)
-- notice · unittest:tests.test_board_tools — tests/test_board_tools.py: 8 of 265 never ran here (test_verifier_updates_and_qa_transition_preserve_the_implementer, test_refine_writes_related_links_known_labels_and_a_missing_done_means, test_refine_leaves_an_existing_done_means_alone…)
-- notice · unittest:tests.test_board_tools — tests/test_board_tools.py: 1 of 265 are not in the project any more (test_the_offered_tools_are_read_only_files_search_and_the_modes_board_tools)
+- notice · unittest:tests.test_board_tools — tests/test_board_tools.py: 83 of 340 never ran here (test_dates_owner_and_reverse_children_round_trip, test_bad_resolution_and_parent_cycle_are_refused, test_a_summary_opens_the_issue_with_the_request_quoted_and_attributed…)
+- notice · unittest:tests.test_board_tools — tests/test_board_tools.py: 5 of 340 are not in the project any more (test_the_offered_tools_are_read_only_files_search_and_the_modes_board_tools, test_an_hour_later_the_hourly_budget_is_free_again, test_creates_are_capped_per_hour_across_panes_of_one_workspace…)
 - notice · unittest:tests.test_web_model_name — tests/test_web_model_name.py is not in the project any more
-- notice · ctest:modelcatalog — ctest -R modelcatalog is slow: p95 3.72 s, p50 3.72 s
+- notice · ctest:modelcatalog — ctest -R modelcatalog is slow: p95 3.87 s, p50 3.72 s
 - notice · ctest:board — ctest -R board is slow: p95 2.61 s, p50 2.56 s
 history: thread

@@ -18,3 +18,6 @@ Plan this card.
 
 <!-- relay:entry 20260924T043452Z-vf author=owner kind=event pane=switchboard -->
 - ✦ owner moved this card · Planning → Planned · the plan is on the card
+
+<!-- relay:entry 20260925T213418Z-eg author=agent kind=event mention=WBFM model=k3 pane=164b2cbb turn=6173581165764472b6c340786cfdcc26/f12975b5ee924855bd3bca2af187a050 -->
+mentioned in #WBFM · 2026-09-25 · agent

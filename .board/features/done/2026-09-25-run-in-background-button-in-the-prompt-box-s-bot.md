@@ -31,3 +31,13 @@ Text wrapping is unchanged in mechanism and stronger in effect: text already wra
 - `ctest -R "consolemode|consolecorner|queuecontract"` — 3/3 pass (the busy-line test updated to find the box by its new `promptBox` name).
 - `ctest -R "boardworkspace|boardpane|conversations"` — 3/3 pass; full app target builds green through `scripts/relay-build`.
 - `relay-panestatus-tests` fails 2 cases (whoGetsABand, byTypeDiffersByGroupShares) — measured pre-existing at clean HEAD (bug #S7ZM), not this change.
+
+### Check 2026-09-25 11:17
+- not-applicable · ctest:consolecorner — ctest -R consolecorner is not in the project any more
+- failed · ctest:consolemode|consolecorner|queuecontract — ctest -R consolemode|consolecorner|queuecontract failed for this revision on spark-dcc9
+- missing-evidence · ctest:boardworkspace|boardpane|conversations — no run of ctest -R boardworkspace|boardpane|conversations for this revision, from any host, and no attached result
+- notice · ctest:consolecorner — ctest -R consolecorner is not in the project any more
+- notice · ctest:consolemode|consolecorner|queuecontract — ctest -R consolemode|consolecorner|queuecontract: 2 of 2 are slow (consolemode, queuecontract)
+- notice · ctest:boardworkspace|boardpane|conversations — ctest -R boardworkspace|boardpane|conversations: 1 of 3 are slow (conversations)
+- notice · ctest:consolemode — ctest -R consolemode failed the last time it ran, 2026-09-25T15:16:45Z
+history: thread

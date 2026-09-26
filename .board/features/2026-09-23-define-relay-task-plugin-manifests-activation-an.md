@@ -43,3 +43,9 @@ then lets go to your reports and write detailed cards for the editable artifacts
 - [ ] Add workspace-scoped router, runner and preview role interfaces <!-- t:4h blocked_by=6r,4v -->
 - [ ] Add lazy namespaced tool registry with native/guest parity <!-- t:9a blocked_by=4v -->
 - [ ] Prove the API with document and kernel plugin fixtures <!-- t:e9 blocked_by=4h,9a -->
+
+## Execution Summary
+Landed 2026-09-25 after the owner lifted the hold: `503933ca` is 9825875c's content, re-applied onto the tip (a three-way merge reproduced the working copy byte for byte). It covers workspace_plugins.py (WorkspaceManager, Python KernelRuntime, TeX runtime, route through lang_router), workspace-scoped lazy py_*/tex_* tools with native and guest parity (agent.py, tools.py, tool_groups.py, guest_board_bridge.py, worker.py), protocol 36 in docs/AGENT-SESSIONS-PROTOCOL.md, and the #6FDD v2 remainder. #E34S's in-progress hunks in agent.py (one) and worker.py (four) were left out and stay in the tree for that session.
+
+## Tests
+- Clean export of 503933ca: `PYTHONPATH=backend python3 -m unittest tests.test_workspace_plugins tests.test_open_buffers tests.test_task_plugins tests.test_tool_groups tests.test_tools`, 143 tests OK.

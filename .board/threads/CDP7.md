@@ -53,3 +53,11 @@ Check · 3 missing-evidence, 1 not-applicable, 2 passed; 5 advisory finding(s). 
 
 <!-- relay:entry 20260924T032312Z-7f author=agent kind=evidence -->
 Check · 2 missing-evidence, 1 not-applicable, 3 passed; 5 advisory finding(s). The status is under `## Tests`; earlier checks are in this thread.
+<!-- relay:entry 20260925T224912Z-ux author=agent kind=note -->
+Verification (rev 2db96643, clean worktree): PASSED — modelpicker 62/0, modelcatalog 73/0 (fills the card's missing-evidence line), modelspane 25/1 (#E8V1 stale string, #SYTR). The two python failures (openrouter catalog ordering, guest preset rows) are later drift from #Y4PJ and a new harness — both suites are green at this card's own commit 78639301; filed #042V. Evidence: docs/qa_evidence/2026-09-25-verify-CDP7/. Moved needs-verification → needs-qa-llm.
+
+<!-- relay:entry 20260926T000807Z-qh author=agent kind=evidence -->
+Check · 2 missing-evidence, 1 not-applicable, 3 passed; 8 advisory finding(s). The status is under `## Tests`; earlier checks are in this thread.
+
+<!-- relay:entry 20260926T005550Z-v1 author=agent kind=evidence -->
+Check · 1 failed, 2 missing-evidence, 1 not-applicable, 2 passed; 8 advisory finding(s). The status is under `## Tests`; earlier checks are in this thread.

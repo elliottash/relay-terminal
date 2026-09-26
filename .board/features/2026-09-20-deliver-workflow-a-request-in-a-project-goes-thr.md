@@ -7,7 +7,7 @@ assignee: agent
 rank: i1
 created: '2026-09-20'
 source: pane, 2026-09-20
-links: {plans: [], commits: [d97bcf24, 5fc80e33, 6a8575f4, be5d9ec1, a1ec6290, baae6a63, a7746e2d, a5e0dfbb, d52916e4, ca6ebaad, fec0fd71, 7bd892f2, c82f171d, 4bedd4f1, 61296f15, e54d1e5f, cd8e7dfa], evidence: [docs/qa_evidence/2026-09-20-deliver-claim], related: [], github: null}
+links: {plans: [], commits: [a7746e2dd130, d97bcf24e58b, 5fc80e3359e5, 6a8575f41995, a5e0dfbb7ab6, be5d9ec1078a, a1ec6290c1d4, baae6a63f969, d52916e47ada, ca6ebaadf4c6, 7bd892f22c0e, c82f171d963b, 4bedd4f195b9, fec0fd71fc8f, 61296f15eda9, e54d1e5fa490, cd8e7dfaba0f, e7ce0f13b8c2, 9d31b6aaf977, bbcf3b438801], evidence: [docs/qa_evidence/2026-09-20-deliver-claim], related: [], github: null}
 ---
 # Deliver workflow: a request in a project goes through a card; sessions claim cards visibly; /deliver
 

@@ -80,3 +80,23 @@ I have the full picture now. Re-reading the card for its current hash, then writ
 
 <!-- relay:entry 20260924T043617Z-dn author=owner kind=event pane=switchboard -->
 - ✦ owner moved this card · Planning → Planned · the plan is on the card
+
+<!-- relay:entry 20260925T115320Z-xa author=owner kind=event pane=switchboard -->
+- ✦ owner claimed this card · assignee agent, Planned → Executing, session 4386a69e
+
+<!-- relay:entry 20260925T115320Z-xb author=owner kind=progress pane=switchboard pane_token=4386a69e-3006-48f5-bb9c-6e7338a8c7df -->
+Claimed (4386a69e) · working on it from a terminal pane
+
+Run pressed on iOS Safari.
+
+<!-- relay:entry 20260925T115659Z-dz author=agent kind=event model=claude-opus-5-5 pane=4386a69e turn=d55449d2a1e34f9aa7c193f74c36a6d0/81539e9ee1dc476484d7452376c0cff3 -->
+- ✦ agent updated this card · links: {"plans": [], "commits": [], "evidence": ["docs/qa_evidence/2026-09-21-ph0n-host… → {"plans": [], "commits": ["15ee6c5"], "evidence": ["docs/qa_evidence/2026-09-21-…; waiting_on: owner → (unset); appended to `## Tests`
+
+<!-- relay:entry 20260925T115706Z-hx author=agent kind=event model=claude-opus-5-5 pane=4386a69e turn=d55449d2a1e34f9aa7c193f74c36a6d0/81539e9ee1dc476484d7452376c0cff3 -->
+- ✦ agent updated this card · appended to `## Execution Summary`
+
+<!-- relay:entry 20260925T115707Z-hy author=agent kind=event model=claude-opus-5-5 pane=4386a69e turn=d55449d2a1e34f9aa7c193f74c36a6d0/81539e9ee1dc476484d7452376c0cff3 -->
+- ✦ agent moved this card · Executing → Needs verification · RELAY_HOSTED=off landed in 15ee6c5. Tests and a live stub drive show no gateway request with the switch set, and relay-qa-run defaults it on. · evidence docs/qa_evidence/2026-09-25-rcpf-hosted-off/ · implemented_by anthropic/claude-opus-5-5 via claude-code
+
+<!-- relay:entry 20260925T115710Z-64 author=agent kind=progress model=claude-opus-5-5 pane=4386a69e turn=d55449d2a1e34f9aa7c193f74c36a6d0/81539e9ee1dc476484d7452376c0cff3 -->
+Landed `15ee6c5`: `RELAY_HOSTED=off` switches Relay Free off in a profile, and `scripts/relay-qa-run` now defaults it on. With it set, a loopback stub gateway logged no requests from any entry point: chat, recap roles, key test, Relay Pro, image and health. With it unset, Relay Free works as before. The evidence is in `docs/qa_evidence/2026-09-25-rcpf-hosted-off/`. Two test failures also fail on a clean HEAD export, so this card didn't cause them; both are listed under `## Tests`. Moved to needs-verification.

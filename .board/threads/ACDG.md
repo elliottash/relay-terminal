@@ -19,3 +19,6 @@ Filed at the owner's explicit request to card the keyboard survey's identified g
 
 <!-- relay:entry 20260924T032309Z-9p author=agent kind=evidence -->
 Check · 1 not-applicable, 1 passed; 1 advisory finding(s). The status is under `## Tests`; earlier checks are in this thread.
+
+<!-- relay:entry 20260926T005546Z-30 author=agent kind=evidence -->
+Check · 1 failed, 1 not-applicable; 2 advisory finding(s). The status is under `## Tests`; earlier checks are in this thread.

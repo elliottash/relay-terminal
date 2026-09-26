@@ -36,9 +36,9 @@ Ctrl+Shift+R opens or focuses the Review pane in the active tab, without invokin
 - `scripts/relay-build --target relay-keymap-tests --target relay-appcommands-tests --target relay` (passed)
 - `scripts/land.py commit jewy-review-key` (exact landed tree built)
 
-### Check 2026-09-24 15:35
-- passed · ctest:keymap — ctest -R keymap passed for this revision on spark-dcc9, 2026-09-24T19:35:46Z
-- passed · ctest:appcommands — ctest -R appcommands passed for this revision on spark-dcc9, 2026-09-24T19:35:46Z
+### Check 2026-09-25 21:01
+- passed · ctest:keymap — ctest -R keymap passed for this revision on spark-dcc9, 2026-09-26T01:01:27Z
+- passed · ctest:appcommands — ctest -R appcommands passed for this revision on spark-dcc9, 2026-09-26T00:55:41Z
 - passed · ctest:reviewpane — ctest -R reviewpane passed for this revision on spark-dcc9, 2026-09-24T19:35:46Z
 history: thread
 ## Execution Summary

@@ -71,6 +71,11 @@ handler opens a **modal** still cannot be marked, whatever the owner said, until
 non-blocking pass: `run()` would not return, the result would never be sent, and the window would
 sit frozen behind a dialog. `pane.share` is one of those, so it is allowed and not yet on.
 
+**Local-models Save buttons — yes, 2026-09-25** ("Yes"). An agent may press Save on a local
+endpoint it found — `found:<n>` › Save and `local:address/save` › Save in Options › Local models.
+Since #FRVM a button is safe unless refused by name, so the decision means: leave both out of
+`refusedRowButtons()`. Nothing to build.
+
 
 ## Discussion points
 

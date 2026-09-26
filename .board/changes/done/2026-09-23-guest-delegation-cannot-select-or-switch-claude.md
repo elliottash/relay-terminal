@@ -9,7 +9,7 @@ verified_by: openai/gpt-6-sol via codex
 rank: zzzzzzzzzzzzzzzzzzz
 created: '2026-09-23'
 source: Codex in Relay pane, 2026-09-23
-links: {plans: [], commits: [f610a0774e0faf9214f1b37a189ce67f6b35be66], evidence: [tests/test_subagents.py], related: [], github: null}
+links: {plans: [], commits: [f610a0774e0f, da8c681cb654], evidence: [tests/test_subagents.py], related: [], github: null}
 ---
 # Guest delegation cannot select or switch Claude Opus subagents
 

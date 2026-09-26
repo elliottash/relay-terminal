@@ -27,3 +27,6 @@ Which astra did you mean — and was it maybe already in the main list? Recommen
 
 <!-- relay:entry 20260921T105731Z-27 author=agent kind=event model=kimi-k3 pane=e73b3a18 turn=bcb327c82e3b4cada30d03f7da9b22ef/ef1fdc329d8d481f8c9708ba5dd74a63 -->
 - ✦ agent updated this card · waiting_on: (unset) → owner
+
+<!-- relay:entry 20260925T213418Z-gt author=agent kind=event mention=WBFM model=k3 pane=164b2cbb turn=6173581165764472b6c340786cfdcc26/f12975b5ee924855bd3bca2af187a050 -->
+mentioned in #WBFM · 2026-09-25 · agent

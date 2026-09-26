@@ -1,7 +1,7 @@
 ---
 id: P7CF
 type: work
-status: discussing
+status: planned
 labels: [feature, qa, switchboard]
 assignee: agent
 implemented_by: openai/gpt-6-sol via codex
@@ -18,23 +18,32 @@ links: {plans: [], commits: [39b82175e4dc3f20795cbeb2c8106a9d33bd595d], evidence
 can you do deeper research on that issue and put it on a card -- i have 550 cards in needs verification or needs Q&A, and i am sure that most of them are fine.
 
 ## Plan
-Goal: recommend a closure policy that reduces the verification backlog without losing important quality gates.
+Goal: implement the two gates the research and the #0FBB example named — owner-authorized chat close and independent-verifier `ai-visual` gating — and the first two steps of the backlog path (manifest + pilot sample), leaving `verification: ask` strong against autonomous closure and moving no backlog card.
 
-Findings: `backend/relay_core/qa_policy.py` defaults to `verification: ask`; `backend/relay_core/board_tools.py` rejects agent closure from verification lanes even after an explicit owner instruction. Related card #C3Q2 built that switch.
+Findings:
+- `backend/relay_core/qa_policy.py` — `apply()` rule 2 demotes an `ai-text`/`ai-visual` primary to `also` unless `ai_may_gate_after` is satisfied **and** the card's `qa` block names a verifier outside the implementer's lineage; the default `ai_may_gate_after: never` demotes every AI primary, so `ai-visual` never gates. `closes_automatically()` is true only under `verification: automatic` with `human` not `required`.
+- `backend/relay_core/board_tools.py` `_qa_ask_gate` (~line 2227): under `ask`, a verifying session moving a card from `needs-verification` or a `QA_STATUSES` lane to `done` raises `board_refused` with `requires: user_close`, `offer: needs-verification`; only `OWNER_ACTOR` is exempt — where the #0FBB close died.
+- `_verify_gate` (~line 3619): `human: required` refuses `done` for an agent until a `## Human QA` question carries an `Answer:` line; `verify.deferred` and `sign_off` receipts refuse for anyone. `_human_qa_gate` refuses any close with an unanswered `## Human QA` question (#WC3E).
+- `_move` (~line 2606) funnels every move through `_signal_gate`, `_human_qa_gate`, `_verify_gate`, `_qa_ask_gate`; its `allowed` args set is where a new argument registers, and `self._append(card, text, kind=...)` is how a thread entry lands (`_comment`, ~line 2970; `decision` entries must carry a quotation).
+- Backlog audit (2026-09-24, `research_notes/AI software verification policy/relay_backlog.md`): 306 `needs-verification` + 241 `needs-qa-llm`; 54/306 and 0/241 carry a `verify` block; 20 have no structural `unverified_reasons()`.
 
 Steps:
-1. Collect recent primary-source practices and empirical evidence on AI code review, human review, and risk-based QA.
-2. Audit the current Board's lane sizes and metadata completeness.
-3. Synthesize policy alternatives, a recommended path, safeguards, and a staged backlog reduction plan.
+1. **Owner-authorized close.** `board_move_card` gains `authorized_by` — the owner's verbatim chat instruction, one card per call. In `_qa_ask_gate`, a close to `done` carrying `authorized_by` passes under `ask`: the same write appends a `decision` thread entry quoting the instruction with date, relaying session, and the revision the evidence was shown at (skip it if that exact quote is already on the thread), and the result's `note` reads `closed on the owner's instruction: …`. Without `authorized_by` the refusal stays word for word; `verification: automatic` behaviour is untouched.
+2. **Authorization satisfies the person gates.** A recorded owner authorization also passes `_human_qa_gate` and `_verify_gate`'s `human: required`: the move writes the owner's words as an `Answer:` line under the open `## Human QA` question, attributed (`Answer: owner, relayed by <session>: "…"`). `verify.deferred` and `sign_off` receipts still refuse — a chat instruction cannot create a dated receipt or end a deferral.
+3. **Independent `ai-visual` gating.** In `qa_policy.apply`, split rule 2: `ai-visual` keeps `primary` when the card's `verify.artifact` is `visual` **and** the `qa` block names a verifier outside the implementer's lineage — no `ai_may_gate_after` needed. `ai-text` keeps today's rule exactly; `ai-visual` without an independent verifier still demotes with today's note.
+4. **Backlog manifest + pilot sample.** New read-only `scripts/board_backlog.py`: walk `.board/` work cards in the two lanes, emit per-card rows (id, status, implemented_by, session age, `verify` summary or none, evidence paths, `links.commits`, `unverified_reasons()` signals, last thread entry) to `research_notes/AI software verification policy/backlog-manifest-<date>.md`, plus per-stratum counts and a fixed-seed stratified pilot sample (20 per lane). `--json`; writes nothing to `.board/`.
+5. **Docs.** `docs/BOARD-FORMAT.md` (`qa:` policy block; `authorized_by` on `board_move_card`), `docs/AGENT-SESSIONS-PROTOCOL.md` 19.21 (the AI-gating split, `authorized_by`, one-card scope, what lands on the thread), one sentence on the Verification row in `docs/ARCHITECTURE.md`.
 
-Risks: backlog status alone does not prove a change is good; mass closure needs evidence and rollback.
+Risks: `authorized_by` is the relaying session's claim, not a channel the backend can verify — a dishonest agent could invent a quote; the mitigations are one card per call, the permanent decision entry naming relayer and revision, and refuse-by-default. Step 3 relaxes a default #C3Q2 set on your steer; say the word if you want it behind a policy key (`ai_visual_may_gate:`) rather than unconditional. The manifest is point-in-time in a board other sessions edit. No backlog card changes status here — cohort closing waits for your review of the pilot.
 
-Verify: source links, reproducible counts, and explicit separation of observed facts from proposed policy.
+Verify: extend `tests/test_qa_policy.py` (visual + independent verifier keeps `ai-visual` primary; without independence it demotes; `ai-text` unchanged) and `tests/test_board_tools.py` (authorized close under `ask` appends the decision entry and the `note`; refusal unchanged without it; `human: required` + authorization writes the `Answer:` line; `deferred`/receipt still refuse) — `python3 -m pytest tests/test_qa_policy.py tests/test_board_tools.py -q`, plus `tests/test_board_protocol.py` if `authorized_by` reaches `tools/list`. Run `scripts/board_backlog.py` twice: identical output, counts near the audit's 306/241 (point-in-time). Land through `scripts/land.py` as usual.
 
 ## Done means
-- Compare current primary-source examples of AI-assisted software review and closure, distinguishing review gates from extra UI confirmation.
-- Count and classify Relay cards in verification and QA lanes, including evidence and risk markers, without assuming they have passed.
-- Record a concrete, risk-based proposal and safe migration path on this card, with sources and unresolved decisions.
+- An agent can close one named card on the owner's explicit chat instruction while `verification` is `ask` — the move carries the verbatim quote — and the card's thread records the quote, who relayed it, and the revision; this is the #0FBB path, which today refuses with `requires: user_close`.
+- Without that instruction, an agent close out of `needs-verification`/QA lanes still refuses exactly as today, and `verify.deferred` and sign-off receipts still block anyone.
+- A visual card whose verifier is outside the implementer's lineage keeps `ai-visual` as its primary rung instead of being demoted to `also`.
+- A read-only backlog classifier reproduces the lane manifest (IDs, verify blocks, evidence, signals) and a fixed-seed pilot sample, changing no card status.
+- Failure looks like: the owner says "that verifies it for me" and the agent is still refused — or a backlog card moves status with no recorded instruction.
 
 ## Planning notes
 **Research result (2026-09-24):** [Full report](../../reports/AI%20software%20verification%20policy.md) and [reproducible Board audit](../../research_notes/AI%20software%20verification%20policy/relay_backlog.md). The live audit found 547 work cards in the two populated queues: 306 `needs-verification`, 241 `needs-qa-llm`, out of 706 work cards at the final count. Other sessions were editing the Board, so this is a point-in-time count. Only 54/306 and 0/241 have a `verify` block; 13/306 and 7/241 have no structural `unverified_reasons()`. Those 20 are not proven good or mechanically closable: current tests, signals, artifact quality, and policy can still block them. No defensible percentage of the 547 can be presumed safe to close.

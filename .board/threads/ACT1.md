@@ -28,3 +28,9 @@ Linked evidence/record commit 92f3e5b31e5d390ba517a7ef7d588d40b3569a5e. ACT1 is 
 <!-- relay:entry 20260922T014800Z-rn author=codex kind=progress -->
 ### Codex · 2026-09-22 01:48
 Owner requested valid card codes: #MDL1 → #MDP1 and #RLP7 → #RPR7. Updated this card’s current references to the renamed cards; prior thread entries are unchanged.
+
+<!-- relay:entry 20260925T180518Z-16 author=agent kind=evidence -->
+Check · 1 not-applicable, 1 passed; 1 advisory finding(s). The status is under `## Tests`; earlier checks are in this thread.
+
+<!-- relay:entry 20260925T181018Z-v8 author=agent kind=evidence -->
+Check · 1 not-applicable, 1 passed; 1 advisory finding(s). The status is under `## Tests`; earlier checks are in this thread.

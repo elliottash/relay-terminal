@@ -95,3 +95,6 @@ The picture is clear. Let me record the findings on the card.
 - **One residue unproven:** with the Switchboard up but focus in the *card list* (not the composer), the key still falls through to `pane->openModelBox()` on `m_active` — whether that still yanks you off the board needs a live drive.
 
 Question on the card: close it as superseded by #AGNT, or keep it slimmed down to that residual card-list check? My recommendation is keep-and-verify alongside #AGNT's QA — it's the exact scenario you hit.
+
+<!-- relay:entry 20260925T124834Z-76 author=owner kind=event pane=switchboard -->
+- ✦ owner moved this card · Discussing → Dropped · moved from iOS Safari

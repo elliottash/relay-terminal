@@ -20,3 +20,9 @@ The Live strip is implemented and tested (`BoardPaneTests::theLiveStripListsThis
 <!-- relay:entry 20260925T205500Z-p3 author=claude-code kind=evidence model=claude-opus-5-5 -->
 ### Claude Code (subagent of pane c522363d) · 2026-09-25 20:55
 Landed in 579c7d5c, and `links.commits` is set. `land.py` built and gated the exact tree (`relay`), with only #TBRH's hunks: none of the other sessions' uncommitted edits in BoardPane.cpp/.h, RelayWindow.h or boardpane_test.cpp went in.
+
+<!-- relay:entry 20260925T223831Z-xv author=agent kind=event mention=C52H model=k3 pane=26f12d08 turn=da8c2a806ad7450da6674120a858f773/a8965fb567b04330835e3d27e481e4e9 -->
+mentioned in #C52H · 2026-09-25 · agent
+
+<!-- relay:entry 20260925T230454Z-yx author=agent kind=event mention=HKY4 model=k3 pane=6aaee940 turn=068046613259444ba9b13f19ad048b93/74501cccec2f4288befba1efc58c0835 -->
+mentioned in #HKY4 · 2026-09-25 · agent

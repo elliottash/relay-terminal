@@ -13,3 +13,6 @@ Claimed this request. The picker currently uses preset labels and notes that con
 
 <!-- relay:entry 20260923T123014Z-jr author=agent kind=event model=gpt-6-sol pane=b91c71cd turn=19bd73c570494541b8433b0c939c9daf/64fe62ff82f14e71b8275888ebaa081a -->
 - ✦ agent moved this card · Executing → Needs verification · Provider picker and key prompt now use company names; clean build and isolated UI captures passed. · evidence docs/qa_evidence/2026-09-23-provider-names/ · implemented_by openai/gpt-6-sol via codex
+<!-- relay:entry 20260925T223533Z-9o author=agent kind=note -->
+Verification (rev 2db96643): PASSED — picker lists provider names only, key prompt says "Key for kimi", row summary names providers; code survives at HEAD in RelayWindowModels.cpp:460-487 after #243T's move. Evidence: docs/qa_evidence/2026-09-25-verify-7KPN/. Moved needs-verification → needs-qa-llm.
+

@@ -1,16 +1,16 @@
 ---
 id: XQ8F
 type: work
-status: executing
+status: needs-verification
 labels: [feature, remote, ssh, terminal]
 assignee: agent
-implemented_by: anthropic/claude-fable-5-1 via claude-code
-session: c51c64a9-9994-48e2-884a-650d7ece36b3
+implemented_by: glm/glm-5.3-flash
+session: e3b30db3-cc88-44a2-a967-283322c7b4f5
 rank: zzzzzzzzzzzzzzzzzzzzi
 created: '2026-09-24'
 verify: {artifact: code, primary: script, also: [probe, ai-text], human: optional, criteria: 'ssh to a host from a Relay pane, start `top`, quit Relay, start it again: the pane is back at the same session with top still running; Ctrl+E from that pane opens a second pane logged in to the same host in the same directory without a password', sign_off: none, effort: medium, stakes: rework, blast: capability}
 source: 'Claude Code guest session in Relay, 2026-09-24, follow-up to #VD2M'
-links: {plans: [], commits: [], evidence: [], related: [VD2M, S5SH, S7KC], github: null}
+links: {plans: [], commits: [], evidence: [docs/qa_evidence/2026-09-24-persistent-panes-XQ8F/], related: [VD2M, S5SH, S7KC], github: null}
 ---
 # Persistent remote panes: every ssh pane survives disconnects and restarts, Ctrl+E from a remote pane opens another pane on the host
 
@@ -67,6 +67,16 @@ use subagents for implementation
 - [x] A: shell/remote-holder.sh + wrapper persistence + tests/test_ssh_shell.py — 3c67c241, mosh quoting fix ddc60ef4 <!-- t:de -->
 - [x] B: SshConfig rules (rerun strips holder, session parsing, kill/list) + sshconfig_test — ec0e5a1c <!-- t:a3 -->
 - [x] D: marks over mosh via OSC 52 (remote-integration.sh, RemoteSession, engine cores) + tests — 8c0d9f43 <!-- t:h7 -->
-- [ ] C2: PaneRuntime env exports, restore runs remote_login, mosh enhance + keepalive, persistent chip <!-- t:2k s=in-progress blocked_by=a3,h7 -->
-- [ ] C1: RelayWindow split-on-host, New local pane, close-and-end, remote sessions list, remote_login in the layout leaf, Options rows <!-- t:9w s=in-progress blocked_by=a3 -->
-- [ ] Docs section, evidence dir, end-to-end run, card to needs-verification <!-- t:4n s=in-progress blocked_by=2k,9w -->
+- [x] C2: PaneRuntime env exports, restore runs remote_login, mosh enhance + keepalive, persistent chip — bcab1720, 3e7dce48 <!-- t:2k blocked_by=a3,h7 -->
+- [x] C1: RelayWindow split-on-host, New local pane, close-and-end, remote sessions list, remote_login in the layout leaf, Options rows — 7f778cc7, 16763f52 <!-- t:9w blocked_by=a3 -->
+- [x] Docs section, evidence dir, end-to-end run, card to needs-verification — f4ec5642, 59aa3ad8 <!-- t:4n blocked_by=2k,9w -->
+
+## Execution Summary
+Taken over from the stopped Codex session and finished 2026-09-25. Landed on main: bcab1720 (pane runtime: wrapper env, restore re-attach, mosh keepalive, persistent chip), 3e7dce48 + 16763f52 (window: split-on-host from a remote pane, New local pane, Close and end the remote session, Remote sessions on this host, remote_login in the layout leaf, Options rows Persistent sessions and Link), f4ec5642 (docs section 11 rewritten), 7f778cc7 (holder: screen fallback added, quoting of remote cwd with spaces, zsh -d in tests), 59aa3ad8 (QA evidence: staged GUI run under xvfb + full test suites). screen fallback verified against a real screen session (tests/sshconfig_test.cpp); end-to-end run staged against localhost over ssh: login, split on host, Relay restart with the session re-attached (`top` still running). Evidence: docs/qa_evidence/2026-09-24-persistent-panes-XQ8F/.
+
+## Tests
+- python3 tests/test_ssh_shell.py — 41 tests pass (wrapper gates, holder over real tmux and screen, marks over mosh end-to-end).
+- python3 tests/test_remote_marks.py — 6 tests pass, including a real mosh login carrying marks through OSC 52.
+- ctest ^(sshconfig|remotesession|keymap|backends|relay-engine-tests)$ — all pass (evidence: tests.txt in the evidence dir).
+- Staged GUI run (xvfb): ssh to localhost, start top, quit and restart Relay — session re-attached with top running; Ctrl+E opened a second pane on the host in the same directory; screenshots 01–03 in the evidence dir.
+- Working tree on the land-verify slot of each commit built the exact landed tree (land.py build gate).

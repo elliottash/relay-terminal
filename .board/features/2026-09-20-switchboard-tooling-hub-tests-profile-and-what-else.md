@@ -237,35 +237,30 @@ three phases touch no file that #R9G7 (deliver workflow) currently holds.
 - `tests/test_relay_profile.py`
 - manual: docs/qa_evidence/2026-09-20-switchboard-tooling-hub/HUMAN-QA.md
 
-### Check 2026-09-21 21:37
+### Check 2026-09-25 14:10
 - missing-evidence · ctest:testsuites — no run of ctest -R testsuites for this revision, from any host, and no attached result
 - missing-evidence · ctest:cardtests — no run of ctest -R cardtests for this revision, from any host, and no attached result
 - passed · ctest:profilepane — ctest -R profilepane passed for this revision on spark-dcc9, 2026-09-22T01:37:20Z
-- passed · ctest:windowstate — ctest -R windowstate passed for this revision on spark-dcc9, 2026-09-22T01:12:46Z
-- missing-evidence · unittest:tests.test_test_probe — no run of tests/test_test_probe.py for this revision, from any host, and no attached result
-- missing-evidence · unittest:tests.test_test_history — no run of tests/test_test_history.py for this revision, from any host, and no attached result
+- passed · ctest:windowstate — ctest -R windowstate passed for this revision on spark-dcc9, 2026-09-25T18:10:13Z
+- not-applicable · unittest:tests.test_test_probe — tests/test_test_probe.py is not in the project any more
+- not-applicable · unittest:tests.test_test_history — tests/test_test_history.py is not in the project any more
 - missing-evidence · unittest:tests.test_junit_runner — no run of tests/test_junit_runner.py for this revision, from any host, and no attached result
-- missing-evidence · unittest:tests.test_tests_protocol — no run of tests/test_tests_protocol.py for this revision, from any host, and no attached result
+- not-applicable · unittest:tests.test_tests_protocol — tests/test_tests_protocol.py is not in the project any more
 - missing-evidence · unittest:tests.test_profile_protocol — no run of tests/test_profile_protocol.py for this revision, from any host, and no attached result
 - missing-evidence · unittest:tests.test_relay_profile — no run of tests/test_relay_profile.py for this revision, from any host, and no attached result
 - not-applicable · manual:docs/qa_evidence/2026-09-20-switchboard-tooling-hub/HUMAN-QA.md — manual evidence, recorded by hand: docs/qa_evidence/2026-09-20-switchboard-tooling-hub/HUMAN-QA.md
 - notice · ctest:testsuites — ctest -R testsuites has never run here
 - notice · ctest:cardtests — ctest -R cardtests has never run here
-- notice · unittest:tests.test_test_probe — tests/test_test_probe.py: 20 of 20 never ran here (test_names_ids_labels_and_disabled, test_source_from_the_command_path_convention, test_source_from_add_executable_when_the_name_does_not_match…)
-- notice · unittest:tests.test_test_history — tests/test_test_history.py: 68 of 69 never ran here (test_append_and_read_round_trip, test_a_batch_is_one_write_and_appends_never_rewrite, test_every_line_is_one_json_object_in_the_wire_shape…)
+- notice · unittest:tests.test_test_probe — tests/test_test_probe.py is not in the project any more
+- notice · unittest:tests.test_test_history.StatisticsTests.test_percentile_is_nearest_rank — tests.test_test_history.StatisticsTests.test_percentile_is_nearest_rank has history but is no longer collected
 - notice · unittest:tests.test_junit_runner — tests/test_junit_runner.py: 17 of 17 never ran here (test_writes_one_testcase_per_test_with_outcomes, test_classname_file_and_line_point_at_the_source, test_classname_matches_the_probes_unittest_id…)
 - notice · unittest:tests.test_junit_runner — tests/test_junit_runner.py: 2 of 17 are skipped for good (test_expected, test_unexpected)
-- notice · unittest:tests.test_tests_protocol — tests/test_tests_protocol.py: 101 of 101 never ran here (test_list_carries_the_contract_keys_and_nothing_surprising, test_cards_without_tests_lists_work_in_flight_only, test_a_cards_tests_section_names_the_test_on_its_row…)
+- notice · unittest:tests.test_tests_protocol — tests/test_tests_protocol.py is not in the project any more
 - notice · unittest:tests.test_profile_protocol — tests/test_profile_protocol.py: 14 of 14 never ran here (test_started_progress_finished, test_second_run_is_refused_while_one_is_in_flight, test_stop_ends_the_run…)
 - notice · unittest:tests.test_relay_profile — tests/test_relay_profile.py: 21 of 21 never ran here (test_ninja_log_becomes_a_per_output_table, test_an_output_built_twice_counts_once_at_its_last_time, test_an_empty_log_is_a_sentence_not_a_traceback…)
 - notice · unittest:tests.test_relay_profile — tests/test_relay_profile.py: 11 of 21 are skipped for good (test_it_succeeded_and_printed_where_it_wrote, test_the_five_files_are_there, test_the_summary_table_names_every_object…)
+- warning · manual:docs/qa_evidence/2026-09-20-switchboard-tooling-hub/HUMAN-QA.md — manual evidence docs/qa_evidence/2026-09-20-switchboard-tooling-hub/HUMAN-QA.md is not there
 history: thread
-### Implementer rerun 2026-09-21
-- `python3 -m unittest tests.test_board_tools.SignatureTests` — 11 passed.
-- `python3 -m unittest tests.test_board_tools` — 257 passed.
-- Six listed backend modules — 237 passed.
-- Four listed CTest suites — 4 passed.
-- `python3 scripts/relay-board.py check` — no diagnostic for #7BM4; repository-wide pre-existing diagnostics remain.
 ## QA checklist
 Independent verifier: gpt-6-astra via Codex (Relay a2), 2026-09-21 America/New_York.
 Checked revision: `0241d05ef19393e84c0ef98655c9687466a92efc`, clean archive export;

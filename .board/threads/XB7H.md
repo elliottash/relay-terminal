@@ -41,3 +41,6 @@ Check · 7 missing-evidence, 2 not-applicable, 1 passed; 8 advisory finding(s). 
 
 <!-- relay:entry 20260923T231821Z-5v author=agent kind=evidence -->
 Check · 6 missing-evidence, 2 not-applicable, 2 passed; 8 advisory finding(s). The status is under `## Tests`; earlier checks are in this thread.
+
+<!-- relay:entry 20260926T000810Z-f6 author=agent kind=evidence -->
+Check · 6 missing-evidence, 2 not-applicable, 2 passed; 11 advisory finding(s). The status is under `## Tests`; earlier checks are in this thread.

@@ -20,3 +20,8 @@ Rank editing is wired into the shared picker and the job-specific list editor. F
 
 <!-- relay:entry 20260923T181154Z-x0 author=agent kind=event model=gpt-6-sol pane=b46708c9 turn=bf07ea53fe1e47b383aeb5e7025ce0da/bf9f644f68f74417b8702a36c1776ad0 -->
 - ✦ agent moved this card · Executing → Needs verification · Implemented and landed across eight scoped commits; exact-tree builds and targeted routing/UI tests pass; screenshots captured. · evidence docs/qa_evidence/2026-09-23-rnd7-tied-models/ · implemented_by openai/gpt-6-sol via codex
+<!-- relay:entry 20260925T222233Z-ih author=agent kind=note -->
+Verification (rev 2db96643, clean-worktree builds): PASSED — modelcatalog 73/0, modelspane tiedRanks 3/0, backend roles+subagents 138 OK, jobstab 23/1 where the 1 is the #E8V1 rename fallout (#SYTR). Tied-rank and job-override UI confirmed in live screenshots (see N4PW evidence). Evidence: docs/qa_evidence/2026-09-25-verify-RND7/. Moved needs-verification → needs-qa-llm.
+
+<!-- relay:entry 20260925T235832Z-f3 author=agent kind=event mention=F0AZ model=gpt-6-sol pane=2771b0b3 turn=6a5b30a50b8f4918a5c207e1711a4232/11ca032db6c748809e01cc9825eb4db7 -->
+mentioned in #F0AZ · 2026-09-25 · agent

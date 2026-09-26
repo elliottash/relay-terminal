@@ -14,7 +14,7 @@ rank: zzzzzm
 created: '2026-09-18'
 verify: {artifact: system, primary: person, also: [script], human: none, criteria: 'Done means: a live local process survives Relay quitting and returns with its pane (screen, cwd, pre-restart scrollback replayed first); close-and-end empties its session; the sessions list sees leftovers; option off behaves exactly as today; marks/prompt/cwd tracking intact in a wrapped pane.', sign_off: none, effort: medium, stakes: rework}
 source: owner, in a Claude Code session, 2026-09-18, while deciding how
-links: {commits: [0fbf2cac, 7beab862], evidence: [docs/qa_evidence/2026-09-25-87hb-local-holder/], github: null, plans: [docs/SSH-AND-MOSH.md], related: [S5SH, SPBN, XQ8F, VD2M]}
+links: {commits: [0fbf2cac, 7beab862, 9f1032d9], evidence: [docs/qa_evidence/2026-09-25-87hb-local-holder/], github: null, plans: [docs/SSH-AND-MOSH.md], related: [S5SH, SPBN, XQ8F, VD2M]}
 ---
 # The local half of the tmux gap: a shell that survives Relay quitting
 

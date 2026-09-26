@@ -57,6 +57,10 @@ Note: another session is mid-edit in `src/Conversations.cpp` in this checkout; t
 - `windowstate_test.cpp::proseBlocksSurviveSaveReadAndRestore` — trailer round-trip (uri, columns, role, span text/sgr/link); `readScrollback` never returns trailer lines; a trailer-less file restores as before; hand-edited records under a non-prose URI and malformed lines are dropped; the conversation store round-trips; rows gone means file gone.
 - Suites green at `1d80a83b`: `ctest -R "windowstate|relay-engine-tests"` (full engine suite incl. image/media/fold tests) plus `conversations`, `activepaneclose`, `panetabnavigation`. Evidence: `docs/qa_evidence/2026-09-24-prose-wrap-restore-MTCS/`.
 
+### Check 2026-09-25 14:10
+- missing-evidence · ctest:windowstate|relay-engine-tests — no run of ctest -R windowstate|relay-engine-tests for this revision, from any host, and no attached result
+- notice · ctest:windowstate|relay-engine-tests — ctest -R windowstate|relay-engine-tests: 1 of 2 are slow (relay-engine-tests)
+history: thread
 ## Try it
 **Open**: the Relay window this delivery left on your display (a fresh one: `docs/qa_evidence/2026-09-24-prose-wrap-restore-MTCS/stage.sh`). It is a sandboxed profile — your own Relay state is untouched — whose single pane was restored from saved text carrying two word-wrapped blocks beside plain build output.
 

@@ -33,3 +33,9 @@ Check · 1 not-applicable, 1 passed; 1 advisory finding(s). The status is under 
 
 <!-- relay:entry 20260924T224914Z-h8 author=agent kind=evidence -->
 Check · 1 not-applicable, 1 passed; 1 advisory finding(s). The status is under `## Tests`; earlier checks are in this thread.
+
+<!-- relay:entry 20260925T151511Z-ej author=agent kind=evidence -->
+Check · 1 failed, 1 not-applicable; 1 advisory finding(s). The status is under `## Tests`; earlier checks are in this thread.
+
+<!-- relay:entry 20260925T151656Z-k4 author=agent kind=evidence -->
+Check · 1 failed, 1 not-applicable; 1 advisory finding(s). The status is under `## Tests`; earlier checks are in this thread.

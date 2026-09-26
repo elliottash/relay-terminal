@@ -9,7 +9,7 @@ verified_by: kimi/kimi-k3
 rank: zzzzzzzzzzzzzzzz
 created: '2026-09-20'
 source: pane 80c1c8cd
-links: {commits: [a0f5c10cb0bf2cdaca92ca0152288ca8195f07fd], plans: [], evidence: [], related: [], github: null}
+links: {commits: [a0f5c10cb0bf, a6b63f205031], plans: [], evidence: [], related: [], github: null}
 ---
 # kimi-k3 wrongly marked text-only: image turns refused
 

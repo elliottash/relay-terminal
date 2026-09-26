@@ -9,7 +9,7 @@ session: cd5a8e43-5852-4af5-a07c-f2190da34c42
 rank: zzzzzzzzzzzzzzzzzzzzzzzi
 created: '2026-09-25'
 verify: {artifact: code, primary: script, also: [], human: optional, criteria: Alt+click on a file link in real output puts @path in the composer; Ctrl+click still cds; Alt+drag adds the selected text, sign_off: none, effort: medium, stakes: rework}
-links: {plans: [], commits: [1cc5b1d2772a, 7c2f4a54b6e8, 85e97d637480], evidence: [docs/qa_evidence/2026-09-25-alt-click-context/], related: [], github: null}
+links: {plans: [], commits: [1cc5b1d2772a, 7c2f4a54b6e8, 85e97d637480, 59fa8378bf06], evidence: [docs/qa_evidence/2026-09-25-alt-click-context/], related: [], github: null}
 ---
 # Alt+click adds output material to the agent context; Ctrl+click takes over folder navigation
 

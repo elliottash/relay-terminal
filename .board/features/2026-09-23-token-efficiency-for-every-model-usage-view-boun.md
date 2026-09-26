@@ -9,7 +9,7 @@ session: 6ce97a62-7d63-4001-9a08-00a24af1ef25
 rank: zzzzzzzzzzzzzzzzy
 created: '2026-09-23'
 source: Claude guest in a Relay pane, 2026-09-23
-links: {plans: [], commits: [1caa660b, 419f057d, 4709154b, 1697e39e, 2a1a1991, 410bd0b9, 78ab3532, 0a60e584], evidence: [docs/qa_evidence/2026-09-23-0C0V/], related: [GMCF, C8WX, CP3M, Y63Z, PPR4], github: null}
+links: {plans: [], commits: [1caa660baa7b, 419f057dcab1, 4709154bbf94, 2a1a199136a1, 1697e39e869e, 410bd0b90289, 78ab3532b519, 0a60e5846d8f, dc0303aeb78f], evidence: [docs/qa_evidence/2026-09-23-0C0V/], related: [GMCF, C8WX, CP3M, Y63Z, PPR4], github: null}
 ---
 # Token efficiency for every model: usage view, bounded tool output, stable prefix, cheaper subagents, economic compaction
 

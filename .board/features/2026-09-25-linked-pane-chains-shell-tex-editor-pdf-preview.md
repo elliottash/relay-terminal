@@ -6,7 +6,7 @@ labels: [feature, panes, artifacts, preview]
 rank: zzzzzzzzzzzzzzzzzzzzzzzw
 created: '2026-09-25'
 source: 'Owner in a Relay pane, 2026-09-25; slice of #P2W8 (D6)'
-links: {plans: [], commits: [], evidence: [], related: [P2W8, E85D, WYGY, F8R7], github: null}
+links: {plans: [], commits: [488ff0c853f7], evidence: [], related: [P2W8, E85D, WYGY, F8R7], github: null}
 ---
 # Linked pane chains: shell → TeX editor → PDF preview as one group that opens, restores and closes together
 

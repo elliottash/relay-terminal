@@ -7,7 +7,7 @@ assignee: y2ba-cards
 implemented_by: kimi/k3
 rank: zzzzzzzzzzzzw
 created: '2026-09-19'
-links: {plans: [], commits: [0e1988843e50, 459c2e59b814, d850939f504d, 103e2f60645d, 9a13cfe2fc22], evidence: [docs/qa_evidence/2026-09-25-card-panes/], related: [], github: null}
+links: {plans: [], commits: [0e1988843e50, 459c2e59b814, d850939f504d, 103e2f60645d, 9a13cfe2fc22, 4d1ba7c023ad], evidence: [docs/qa_evidence/2026-09-25-card-panes/], related: [], github: null}
 ---
 # Several cards open at once: solo card panes, then a Card pane kind of its own
 

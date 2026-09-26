@@ -49,3 +49,11 @@ Check · 3 missing-evidence, 1 not-applicable, 2 passed; 5 advisory finding(s). 
 
 <!-- relay:entry 20260924T032314Z-ye author=agent kind=evidence -->
 Check · 2 missing-evidence, 1 not-applicable, 3 passed; 5 advisory finding(s). The status is under `## Tests`; earlier checks are in this thread.
+<!-- relay:entry 20260925T225115Z-6p author=agent kind=note -->
+Verification (rev 2db96643): PASSED — the card's own staged full-app check re-run at HEAD exits 0 (late openrouter events reach an open Priorities pane, no restart; six staged codex models list; key_stored recorded); modelpicker 62/0, modelcatalog 73/0, modelspane 25/1 (#E8V1 stale string, #SYTR); the two python failures are later drift (#042V). Evidence: docs/qa_evidence/2026-09-25-verify-VPR7/ + verify-20260925 captures in the VPR7 dir. Moved needs-verification → needs-qa-llm.
+
+<!-- relay:entry 20260926T000809Z-z9 author=agent kind=evidence -->
+Check · 2 missing-evidence, 1 not-applicable, 3 passed; 8 advisory finding(s). The status is under `## Tests`; earlier checks are in this thread.
+
+<!-- relay:entry 20260926T005551Z-ve author=agent kind=evidence -->
+Check · 1 failed, 2 missing-evidence, 1 not-applicable, 2 passed; 8 advisory finding(s). The status is under `## Tests`; earlier checks are in this thread.

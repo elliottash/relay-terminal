@@ -1,13 +1,13 @@
 ---
 id: PBZ4
 type: work
-status: executing
-assignee: claude-code
+status: needs-verification
 labels: [feature, panes, files, agent-ui, plugins]
+assignee: claude-code
 rank: zzzzzzzzzzzzzzzzzzzzzzz
 created: '2026-09-25'
 source: 'Owner in a Relay pane, 2026-09-25; slice of #P2W8 (model row 2)'
-links: {plans: [], commits: [], evidence: [], related: [P2W8, F8R7, E85D, C0Q8, WYGY], github: null}
+links: {plans: [], commits: [8d725727c81a, 430b82736c63, 03e6e361eeff, 4a5a4267657d, 488ff0c853f7], evidence: [docs/qa_evidence/2026-09-25-artifact-panes/], related: [P2W8, F8R7, E85D, C0Q8, WYGY], github: null}
 ---
 # Artifact panes: a docked agent on file editors, with the plugin's actions and slash commands
 
@@ -39,4 +39,43 @@ Slice 7 of #P2W8 (model row 2; decisions D1, D2, U5). **Wave 2: waits for the ho
 - [x] Context::slashCommands merged into the / popup <!-- t:ar blocked_by=#6FDD -->
 - [x] Docked console on Preview and Plan panes (after the hold lifts) <!-- t:m5 blocked_by=5j -->
 - [x] Agent edits as buffer undo steps with change list and review toggle <!-- t:j2 blocked_by=m5 -->
-- [ ] Docs and live evidence <!-- t:ry blocked_by=ar,j2 -->
+- [x] Docs and live evidence <!-- t:ry blocked_by=ar,j2 -->
+
+## Execution Summary
+
+A text or Markdown file in a preview pane, and a plan pane, end in an `ArtifactDock`: a "✦ Agent
+(Alt+Q)" row that builds, on first expand, the ordinary no-shell console about that file
+(`relay::agent::ArtifactContext`). The file's task plugin supplies the action row and the `/`
+commands (bundled `relay.markdown`: outline, tighten, proofread, toc); the agent's `edit_file` /
+`write_file` on the file land in the buffer as one undo step; the dock shows a per-turn change list
+and a per-project "Review before apply" switch; an overlap with unsaved typing is merged inline
+between conflict markers, never saved.
+
+Commits: `8d725727` (ArtifactContext, `file`/`plugin` on the wire, `Context::slashCommands`, the
+Markdown plugin), `430b8273` (the dock, the `/` merge, held and conflict answers), `03e6e361` (a
+patch heard by every console of a tab is answered once), `4a5a4267` (two defects the live pass
+found: the worker took the `<tab>/file:<path>` persist key for the tab id and refused the console's
+`configure`; the session's first file was matched against no plugin search, so it had no actions
+or `/` commands). Docs: `docs/ARCHITECTURE.md` section 10 ("The agent docked under a file") and
+"Agents are consoles" (the Artifact row, "A file is a context too", "A context can add slash
+commands"); `docs/AGENT-SESSIONS-PROTOCOL.md` 33.1 (`file`, `plugin`, the artifact context) and 35
+(`held`, `conflict`).
+
+Live pass (clean export build, isolated profile, Xvfb, stub model; `docs/qa_evidence/2026-09-25-artifact-panes/README.md`):
+
+![The docked agent under README.md with the Markdown plugin's actions](docs/qa_evidence/2026-09-25-artifact-panes/01-docked-agent-with-markdown-actions.png)
+![`/o` lists `/outline ✦ Markdown` first](docs/qa_evidence/2026-09-25-artifact-panes/02b-slash-popup-filtered.png)
+![The agent's sentence landed while the typing on the Notes line survived](docs/qa_evidence/2026-09-25-artifact-panes/04-sentence-landed-typing-kept.png)
+![The change list names the turn by the words that asked](docs/qa_evidence/2026-09-25-artifact-panes/05-change-list-names-the-turn.png)
+![One Ctrl+Z removes only the agent's sentence](docs/qa_evidence/2026-09-25-artifact-panes/06-one-undo-removes-only-the-agents-step.png)
+
+Not this card's: `tests/test_board_chat.py::WorkerConsoleTest::test_the_same_tab_gets_its_conversation_back_and_another_tab_does_not`
+fails at clean HEAD with or without these commits (#KZHX).
+
+## Tests
+
+`ctest --test-dir build -R 'filesync|agentcontext|consolemode|slash|filepanes|artifactworkspace'`
+`tests/test_board_chat.py::TabOfTest::test_an_artifact_consoles_key_names_a_file_not_the_tab`
+`tests/test_agent_context.py`
+`tests/test_open_buffers.py`
+`manual: docs/qa_evidence/2026-09-25-artifact-panes/`

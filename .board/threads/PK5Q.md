@@ -44,3 +44,6 @@ true and is now true in one widget rather than two: every model box is the pane'
 
 <!-- relay:entry 20260922T005810Z-m9 author=agent kind=note pane=switchboard -->
 Handoff: done, needs-verification. Every helper's model box is the same picker the terminal pane uses — same rows, same order, opens the same ModelPicker dialog, same keys (Alt+M, Ctrl+Alt+M, /model). Guest rows (Claude Code, Codex) are listed but refused with one sentence if picked for a helper. QA checklist is a 6-item walk; nothing left to build.
+<!-- relay:entry 20260925T222619Z-3s author=agent kind=note -->
+Verification (rev 2db96643, clean-worktree builds): PASSED on what survives — modelrows/modelpicker/modelcatalog/modelsettings/board/boardpane green, tests.test_roles OK, pane's box confirmed live (Alt+M). Note: #AGNT (db186adc) later retired the helper's panel and deleted tests/helpermodelbox_test.cpp, so the helper-side manual items are no longer exercisable; settings/conversations ctest failures are the #E8V1 fallout (#SYTR). Evidence: docs/qa_evidence/2026-09-25-verify-PK5Q/. Moved needs-verification → needs-qa-llm.
+

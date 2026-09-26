@@ -1,15 +1,15 @@
 ---
 id: EA37
 type: work
-status: discussing
+status: needs-verification
 labels: [feature, design, board, switchboard, skills, research]
 component: [gui, worker, board]
-waiting_on: owner
+implemented_by: glm/glm-5.3
 rank: zzzzzzzzzzzzzzzzzzzzzzw
 created: '2026-09-25'
 verify: {artifact: decision, primary: person, also: [ai-text], human: required, criteria: 'the design page answers which object kinds get a tab, how links are addressed and stored, and what changes on #9FX8 step 2; the owner''s seven decisions are recorded', sign_off: none, effort: medium, stakes: rework, blast: capability}
 source: 'owner, Relay conversation, 2026-09-25, while #9FX8 was executing'
-links: {plans: [], commits: [0157252fdc6f692595d7d445ddf30e0e7d2057c5], evidence: [docs/PROJECT-BOARD-DESIGN.md, docs/research/project-board/a-single-project-object-models.md, docs/research/project-board/b-agent-era-project-state.md, docs/research/project-board/c-link-models-and-backlinks.md], related: [9FX8, 1QKM, FVVY, V3R3, P2W8, 7BM4, G9ZD], github: null}
+links: {commits: [0157252fdc6f, b48afea250ef, 579c7d5cab51], evidence: [docs/PROJECT-BOARD-DESIGN.md, docs/research/project-board/a-single-project-object-models.md, docs/research/project-board/b-agent-era-project-state.md, docs/research/project-board/c-link-models-and-backlinks.md], github: null, plans: [], related: [9FX8, 1QKM, FVVY, V3R3, P2W8, 7BM4, G9ZD, Y0QQ, EE42, TBRH]}
 ---
 # The Board as the project's manager: objects (cards, skills, memories, artifacts), a Live strip instead of a pane list, and computed links among them
 
@@ -42,3 +42,17 @@ do some deeper design and research as appropriate
 **Risks.** The page's phase 1 asks #9FX8 for three small extras beyond its plan; if the implementing session has already built a fixed three-way control, the fourth entry is a follow-up rather than a rework. The `mentioned in` line writes to threads of cards the writer did not touch, which must stay a worker-side append under the board lock. Research claims marked *unverified* in the passes are not relied on here.
 
 **Verify.** A person reads the page and the seven questions and records decisions on this card (`human: required`); the three research files exist with their comparison tables; #9FX8 and #FVVY threads carry the notes.
+
+## Decisions
+Owner, 2026-09-25 (thread): 1/3/4/5/6/7 per the recommendation; 2 split to its own card.
+1. **Artifacts as a fourth tab, gated on #FVVY's runs ledger — yes.** The tab card (phase 5) files after #FVVY lands.
+2. **Cases — split to #Y0QQ** (deferred): undrawn as a set for now; rows on the skill page and card page only. Revisit on #FVVY's non-software pilot.
+3. **Computed Live strip on the Cards tab instead of a pane tab — yes** (phase 3, #TBRH, blocked on #9FX8); the Projects page keeps attach/reveal/filter.
+4. **`duplicate_of`, `discovered_from`, `supersedes` on work cards — yes**, in phase 2 (#EE42); nothing beyond the four-plus-one vocabulary.
+5. **One append-only `mentioned in #X · date · who` line in the target's thread per cross-reference — yes**; the in-memory index wins on disagreement.
+6. **Phase 2 filed now — yes** (#EE42), so #9FX8's Linked panels are built against the `board_links` request shape.
+7. **No project home page — not now**; tab counts and the expired-memories section carry it. Revisit at four tabs.
+
+## Human QA
+1. Do the recorded decisions stand as made — 1/3/4/5/6/7 per the recommendation, cases split to #Y0QQ — completing this design card?
+   Answer: "can we split off cases as a separate card? i want to do everything else first. 1 / 3 / 4 / 5 / 6 / 7 follow your rec" — owner, this card's thread, 2026-09-25, recorded verbatim.

@@ -1,12 +1,14 @@
 ---
 id: WK7C
 type: work
-status: discussing
+status: needs-verification
 labels: [feature, switchboard, options]
-waiting_on: owner
+assignee: agent
+implemented_by: openai/gpt-6-luna via codex
 rank: zzzzzzzzzzzzzzzzy
 created: '2026-09-24'
-verify: {artifact: system, primary: script, also: [], human: none, criteria: 'an agent lists and clears a job''s model override through the app tools; notification with undo appears; rolestore keys change; no dialog opens, sign_off: none, effort: medium} source: pane 1, 2026-09-24 links: {plans: [], commits: [], evidence: [], related: [], github: null'}
+verify: {artifact: system, primary: script, also: [], human: none, criteria: An agent can list and set or clear roles.<job> rows through app_option_set; rows share rolestore with the Models job rules tab; notification and undo work; writes_disabled refuses; no model key or token becomes settable., sign_off: none, effort: medium, stakes: rework, blast: capability}
+links: {commits: [ff7c872db2e6], evidence: [docs/qa_evidence/2026-09-25-wbfm-b/]}
 ---
 # Give agents tools to change per-job model overrides (and settings like them)
 
@@ -23,6 +25,12 @@ Why it is not agent-settable today (asked 2026-09-24, "why isnt it safe"):
 - The actual write path (`rolestore::setOverride` / JobsTab `clearOverride`, keys `roles/<role>/{preset,model,effort,tier,candidates}`) exists only inside the Jobs tab's own widgets. There is no `SettingRow` for it, so the agent catalog (`app_option_list`, 161 rows) has nothing to point `app_option_set` at.
 
 Assets that make this cheap: `SettingRow` carries per-row reader/writer closures with QSettings as the single source of truth (SettingsPane.h:70); `set_option` in AppCommands::execute already does findRow → writeRow → read-back → "Agent changed <row>" notification with Undo → change list; `SettingsWatch::notify()` keeps the GUI from going stale; `JobsTab::jobs()` is the one table of job roles and labels.
+
+Status check, 2026-09-25 ("is this stale?"):
+
+- The actions half is **done elsewhere**: `actionIsAgentSafe` (src/AppCommands.cpp:266, #FRVM) is now default-on with named refusals, per the owner's 2026-09-24 decision quoted above. Bullets 1–2 above are historical. `agent.modelRoles` is not in any refusal list, so it is agent-safe now — but it still only opens the Jobs tab; it sets nothing.
+- The ask is **still open**: no `roles.<job>` row exists anywhere in src (no `roles.` row ids; `rolestore::setOverride` still lives only in the Jobs tab widgets). An agent today still cannot list or clear a per-job override through the app tools — the `kimi`-pin incident would repeat unchanged.
+- Shape already settled by the owner's decision: rows. Ready to build, not stale.
 
 ## Done means
 - An agent (pane agent or helper) can list every job's current model override and change or clear it through the app tools, without opening a dialog for the person.
@@ -44,8 +52,16 @@ Out of scope: making `agent.modelRoles` (the pane-opening action) agent-safe —
 
 ## Tasks
 
-- [ ] Owner picks the shape: rows in the options catalog (recommended) or a role command <!-- t:3n blocked_by=#WK7C -->
-- [ ] Add per-job override rows (roles.<role>) with rolestore writers in RelayWindowModels.cpp <!-- t:kv -->
-- [ ] Verify notification + undo + SettingsWatch + writes_disabled on the new rows <!-- t:gc -->
-- [ ] Tests: set/clear pin via set_option path; keys land in rolestore; no secret widening <!-- t:ct -->
-- [ ] Build via scripts/relay-build, run targeted tests, land with scripts/land.py <!-- t:x7 -->
+- [x] Owner picks the shape: rows in the options catalog (recommended) or a role command <!-- t:3n blocked_by=#WK7C -->
+- [x] Add per-job override rows (roles.<role>) with rolestore writers in RelayWindowModels.cpp <!-- t:kv -->
+- [x] Verify notification + undo + SettingsWatch + writes_disabled on the new rows <!-- t:gc -->
+- [x] Tests: set/clear pin via set_option path; keys land in rolestore; no secret widening <!-- t:ct -->
+- [x] Build via scripts/relay-build, run targeted tests, land with scripts/land.py <!-- t:x7 -->
+
+## Tests
+- `ctest -R '^jobstab$'`
+- `ctest -R '^appcommands$'`
+- `ctest -R '^modelspane$'
+
+## Execution Summary
+Implemented `roles.<job>` catalog rows for each settable job, backed by the same rolestore as the Job rules tab. Agent pin, clear, tier, invalid-value, notification/undo, and writes-disabled paths are covered. `ctest:jobstab` and `ctest:appcommands` passed; `ctest:modelspane` has the unrelated #SYTR stale-name expectation. Exact-tree build passed. UI evidence is in `docs/qa_evidence/2026-09-25-wbfm-b/`.

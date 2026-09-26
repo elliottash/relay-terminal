@@ -40,3 +40,6 @@ Released (2cb87486) · the pane closed
 
 <!-- relay:entry 20260925T012243Z-81 author=agent kind=evidence model=claude-opus-5-5 pane=64de364c turn=d7865438e5d344cabec7eded6da91d02/1c517e5feb8f4b189580c19cc1eddee3 -->
 8e5606ef adds the Options › Security "Unattended turns get the full tool set" row (security/unattended_full_tools). 2e6ad863 missed it, although its message listed it; the salvage subagent a2 caught the gap. The land gate built the exact tree and the `settings` ctest passed.
+
+<!-- relay:entry 20260925T214326Z-ph author=agent kind=event mention=NPCD model=claude-opus-5-5 pane=switchboard turn=fb227ab46bee28e017a9d94de4d7a32b/f28a275503e24af5945beb288c85386f -->
+mentioned in #NPCD · 2026-09-25 · agent

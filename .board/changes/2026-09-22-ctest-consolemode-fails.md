@@ -23,14 +23,14 @@ Failed
 ## Signal
 <!-- Written by Relay (relay_core.signals.signal_section). Rewritten in place whenever
      the signal changes; edit around it, not inside it. -->
-- **key** `ctest:consolemode` · broken · **resolved**
-- failing executions: 2 in 2 run(s); first seen 2026-09-23T02:51:36Z, last 2026-09-23T02:51:38Z
-- fingerprint: `Failed`
-- resolved at 2026-09-23T23:23:39Z in `0dbcbfa5c29e`
-- it resolves on 2 consecutive passing executions of that key, and on nothing else: closing this card does not close the signal, and this card cannot leave needs-verification while the signal is open.
+- **key** `ctest:consolemode` · flaky · **open** · regressed
+- failing executions: 6 in 6 run(s); first seen 2026-09-23T02:51:36Z, last 2026-09-25T15:16:45Z
+- fingerprint: `SEGFAULT`
+- resolved at  in `0dbcbfa5c29e`
+- it resolves on 20 consecutive passing executions of that key, and on nothing else: closing this card does not close the signal, and this card cannot leave needs-verification while the signal is open.
 
 ```
-Failed
+SEGFAULT
 ```
 
 ## Planning notes

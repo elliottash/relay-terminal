@@ -27,3 +27,6 @@ While checking #D7AV, the default scripts/relay-build hit relay-contextmeter-tes
 
 <!-- relay:entry 20260921T204344Z-n1 author=agent kind=evidence model=opus pane=4fd20531 turn=ac859a81872f41129eeaa0c501ad955f/23f40449f5df4b53bc42cf868cb54a70 -->
 Landed f94f669d64ba057b35f68ad99213c9511f87fbe3 after land.py's exact-tree build passed. Focused adapters/wiring/worker tests passed (189 before the final zero-occupancy case); all 6 final regression cases plus contextmeter pass in the test registry. tests_check has no findings/failing tests/blocks. Real GUI Xvfb drive passes Codex, Claude and unknown-state cases. Board check reports no C8WX issues; unrelated existing board-format findings remain. The transient model-catalog test failure now passes after concurrent model changes landed.
+
+<!-- relay:entry 20260925T235621Z-zv author=agent kind=event mention=G7M2 model=gpt-6-sol pane=10dade07 turn=69c8c6896f204c79833d47ec55a8be57/a3dfd2f8e5184d09aef2dba6d3b216dd -->
+mentioned in #G7M2 · 2026-09-25 · agent

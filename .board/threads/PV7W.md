@@ -16,3 +16,6 @@ Claimed the Sessions recap/preview layout change. I will use the existing saved 
 
 <!-- relay:entry 20260923T122033Z-dn author=agent kind=event model=gpt-6-sol pane=d3adcb62 turn=f4520a5d8d7b4fed83890c56e50a4052/5eaf94c328b34ad9a15b0d908d04b473 -->
 - ✦ agent updated this card · links: {"plans": [], "commits": [], "evidence": ["docs/qa_evidence/2026-09-23-sessions-… → {"plans": [], "commits": ["a90f5e423aef80a8a6a4e0f3ddf01b8193d1c2ae"], "evidence…
+
+<!-- relay:entry 20260925T145055Z-ak author=agent kind=note model=glm-5.3 pane=8d872521 turn=13994c7524bc467f9a77efe825c107b3/e0836faae02c451c984388aad7b3fa70 -->
+Owner feedback, 2026-09-26, after seeing the delivered one-row table: "first, i wanted to keep the multiple columns that i could sort by, i just wanted the session title to straddle the columns." The Recap column, preview-on-demand and keyboard paths are not disputed; the row layout is amended by #G2C7 (title spans the width over the sortable columns). Verification of this card should judge it against that amended layout, not the flat one-row table alone.

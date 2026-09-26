@@ -44,11 +44,11 @@ Landed 044d7b13 on main. The exact committed tree built Relay and consolemode te
 
 Board run 20260924T224244Z-b7c1: both shared-checkout tests passed. Isolated Xvfb --recall-only also passed. Exact-tree build passed; consolemode exposed an unrelated existing H2KQ shell-label assertion (recorded separately).
 
-### Check 2026-09-24 18:49
-- passed · ctest:consolemode — ctest -R consolemode passed for this revision on spark-dcc9, 2026-09-24T22:49:05Z
-- passed · ctest:queuecontract — ctest -R queuecontract passed for this revision on spark-dcc9, 2026-09-24T22:49:05Z
+### Check 2026-09-25 11:16
+- failed · ctest:consolemode — ctest -R consolemode failed for this revision on spark-dcc9
+- missing-evidence · ctest:queuecontract — no run of ctest -R queuecontract for this revision, from any host, and no attached result
 - not-applicable · manual:docs/qa_evidence/2026-09-24-recall-7Z08/README.md — manual evidence, recorded by hand: docs/qa_evidence/2026-09-24-recall-7Z08/README.md
-- notice · ctest:consolemode — ctest -R consolemode is slow: p95 6.69 s, p50 1.62 s
+- notice · ctest:consolemode — ctest -R consolemode is slow: p95 50.99 s, p50 1.65 s
 - notice · ctest:queuecontract — ctest -R queuecontract is slow: p95 3.52 s, p50 3.49 s
 history: thread
 ## Decisions

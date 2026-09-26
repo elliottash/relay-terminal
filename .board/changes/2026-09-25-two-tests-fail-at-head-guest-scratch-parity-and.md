@@ -5,7 +5,7 @@ status: inbox
 labels: [bug, remote]
 rank: zzzzzzzzzzzzzzzzzzzzzzzzzzz
 created: '2026-09-25'
-links: {plans: [], commits: [], evidence: [], related: [], github: null}
+links: {plans: [], commits: [bc511a6b93f2], evidence: [], related: [], github: null}
 ---
 # Two tests fail at HEAD: guest scratch parity and board digest leak
 

@@ -44,3 +44,6 @@ Check · 1 missing-evidence, 1 passed; 1 advisory finding(s). The status is unde
 
 <!-- relay:entry 20260923T190306Z-ej author=agent kind=evidence -->
 Check · 1 missing-evidence, 1 passed; 1 advisory finding(s). The status is under `## Tests`; earlier checks are in this thread.
+
+<!-- relay:entry 20260926T012934Z-3n author=agent kind=evidence -->
+Check · 1 missing-evidence, 1 passed; 1 advisory finding(s). The status is under `## Tests`; earlier checks are in this thread.

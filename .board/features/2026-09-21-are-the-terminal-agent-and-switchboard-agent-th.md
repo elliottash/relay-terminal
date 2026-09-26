@@ -7,12 +7,7 @@ assignee: agent
 rank: zzzzzzzzzzzzzzzk
 created: '2026-09-21'
 source: Owner, terminal, 2026-09-21, asking whether the two agents are one system yet
-links: {plans: [], commits: [8f5322a9, 1b9571ce, cb866888, ab0834e5, 4951b5b1, 3f3d1dfc,
-    4af1d7cc, 21660474, d9577277, dc083b31, 421361bb, cd75da79, 7a5d7f27, acda4552,
-    5f834ce7], evidence: ['docs/qa_evidence/2026-09-21-card-turns-backend',
-    'docs/qa_evidence/2026-09-21-card-turns-console',
-    'docs/qa_evidence/2026-09-21-card-turns-final'], related: [AGNT, FEJQ, 8YQ9, 3XZV,
-    VZ69, T71W, DR4K, 0Z13, VN69, R9G7, QRC1], github: null}
+links: {plans: [], commits: [8f5322a968f2, '216604744554', d95772778ff6, 1b9571ceee95, cb866888e45f, ab0834e54204, 3f3d1dfccb73, 4951b5b12d07, 4af1d7cc12ca, dc083b310d69, 421361bb0868, cd75da796c51, 7a5d7f272447, acda4552c01b, 5f834ce703d3, 95d53c84f7cf], evidence: [docs/qa_evidence/2026-09-21-card-turns-backend, docs/qa_evidence/2026-09-21-card-turns-console, docs/qa_evidence/2026-09-21-card-turns-final], related: [AGNT, FEJQ, 8YQ9, 3XZV, VZ69, T71W, DR4K, 0Z13, VN69, R9G7, QRC1], github: null}
 ---
 # A card turn is an ordinary console turn: the last surface that still has its own agent
 
@@ -701,12 +696,12 @@ drive and what it found.
   back as an editable row). `board` gained the card-to-card transcript hand-over.
 - `boardexecute` fails 3 of 5 exactly as #48S3's thread records, unchanged by any commit here.
 
-### Check 2026-09-24 18:49
+### Check 2026-09-25 11:16
 - not-applicable · unittest:test_roles — test_roles.py is not in the project any more
-- missing-evidence · ctest:consolemode$|^board$|^boardworkspace$|^boardpane$|^boardsections$|^boardfilter$|^queuenav$|^queuesubmit — no run of ctest -R consolemode$|^board$|^boardworkspace$|^boardpane$|^boardsections$|^boardfilter$|^queuenav$|^queuesubmit for this revision, from any host, and no attached result
+- failed · ctest:consolemode$|^board$|^boardworkspace$|^boardpane$|^boardsections$|^boardfilter$|^queuenav$|^queuesubmit — ctest -R consolemode$|^board$|^boardworkspace$|^boardpane$|^boardsections$|^boardfilter$|^queuenav$|^queuesubmit failed for this revision on spark-dcc9
 - notice · unittest:test_roles — test_roles.py is not in the project any more
-- notice · ctest:consolemode$|^board$|^boardworkspace$|^boardpane$|^boardsections$|^boardfilter$|^queuenav$|^queuesubmit — ctest -R consolemode$|^board$|^boardworkspace$|^boardpane$|^boardsections$|^boardfilter$|^queuenav$|^queuesubmit: 2 of 8 are slow (consolemode, board)
-- notice · ctest:consolemode$|^board$|^boardworkspace$|^boardpane$|^boardsections$|^boardfilter$|^queuenav$|^queuesubmit — ctest -R consolemode$|^board$|^boardworkspace$|^boardpane$|^boardsections$|^boardfilter$|^queuenav$|^queuesubmit: 1 of 8 never ran here (boardfilter)
+- notice · ctest:consolemode$|^board$|^boardworkspace$|^boardpane$|^boardsections$|^boardfilter$|^queuenav$|^queuesubmit — ctest -R consolemode$|^board$|^boardworkspace$|^boardpane$|^boardsections$|^boardfilter$|^queuenav$|^queuesubmit: 3 of 8 are slow (consolemode, board, boardfilter)
+- notice · ctest:consolemode — ctest -R consolemode failed the last time it ran, 2026-09-25T15:16:45Z
 history: thread
 ## QA checklist
 

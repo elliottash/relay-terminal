@@ -8,7 +8,7 @@ parent: YZ8G
 rank: zzzzzzzzzzzzzzzzb
 created: '2026-09-21'
 source: 'owner, 2026-09-21: "i agree with all, go ahead with it" (#YZ8G plan)'
-links: {plans: [], commits: [0ef3ee13], evidence: ['docs/qa_evidence/2026-09-21-verify-WC3E/'], related: [YZ8G, 7BM4], github: null}
+links: {plans: [], commits: [0ef3ee1311f9, e7ce0f13b8c2], evidence: [docs/qa_evidence/2026-09-21-verify-WC3E/], related: [YZ8G, 7BM4], github: null}
 ---
 # Expectations before implementation, and a verification record written by a separate session
 

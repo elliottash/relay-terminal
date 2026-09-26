@@ -10,7 +10,7 @@ resolution: done
 rank: zzzzzzzzzzzzzzzzy
 created: '2026-09-25'
 verify: {artifact: code, primary: script, also: [], human: optional, criteria: 'a fresh opus request on the GLM pane shows model claude opus on the spawned turn, not glm-5.3', sign_off: none, effort: low}
-links: {plans: [], commits: [da8c681cb654], evidence: [], related: [7XN0], github: null}
+links: {plans: [], commits: [da8c681cb654, a7cc1fcce1c4], evidence: [], related: [7XN0], github: null}
 ---
 # model "opus" on a non-Claude pane silently inherits the pane's model
 

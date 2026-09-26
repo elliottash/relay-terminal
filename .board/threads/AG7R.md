@@ -262,3 +262,49 @@ I checked the code directly. Two notes on the hash first: `edb61e9038c1417f8a5c7
 - **One question still yours,** now posted on #AG7R: may an agent press **Save** on a local endpoint it just detected? Recommend yes.
 
 Findings recorded on the card. Once you answer, the remaining work is one Execute: the group-4 modal pass plus (if yes) the two Save buttons.
+
+<!-- relay:entry 20260925T050858Z-56 author=owner kind=comment mode=plan -->
+What’s a local endpoint
+
+<!-- relay:entry 20260925T050858Z-dc author=owner kind=event pane=switchboard -->
+- ✦ owner moved this card · Planning → Planning · a Plan turn started
+
+<!-- relay:entry 20260925T051221Z-ae author=owner kind=comment mode=discuss -->
+Yes
+
+<!-- relay:entry 20260925T051413Z-ae author=agent kind=decision model=glm-5.3 pane=switchboard turn=c7857e2bfadbcd55c525bcb4d70d3181/13a80cb1970746acaf9024a4fccee464 -->
+Owner, 2026-09-25: "Yes" — an agent may press Save on a local endpoint it found (Options › Local models, `found:<n>` › Save and `local:address/save` › Save). For the record, a local endpoint is a model server on the person's own machine — Ollama, llama.cpp, LM Studio, vLLM, anything OpenAI-compatible answering on localhost; Detect/Find servers discover it, Save adds it to the Local models list, Remove takes it back. Since #FRVM (2026-09-24) a row button is safe unless refused by name (`rowButtonIsAgentSafe`, src/AppCommands.cpp:278; `refusedRowButtons()` holds only `remote.pair`), so both Save buttons are already allowed — this decision records that they stay on. Nothing to build; `agentSafeButtons` is now the audited/inline-run mark, not the gate (src/AppCommands.h:102).
+
+<!-- relay:entry 20260925T051413Z-af author=agent kind=note model=glm-5.3 pane=switchboard turn=c7857e2bfadbcd55c525bcb4d70d3181/13a80cb1970746acaf9024a4fccee464 -->
+State correction, measured against main on 2026-09-25: the 2026-09-21 "NOT done, two things" note is now stale on both halves.
+
+1. **Group 4's non-blocking pass landed with #FRVM** (owner, 2026-09-24: "by default agents should be able to control relay"). Unaudited actions run on the next turn of the event loop *after* the answer (`run_action` in `AppCommands::execute()`: `QTimer::singleShot(0, …)` and `deferred: true` in the result, src/AppCommands.cpp:962), so a modal no longer hangs the tool call or the window's answer path. `windows.fresh` is on. `waitingOnTheModalPass()` became `notYetAimable()`, holding exactly one key: `pane.close` — still off because it closes the *focused* leaf, not a named pane. That aiming is the only code item left on this card.
+2. **The Local-models Save buttons are on** by #FRVM's default (refuse-by-name), confirmed by the owner's Yes above.
+
+The 18 modal keys of group 4 are reachable and safe by default; each now pops its dialog on the person, which is the shape #FRVM chose ("it asks the person, which is the point of it").
+
+<!-- relay:entry 20260925T051428Z-j3 author=agent kind=event model=glm-5.3 pane=switchboard turn=c7857e2bfadbcd55c525bcb4d70d3181/13a80cb1970746acaf9024a4fccee464 -->
+- ✦ agent updated this card · appended to `## Decisions`
+
+<!-- relay:entry 20260925T051437Z-8n author=agent kind=comment mode=discuss model=glm-5.3 turn=c7857e2bfadbcd55c525bcb4d70d3181/13a80cb1970746acaf9024a4fccee464 -->
+The owner answered the pending Save question with "Yes". Before recording it, let me confirm what the current gate does with those buttons — my earlier read showed #FRVM made row buttons safe by default.
+
+The search hit a file cap before `src/`. Narrowing it:
+
+
+
+
+
+Verified: since #FRVM, row buttons are safe **unless refused by name** (`rowButtonIsAgentSafe` at `src/AppCommands.cpp:278`, with `refusedRowButtons()` holding only `remote.pair`) — so both Save buttons are already allowed, and the owner's "Yes" settles them as *staying* on. Recording the decision on the card now.
+
+Recording the decision and a correction to the stale "not done" note, both on the card.
+
+Both entries are on the thread. Now the `## Decisions` section, so the decision lives in the card body too:
+
+My typo in the hash — retrying with the right one:
+
+**Done:** decision recorded on #AG7R (thread + `## Decisions`), and the stale "group 4 not done" note corrected.
+
+To answer what you asked before saying yes: a **local endpoint** is a model server on your own machine — Ollama, llama.cpp, LM Studio, vLLM, anything OpenAI-compatible answering on `localhost`. Options › Local models can Detect/scan for one, and **Save** adds it to the list so panes can use it as their model instead of a hosted API; Remove takes it back.
+
+Your "Yes" needs no code change: since #FRVM (2026-09-24, control-by-default) both Save buttons are already allowed — refuse-by-name is the rule now and neither is refused. The card's one remaining item is aiming `pane.close` at a named pane; that's a job for **Run** when you want it.

@@ -14,3 +14,6 @@ Worker `usage_refresh` (runs guest + plan quota polls now), `email` on guest pre
 
 <!-- relay:entry 20260925T224611Z-p8 author=agent kind=event model=claude-opus-5-5 pane=cd39c532 turn=eb540dbc335b48608bf140f752a963ce/2533e01880b34962874cd7d74c7d59de -->
 - ✦ agent updated this card · verify: (unset) → {"artifact": "code", "primary": "script", "also": ["probe"], "human": "optional"…; appended to `## Execution Summary`; replaced `## Done means`
+
+<!-- relay:entry 20260925T224819Z-41 author=agent kind=event mention=YC0T model=claude-opus-5-5 pane=cd39c532 turn=eb540dbc335b48608bf140f752a963ce/5b5c3e27cc2d46adaf367f65e81a488f -->
+mentioned in #YC0T · 2026-09-25 · agent

@@ -26,3 +26,20 @@ Plan, Done means and verify block are on the card. Wave 1 running as three Relay
 
 <!-- relay:entry 20260925T004446Z-k2 author=agent kind=event model=claude-fable-5-1 pane=c51c64a9 turn=ff5289b78ec24f1b99f57162e21ff33a/ee481f13ff8e46f4b859fcecf5b5387f -->
 - ✦ agent updated this card · tasks: 3/6 done
+
+<!-- relay:entry 20260925T005802Z-2r author=agent kind=event model=gpt-6-sol pane=e3b30db3 turn=acc08070fbf04a2e969c45d78d305b8f/2aa63ab7026d45cb8151818e49df5e20 -->
+- ✦ agent claimed this card · implemented_by openai/gpt-6-sol via codex, session e3b30db3
+
+<!-- relay:entry 20260925T005802Z-5a author=agent kind=progress model=gpt-6-sol pane=e3b30db3 turn=acc08070fbf04a2e969c45d78d305b8f/2aa63ab7026d45cb8151818e49df5e20 pane_token=e3b30db3-cc88-44a2-a967-283322c7b4f5 -->
+Claimed (e3b30db3) · working on it from a terminal pane
+
+Taking over at the owner's request. I will audit the unfinished pane/window work, finish it, verify it, and land the card.
+
+<!-- relay:entry 20260925T012612Z-gv author=agent kind=event model=glm-5.3-flash pane=e3b30db3 turn=acc08070fbf04a2e969c45d78d305b8f/e65a1bc9195b44e9b62e543f5cce0740 -->
+- ✦ agent updated this card · appended to `## Execution Summary`; tasks: 6/6 done
+
+<!-- relay:entry 20260925T012624Z-jc author=agent kind=event model=glm-5.3-flash pane=e3b30db3 turn=acc08070fbf04a2e969c45d78d305b8f/e65a1bc9195b44e9b62e543f5cce0740 -->
+- ✦ agent updated this card · appended to `## Tests`
+
+<!-- relay:entry 20260925T012630Z-59 author=agent kind=event model=glm-5.3-flash pane=e3b30db3 turn=acc08070fbf04a2e969c45d78d305b8f/e65a1bc9195b44e9b62e543f5cce0740 -->
+- ✦ agent moved this card · Executing → Needs verification · All six tasks done, tests and a staged end-to-end GUI run pass; evidence in docs/qa_evidence/2026-09-24-persistent-panes-XQ8F/. · evidence docs/qa_evidence/2026-09-24-persistent-panes-XQ8F/ · implemented_by glm/glm-5.3-flash

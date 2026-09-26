@@ -10,7 +10,7 @@ rank: zzzzzzzzzzzzzzzzzzzzzzzzzzzy
 created: '2026-09-25'
 verify: {artifact: system, primary: script, also: [], human: none, criteria: 'sections() lists no active/deferred extra and no memory-card status; a fresh BoardView''s hiddenSections() holds verified, done and dropped; the checks row carries an Uncheck all button that unticks every section; board pane tests pass', sign_off: none, effort: medium, stakes: rework, blast: capability}
 source: pane 1, 2026-09-25
-links: {plans: [], commits: [4a4df89650aa], evidence: [docs/qa_evidence/2026-09-25-yvtw-uncheck-all-defaults/notes.md], related: [], github: null}
+links: {plans: [], commits: [4a4df89650aa, d27de59a728f, 374886c5c02f, e441b8f053a7], evidence: [docs/qa_evidence/2026-09-25-yvtw-uncheck-all-defaults/notes.md], related: [], github: null}
 ---
 # Board cards list: Uncheck all button, closed stages off by default, no Active/Deferred sections
 

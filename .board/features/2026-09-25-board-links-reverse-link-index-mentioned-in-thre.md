@@ -10,7 +10,7 @@ rank: zzzzzzzzzzzzzzzzzzzzzzzzzzzw
 created: '2026-09-25'
 verify: {artifact: code, primary: script, also: [ai-text], human: optional, criteria: 'board_links on this board answers #EA37 with #EE42 among its reverse edges, and a comment naming a card leaves one mentioned-in line on it', effort: medium}
 source: 'owner decisions on #EA37, 2026-09-25'
-links: {plans: [], commits: [97da1c6055bf], evidence: [docs/qa_evidence/2026-09-25-ee42-board-links/], related: [EA37, 9FX8], github: null}
+links: {plans: [], commits: [97da1c6055bf, 096b9512a547], evidence: [docs/qa_evidence/2026-09-25-ee42-board-links/], related: [EA37, 9FX8], github: null}
 ---
 # board_links: reverse-link index, mentioned-in thread lines, duplicate_of / discovered_from / supersedes, dangling_link, filter prefixes
 

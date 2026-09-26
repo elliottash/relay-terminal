@@ -1,7 +1,7 @@
 ---
 id: C8XD
 type: work
-status: executing
+status: needs-verification
 labels: [feature, board, onboarding, instructions]
 assignee: agent
 implemented_by: glm/glm-5.3
@@ -10,7 +10,7 @@ rank: zzzzzzzzzzzzzzzzzzzzzzz
 created: '2026-09-25'
 verify: {artifact: code, primary: script, also: [], human: none, sign_off: none, effort: low}
 source: 'pane 1, 2026-09-25, follow-up to #2M26'
-links: {plans: [], commits: [e7ce0f13b8c2], evidence: [], related: [2M26], github: null}
+links: {plans: [], commits: [e7ce0f13b8c2, 3cc4397e5123, 9d31b6aaf977], evidence: [docs/qa_evidence/2026-09-25-c8xd-relay-md-default-guidance/], related: [2M26], github: null}
 ---
 # /init creates RELAY.md as the default agent guidance and points the other instruction files at it
 
@@ -35,5 +35,9 @@ Proposed shape:
 - Re-running init replaces the generated blocks in place and never rewrites anything outside the fences; a hand-written `RELAY.md` gains the block without losing a word.
 - A project that already has the old full policy block in `CLAUDE.md`/`AGENTS.md` is migrated on the next init run.
 - `WARP.md` is never renamed (it is the Warp terminal's own agents file).
-- `doctor` warns when an instruction file `@`-imports a `RELAY.md` that is missing.
-- `tests/test_board.py` and `tests/test_session_protocol.py` cover each bullet; evidence shows the scaffold run on this repo.
+- If `RELAY.md` is later deleted by hand, `instructions.load` reports it in `skipped` ("missing") wherever a note still imports it, and the next scaffold run recreates it — there is no separate `doctor` command in Relay's backend to carry that warning.
+- `tests/test_board.py` covers each bullet; evidence shows the scaffold run on this repo.
+
+## Tests
+`PYTHONPATH=backend python3 -m unittest tests.test_board tests.test_session_protocol` — 197 tests, all pass. New: the note-imports-RELAY.md chain test (policy reaches the prompt through `RELAY.md`, `CLAUDE.md` keeps its own text), the old-block migration test, the hand-written-`RELAY.md` test, and the WARP.md-annotated-never-renamed test. Also fixed `test_this_repositorys_own_policy_is_a_fresh_regeneration` (#WC3E) to read the board this checkout actually uses instead of a leftover gitignored legacy `issues/` folder, and `.board/POLICY.md` — stale on main, still saying `issues/` — is regenerated and lands with this change as that test demands. Evidence: `docs/qa_evidence/2026-09-25-c8xd-relay-md-default-guidance/`. Landed as `e7ce0f13` + `3cc4397e`.
+Follow-up `9d31b6aa` (owner: "dont create agents or claude or warp when absent"): the scaffold no longer creates an `AGENTS.md` when the project has none — `_new_agents_text` is gone; `CLAUDE.md`/`AGENTS.md`/`WARP.md` are annotated only when they already exist. Same suite, 197 pass, including the two rewritten creation tests; a scaffold re-run on this repo reports "unchanged ... (and the instruction files)".

@@ -42,11 +42,11 @@ Landed cf473cd5. Exact-tree console build and CTest passed, and the local relay 
 - `tests/test_queue.py::SupervisorTests::test_question_detection_matches_pane_punctuation_rule`
 - manual: docs/qa_evidence/2026-09-22-question-answers/NOTES.md
 
-### Check 2026-09-24 18:49
-- passed · ctest:consolemode — ctest -R consolemode passed for this revision on spark-dcc9, 2026-09-24T22:49:05Z
+### Check 2026-09-25 11:16
+- failed · ctest:consolemode — ctest -R consolemode failed for this revision on spark-dcc9
 - passed · unittest:tests.test_queue.SupervisorTests.test_question_reply_precedes_queued_work — tests/test_queue.py::SupervisorTests::test_question_reply_precedes_queued_work passed for this revision on spark-dcc9, 2026-09-22T17:45:23Z
 - passed · unittest:tests.test_queue.SupervisorTests.test_resume_can_skip_a_prose_question — tests/test_queue.py::SupervisorTests::test_resume_can_skip_a_prose_question passed for this revision on spark-dcc9, 2026-09-22T17:45:23Z
 - passed · unittest:tests.test_queue.SupervisorTests.test_question_detection_matches_pane_punctuation_rule — tests/test_queue.py::SupervisorTests::test_question_detection_matches_pane_punctuation_rule passed for this revision on spark-dcc9, 2026-09-22T17:45:23Z
 - not-applicable · manual:docs/qa_evidence/2026-09-22-question-answers/NOTES.md — manual evidence, recorded by hand: docs/qa_evidence/2026-09-22-question-answers/NOTES.md
-- notice · ctest:consolemode — ctest -R consolemode is slow: p95 6.69 s, p50 1.62 s
+- notice · ctest:consolemode — ctest -R consolemode is slow: p95 50.99 s, p50 1.65 s
 history: thread

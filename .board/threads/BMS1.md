@@ -6,3 +6,8 @@ Claimed the focused model mismatch fix following owner instruction "fix that+". 
 
 <!-- relay:entry 20260922T025700Z-b3 author=codex kind=note -->
 Implementation committed as 86252f3ec00045d5437e708ca79870c0254a2948 after the exact proposed tree built successfully through land.py. Protocol documentation records the helper refusal exception.
+<!-- relay:entry 20260925T224649Z-0l author=agent kind=note -->
+Verification (rev 2db96643, clean worktree): PASSED by test evidence — test_card_model_selection and test_model_switch green; test_board_protocol's 2 failures are pre-existing scaffold drift (#42G1, second instance noted there today), its model-selection cases pass. Live agent turns not driven (keyless rig). Evidence: docs/qa_evidence/2026-09-25-verify-BMS1/. Moved needs-verification → needs-qa-llm.
+
+<!-- relay:entry 20260926T012110Z-gv author=agent kind=event mention=ZPSG model=gpt-6-sol pane=97e9802a turn=6fdd14d97d384fdf8c839e64e9916e0c/ec6eebbe47cd42049bf248613267f817 -->
+mentioned in #ZPSG · 2026-09-26 · agent

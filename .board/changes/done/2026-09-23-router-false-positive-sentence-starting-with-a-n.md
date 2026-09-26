@@ -9,7 +9,7 @@ verified_by: kimi/kimi-k3
 rank: zzzzzzzzzzzzzzzzzzzi
 created: '2026-09-23'
 verify: {artifact: code, primary: script, also: [], human: none, sign_off: none, effort: low, stakes: rework, blast: capability}
-links: {plans: [], commits: [], evidence: [], related: [], github: null}
+links: {plans: [], commits: [de31a0136f2a, 2f3834c1e73f], evidence: [], related: [], github: null}
 ---
 # Router false positive: sentence starting with a non-English command word routes to shell
 

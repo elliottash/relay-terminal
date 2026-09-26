@@ -24,3 +24,22 @@ Owner, 2026-09-22: "i thought all available models would be in priority, so sear
 
 <!-- relay:entry 20260923T030856Z-3s author=agent kind=evidence model=claude-opus-5-5 pane=540a6092 turn=19bd73c570494541b8433b0c939c9daf/84cd65e339354a2286d9015ca55a8099 -->
 Landed 046e3cb9 + cf5c7b53. Priorities now draws, under each class's ranked rows, every available model that class may hold and does not rank ("not in <class> — + add puts it here"), untyped too; typing filters only that page and never the whole catalog. Available ends each API/local provider section with "+ add model" (opens the id prompt on that provider; none for guest harnesses or Relay Free). The freeze: every row re-read QSettings for ticks/lists/favorites/speeds, and Priorities searched OpenRouter's tail once per class section per keystroke; `curation::ReadScope` now memoises reads for one redraw. Measured offscreen with a 600-model OpenRouter catalog, per keystroke: priorities 390 → 5 ms (1,806 → 6–12 rows), available 300 → 70 ms. Tests: modelcatalog, modelpicker (51), modelspane (22), modelrows all pass; tests rewritten where they encoded the old typed-tail behaviour (`aTierTabsFilterStaysInTheAvailablePoolAndATickedTailModelJoinsIt`, `addModelEndsEveryProviderSectionOfTheAllTab`, `lateProviderCatalogBecomesSearchableInAvailableAndJoinsPriorities`). Full `scripts/relay-build` of relay: exit 0. Not yet driven live in a real window.
+
+<!-- relay:entry 20260925T115216Z-qn author=owner kind=comment mode=discuss -->
+This might be different be, try to reproduce
+
+<!-- relay:entry 20260925T115340Z-6z author=agent kind=event model=glm-5.3 pane=switchboard turn=129600ce8932a0ad49bc7f119c0f5468/ff2c9d24dfa845dc971a0cd7abfcfccd -->
+- ✦ agent updated this card · waiting_on: owner → (unset)
+
+<!-- relay:entry 20260925T115340Z-cr author=agent kind=note model=glm-5.3 pane=switchboard turn=129600ce8932a0ad49bc7f119c0f5468/ff2c9d24dfa845dc971a0cd7abfcfccd -->
+Owner suspects what they saw may be a different fault and asked for a live reproduction. The landed fix is in the tree on main (commits 5f0972ad, 907357d5, 046e3cb9, cf5c7b53), so reproduce on a fresh build, not whatever binary was running: build via scripts/relay-build, open the Models pane, tick/untick a ranked and an unranked model in Available, switch to Priorities and check greyed rows/ranks/refresh, and also try searching (the freeze path). If the card's scenario does not reproduce there, what the owner hit is a different fault — file it as a new card in bugs with the measured evidence rather than reopening this one blind.
+
+<!-- relay:entry 20260925T115349Z-52 author=agent kind=comment mode=discuss model=glm-5.3 turn=129600ce8932a0ad49bc7f119c0f5468/ff2c9d24dfa845dc971a0cd7abfcfccd -->
+The fix is in the tree on main (`activeTierList`, the un-pinned availability tick, commits `5f0972ad`–`cf5c7b53`), so a reproduction has to drive a freshly built binary — which I can't do from Discuss. Recording the ask on the card and clearing the stale `waiting_on`:
+
+**Need:** a live run to reproduce — Discuss can't launch anything. Press **Run** on #AVR8 to hand it to a terminal pane; the note I just added tells it exactly what to do: fresh `scripts/relay-build` (the fix is on main, `5f0972ad`–`cf5c7b53` — if your running binary predates 2026-09-23 you'd still see the old behaviour), then tick/untick in Available → check Priorities, plus the search path for the freeze. If it doesn't reproduce there, it's a new card in bugs with the evidence, not a blind reopen of this one.
+
+Card changes: cleared the stale `waiting_on: owner` and recorded the reproduction ask on #AVR8.
+<!-- relay:entry 20260925T224713Z-oj author=agent kind=note -->
+Verification attempt 2026-09-25 (rev 2db96643): BOUNCED — no landed work exists (no commits/tests/evidence; planning notes say "no production code changed yet" and a membership-vs-visibility clarification is still open). Moved needs-verification → discussing so it can be answered and implemented. Evidence: the card's own body; see also docs/qa_evidence/2026-09-25-verify-RND7/NOTES.md for the suite state of neighboring models cards.
+

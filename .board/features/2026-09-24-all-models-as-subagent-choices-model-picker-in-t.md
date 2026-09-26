@@ -8,7 +8,7 @@ implemented_by: glm/glm-5.3
 rank: zzzzzzzzzzzzzzzzzzzzi
 created: '2026-09-24'
 source: pane 1, 2026-09-21
-links: {plans: [], commits: [], evidence: [], related: [], github: null}
+links: {plans: [], commits: [83218821d6df], evidence: [], related: [], github: null}
 ---
 # All models as subagent choices; model picker in the subagent pane
 

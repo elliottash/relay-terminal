@@ -1,13 +1,14 @@
 ---
 id: 6FDD
 type: work
-status: executing
+status: needs-verification
 labels: [feature, plugins, worker]
 assignee: codex
+implemented_by: anthropic/claude-opus-5-5 via claude-code
 rank: zzzzzzzzzzzzzzzzzzzzzzzi
 created: '2026-09-25'
 source: 'Owner in a Relay pane, 2026-09-25; slice of #P2W8 (proposal 2, 4)'
-links: {plans: [], commits: [], evidence: [], related: [P2W8, C0Q8, 33G0, S976], github: null}
+links: {plans: [], commits: [], evidence: [docs/qa_evidence/2026-09-25-manifest-v2/], related: [P2W8, C0Q8, 33G0, S976], github: null}
 ---
 # Console kinds as plugins: manifest v2 (console program, completion, block marks, slash commands) and a bundled relay.shell
 

@@ -9,7 +9,7 @@ session: 789000ea-27a3-4f62-aac8-d839e2bf2387
 rank: zzzzzzzzzzzzzzzzzzzzzzzzzzzi
 created: '2026-09-25'
 verify: {artifact: code, primary: script, also: [], human: none, sign_off: none, effort: medium, stakes: rework, blast: capability}
-links: {plans: [], commits: [a0041445b6d3], evidence: [docs/qa_evidence/2026-09-25-grem-merge-tool/], related: [P4XN, BCJF], github: null}
+links: {plans: [], commits: [a0041445b6d3, bc511a6b93f2], evidence: [docs/qa_evidence/2026-09-25-grem-merge-tool/], related: [P4XN, BCJF], github: null}
 ---
 # Offer board_merge_cards to pane agents, not only Board cleanup
 

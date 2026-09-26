@@ -1,7 +1,7 @@
 ---
 id: HRF6
 type: work
-status: executing
+status: needs-verification
 labels: [feature, land, scratch]
 assignee: agent
 implemented_by: glm/glm-5.3
@@ -9,7 +9,7 @@ session: 97149268-97e8-4cc9-bf13-249118806781
 rank: zzzzzzzzzzzzzzzzzzzzzzzzzzzi
 created: '2026-09-25'
 source: 'pane 1, 2026-09-25, follow-up to #BHJZ'
-links: {plans: [], commits: [aaecaa7c3fda], evidence: [], related: [BHJZ, DVV2], github: null}
+links: {plans: [], commits: [aaecaa7c3fda, 1a8429a00569, bf5aa57c4fd9], evidence: [docs/qa_evidence/2026-09-25-hrf6-relay-land-root/], related: [BHJZ, DVV2], github: null}
 ---
 # land.py's default root moves to a Relay-owned location ($XDG_STATE_HOME/relay/land), not /tmp/claude-<uid>/land
 

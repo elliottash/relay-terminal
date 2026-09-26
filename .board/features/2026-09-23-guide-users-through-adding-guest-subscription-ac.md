@@ -58,11 +58,13 @@ manual: docs/qa_evidence/2026-09-23-21KQ/
 
 `PYTHONPATH=backend python3 -m unittest tests.test_skills tests.test_agent_context`: 52 passed. `RELAY_SESSION=card21kq scripts/relay-build --target relay`: built. `xvfb-run -a ctest --test-dir build -R '^modelspane$' --output-on-failure`: 1/1 passed. The Xvfb driver also asserted that the helper click did not save `personal` to the account registry.
 
-### Check 2026-09-23 23:23
-- missing-evidence · unittest:tests.test_skills — no run of tests/test_skills.py for this revision, from any host, and no attached result
-- passed · unittest:tests.test_agent_context — tests/test_agent_context.py passed for this revision on spark-dcc9, 2026-09-24T00:06:22Z
-- passed · ctest:modelspane — ctest -R modelspane passed for this revision on spark-dcc9, 2026-09-24T03:23:08Z
+### Check 2026-09-25 20:55
+- not-applicable · unittest:tests.test_skills — tests/test_skills.py is not in the project any more
+- missing-evidence · unittest:tests.test_agent_context — no run of tests/test_agent_context.py for this revision, from any host, and no attached result
+- failed · ctest:modelspane — ctest -R modelspane failed for this revision on spark-dcc9
 - not-applicable · manual:docs/qa_evidence/2026-09-23-21KQ/ — manual evidence, recorded by hand: docs/qa_evidence/2026-09-23-21KQ/
-- notice · unittest:tests.test_skills — tests/test_skills.py: 8 of 36 never ran here (test_parse_profile_reads_vocabularies_lists_and_free_text, test_unknown_key_is_a_warning_not_an_error, test_bad_values_are_warnings_and_dropped…)
-- notice · ctest:modelspane — ctest -R modelspane is slow: p95 1.86 s, p50 1.60 s
+- notice · unittest:tests.test_skills — tests/test_skills.py: 28 of 28 are not in the project any more (test_a_users_own_copy_wins, test_bundled_skills_are_indexed_and_readable, test_guest_account_setup_is_a_loadable_interview_skill…)
+- notice · unittest:tests.test_agent_context — tests/test_agent_context.py: 4 of 28 never ran here (test_the_tests_and_sharing_panes_have_briefs_of_their_own, test_the_guis_block_is_read_with_its_file_and_plugin, test_file_and_plugin_are_additive…)
+- notice · ctest:modelspane — ctest -R modelspane is slow: p95 1.86 s, p50 1.62 s
+- warning · manual:docs/qa_evidence/2026-09-23-21KQ/ — manual evidence docs/qa_evidence/2026-09-23-21KQ/ is not there
 history: thread

@@ -9,7 +9,7 @@ session: 22847335-dbb1-4f65-838e-f1e23b1823b5
 rank: zzzzzzzzzzzzzzzzzzzzzzzzzzzr
 created: '2026-09-25'
 verify: {artifact: code, primary: script, also: [probe], human: none, sign_off: none, effort: low}
-links: {plans: [], commits: [0e52c2ddde75], evidence: [docs/qa_evidence/2026-09-25-pmzz-claude-guest-relaunch/], related: [], github: null}
+links: {plans: [], commits: [0e52c2ddde75, 3bddede17e97], evidence: [docs/qa_evidence/2026-09-25-pmzz-claude-guest-relaunch/], related: [], github: null}
 ---
 # Claude guest dies on model switch + auto set_effort relaunch ("Session ID already in use"), leaving "the guest is not running."
 

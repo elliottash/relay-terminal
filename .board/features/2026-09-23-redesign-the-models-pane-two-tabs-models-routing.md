@@ -89,13 +89,15 @@ The Models pane still has exactly five tabs: Providers, Available, Priorities, E
 
 `RELAY_JOBS=1 scripts/relay-build --target relay-modelpicker-tests relay-jobstab-tests relay-settings-tests relay-modelspane-tests` and `RELAY_JOBS=1 scripts/relay-build --target relay` passed. The four focused CTest suites passed together on the final revision (6.08 s). The 420 px widget capture test passed. The rapid-toggle test checks immediate state after each click, final persisted state, and notifications; a human-perceived latency threshold has not been measured.
 
-### Check 2026-09-23 23:23
-- passed · ctest:modelpicker — ctest -R modelpicker passed for this revision on spark-dcc9, 2026-09-24T03:23:08Z
-- passed · ctest:modelspane — ctest -R modelspane passed for this revision on spark-dcc9, 2026-09-24T03:23:08Z
-- passed · ctest:jobstab — ctest -R jobstab passed for this revision on spark-dcc9, 2026-09-24T03:23:08Z
-- passed · ctest:settings — ctest -R settings passed for this revision on spark-dcc9, 2026-09-24T03:23:08Z
+### Check 2026-09-25 20:55
+- passed · ctest:modelpicker — ctest -R modelpicker passed for this revision on spark-dcc9, 2026-09-26T00:55:41Z
+- failed · ctest:modelspane — ctest -R modelspane failed for this revision on spark-dcc9
+- passed · ctest:jobstab — ctest -R jobstab passed for this revision on spark-dcc9, 2026-09-26T00:55:41Z
+- failed · ctest:settings — ctest -R settings failed for this revision on spark-dcc9
 - not-applicable · manual:docs/qa_evidence/2026-09-23-00G1-redesign/ — manual evidence, recorded by hand: docs/qa_evidence/2026-09-23-00G1-redesign/
-- notice · ctest:modelpicker — ctest -R modelpicker is slow: p95 2.59 s, p50 1.78 s
-- notice · ctest:modelspane — ctest -R modelspane is slow: p95 1.86 s, p50 1.60 s
+- notice · ctest:modelpicker — ctest -R modelpicker is slow: p95 2.62 s, p50 2.59 s
+- notice · ctest:modelspane — ctest -R modelspane is slow: p95 1.86 s, p50 1.62 s
+- notice · ctest:jobstab — ctest -R jobstab is slow: p95 1.34 s, p50 0.95 s
+- warning · manual:docs/qa_evidence/2026-09-23-00G1-redesign/ — manual evidence docs/qa_evidence/2026-09-23-00G1-redesign/ is not there
+- notice · ctest:settings — ctest -R settings failed the last time it ran, 2026-09-26T00:55:44Z
 history: thread
-2026-09-23 copy correction: `RELAY_JOBS=1 scripts/relay-build --target relay-modelspane-tests relay-jobstab-tests` passed. `ctest --test-dir build -R '^(modelspane|jobstab)$' --output-on-failure` passed 2/2. `RELAY_N4PW_EVIDENCE=docs/qa_evidence/2026-09-23-00G1-copy xvfb-run -a build/relay-modelspane-tests everyTabKeepsItsMainControlsInANarrowPane` passed and captured the 420 px views. The exact landed tree built `relay-modelspane-tests` through `land.py`.

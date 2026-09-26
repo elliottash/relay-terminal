@@ -43,3 +43,49 @@ Example requested by the owner (2026-09-25): #0FBB, a UI change verified from a 
 It shows two separate gaps this card names:
 1. **Owner-authorized chat close.** An explicit "this verifies it" about a named card, after its evidence was shown, should be allowed to close it, with the quote, revision and actor recorded. Under `ask` today it cannot.
 2. **Agent-visual verification.** For a nameable visual claim ("the code sits before the title", "a count in parens", "the badge is gone"), the screenshot is the evidence, and a model reading it can check each `Done means` line. The `ai-visual` rung is currently always demoted to `also` (`ai_may_gate_after: never`). A verifier outside the author's lineage reading the images could have gated this card. Subjective judgements such as "looks good" would still go to a person.
+
+<!-- relay:entry 20260925T041028Z-89 author=owner kind=comment mode=plan -->
+Plan this card.
+
+<!-- relay:entry 20260925T041028Z-8a author=owner kind=event pane=switchboard -->
+- ✦ owner moved this card · Discussing → Planning · a Plan turn started
+
+<!-- relay:entry 20260925T165339Z-ke author=owner kind=comment mode=plan -->
+Plan this card.
+
+<!-- relay:entry 20260925T165339Z-kf author=owner kind=event pane=switchboard -->
+- ✦ owner moved this card · Planning → Planning · a Plan turn started
+
+<!-- relay:entry 20260925T165711Z-0y author=agent kind=event model=glm-5.3 pane=switchboard turn=b7f48fd1f94f01ca5b57ebc58199a9f3/0f22ecf3db804d3aba6c70cd5c2d45c1 -->
+- ✦ agent updated this card · replaced `## Done means`
+
+<!-- relay:entry 20260925T165728Z-73 author=agent kind=event model=glm-5.3 pane=switchboard turn=b7f48fd1f94f01ca5b57ebc58199a9f3/0f22ecf3db804d3aba6c70cd5c2d45c1 -->
+- ✦ agent updated this card · replaced `## Plan`
+
+<!-- relay:entry 20260925T165736Z-1z author=agent kind=comment mode=plan model=glm-5.3 turn=b7f48fd1f94f01ca5b57ebc58199a9f3/0f22ecf3db804d3aba6c70cd5c2d45c1 -->
+I'll plan card #P7CF. Reading the card, its related cards, and the code it names first.
+
+Card and related cards read. Now the code: `qa_policy.py` and the gates in `board_tools.py`.
+
+This Plan turn is one structured ask (read, then two section writes), so I'll continue without a todo list. Reading the gates in `board_tools.py`.
+
+I have the gates. Two more look-ups so the plan names real functions: how thread comments are appended and what `OWNER_ACTOR` is.
+
+
+
+One last check so the plan names real files: the docs that describe the policy and the tests that cover it.
+
+I have everything: the gates (`_qa_ask_gate`, `_verify_gate`, `_human_qa_gate` in `board_tools.py`), the floor rules in `qa_policy.py`, the tests (`tests/test_qa_policy.py`, `tests/test_board_tools.py`), and the docs pages. Writing `## Done means` first, then the plan.
+
+Need the card's current hash — re-reading.
+
+
+
+`## Done means` written. Now the plan itself.
+
+Planned on #P7CF: the plan turns the research into four changes — an owner-authorized chat close (`authorized_by` on `board_move_card`, quote and relayer recorded on the thread, `ask` otherwise untouched), the person-gate satisfied by that recorded authorization, `ai-visual` allowed to gate when the verifier is outside the implementer's lineage, and a read-only backlog manifest with a pilot sample that moves no card.
+
+One choice is yours before Run: whether the `ai-visual` relaxation should be unconditional (as planned) or behind a new policy key like `ai_visual_may_gate:` — it loosens a default #C3Q2 set on your steer.
+
+<!-- relay:entry 20260925T165736Z-2x author=owner kind=event pane=switchboard -->
+- ✦ owner moved this card · Planning → Planned · the plan is on the card

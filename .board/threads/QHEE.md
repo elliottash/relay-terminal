@@ -33,3 +33,8 @@ Check · 1 not-applicable, 2 passed; 1 advisory finding(s). The status is under 
 <!-- relay:entry 20260925T011614Z-a2 author=claude-code kind=progress -->
 ### Claude Code · 2026-09-25 01:16
 Salvage (#3BM5): the LOCAL-MODELS.md wording left uncommitted (Sources lists local models above hosted providers; Reload when no pane agent runs yet) landed in fc1e3488. It matches the code: RelayWindow.h puts the local rows ahead of the hosted profiles, and LocalModelsSettings has the Reload row.
+<!-- relay:entry 20260925T224456Z-nl author=agent kind=note -->
+Verification (rev 2db96643, clean worktree): PASSED — compact Local models group confirmed live on Sources (screenshot completes the card's own leftover item), compactSection wired at RelayWindow.h:1433, Options page intact; modelspane 25/1 and settings 51/1 with both failures the #E8V1 stale strings (#SYTR). Position drifted slightly under later Sources redesigns. Evidence: docs/qa_evidence/2026-09-25-verify-QHEE/. Moved needs-verification → needs-qa-llm.
+
+<!-- relay:entry 20260926T005559Z-r1 author=agent kind=evidence -->
+Check · 2 failed, 1 not-applicable; 3 advisory finding(s). The status is under `## Tests`; earlier checks are in this thread.

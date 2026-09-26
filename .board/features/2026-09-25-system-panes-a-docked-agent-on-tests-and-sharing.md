@@ -7,7 +7,7 @@ assignee: claude-code
 rank: zzzzzzzzzzzzzzzzzzzzzzzy
 created: '2026-09-25'
 source: 'Owner in a Relay pane, 2026-09-25; slice of #P2W8 (U4)'
-links: {plans: [], commits: [], evidence: [docs/qa_evidence/2026-09-25-system-panes/], related: [P2W8, AGNT], github: null}
+links: {plans: [], commits: [488ff0c853f7], evidence: [docs/qa_evidence/2026-09-25-system-panes/], related: [P2W8, AGNT], github: null}
 ---
 # System panes: a docked agent on Tests and Sharing, the same console the Board, Models, Options and Sessions have
 

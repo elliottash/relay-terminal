@@ -34,3 +34,10 @@ Owner decision, 2026-09-25: the ↗ button is redundant with the top-right Move 
 - `ctest -R queuecontract` — run-in-background queue semantics via the keyboard path (passes).
 - `rg -n 'runInBackgroundButton|promptInputArea|placeBackgroundSend|m_promptArea|m_backgroundSend|consolecorner' src/ tests/ CMakeLists.txt` — only unrelated hits remain.
 - Green in the land verify slot on the exact tree that landed (ba8ccd86).
+
+### Check 2026-09-25 11:16
+- failed · ctest:consolemode — ctest -R consolemode failed for this revision on spark-dcc9
+- missing-evidence · ctest:queuecontract — no run of ctest -R queuecontract for this revision, from any host, and no attached result
+- notice · ctest:consolemode — ctest -R consolemode is slow: p95 50.99 s, p50 1.65 s
+- notice · ctest:queuecontract — ctest -R queuecontract is slow: p95 3.52 s, p50 3.49 s
+history: thread

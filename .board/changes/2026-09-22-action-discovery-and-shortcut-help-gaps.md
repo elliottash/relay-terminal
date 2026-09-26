@@ -29,10 +29,11 @@ Every public command is discoverable by name, with deliberate equivalents and co
 `ctest -R settings`
 manual: docs/qa_evidence/2026-09-22-keyboard-set/03-palette-search.png ("rest" finds restart, Update and zoom rows that were missing)
 
-### Check 2026-09-23 23:23
-- passed · ctest:settings — ctest -R settings passed for this revision on spark-dcc9, 2026-09-24T03:23:08Z
+### Check 2026-09-25 20:55
+- failed · ctest:settings — ctest -R settings failed for this revision on spark-dcc9
 - not-applicable · manual:docs/qa_evidence/2026-09-22-keyboard-set/03-palette-search.png ("rest" finds restart, Update and zoom rows that were missing) — manual evidence, recorded by hand: docs/qa_evidence/2026-09-22-keyboard-set/03-palette-search.png ("rest" finds restart, Update and zoom rows that were missing)
 - warning · manual:docs/qa_evidence/2026-09-22-keyboard-set/03-palette-search.png ("rest" finds restart, Update and zoom rows that were missing) — manual evidence docs/qa_evidence/2026-09-22-keyboard-set/03-palette-search.png ("rest" finds restart, Update and zoom rows that were missing) is not there
+- notice · ctest:settings — ctest -R settings failed the last time it ran, 2026-09-26T00:55:44Z
 history: thread
 ## Execution Summary
 searchableActions() now appends every registered Keymap action that the hand-built tree lacks. Each gets its live shortcut, and a documented equivalents list keeps aliases from appearing twice. The slash label is /board, not /switchboard. docs/ARCHITECTURE.md key lists are corrected. Commits: cd7dcfcb, 3857b5fc (window-category rows under Relay).

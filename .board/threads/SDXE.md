@@ -75,3 +75,6 @@ Deliberately left: a pane's minimum still moves by 8 px — one row gap — as t
 
 <!-- relay:entry 20260920T150542Z-m3 author=agent kind=event model=claude-opus-5 pane=612194b9 -->
 - ✦ agent moved this card · Executing → Needs verification · b2461d52: the usage chip, the subagent badge, the ssh/phone chips and the title label stop putting what they are showing into the pane's minimum; measured before and after under Xvfb, and `tests/panelayout_test.cpp` reproduces the incident and pins Qt's rule · evidence docs/qa_evidence/2026-09-20-pane-width-jiggle/ · implemented_by anthropic/claude-opus-5
+
+<!-- relay:entry 20260925T225104Z-m9 author=agent kind=event mention=6BY7 model=glm-5.3 pane=switchboard turn=31b1b48aee4e5b1a7b8b486bbf061816/2a6577e6451b4155bda84e2e96d7eb24 -->
+mentioned in #6BY7 · 2026-09-25 · agent

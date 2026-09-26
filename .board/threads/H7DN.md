@@ -13,3 +13,6 @@ Claimed the hosted model naming audit. The Relay Pro note and catalog expose GLM
 
 <!-- relay:entry 20260923T120754Z-3y author=agent kind=event model=gpt-6-sol pane=b91c71cd turn=19bd73c570494541b8433b0c939c9daf/5e62f1c8556e401c9d540cadba747d52 -->
 - ✦ agent updated this card · links: {"plans": [], "commits": [], "evidence": ["docs/qa_evidence/2026-09-23-hosted-na… → {"plans": [], "commits": ["00872ae49dbe618f33cd9fa656059fcd92b67dc5"], "evidence…
+<!-- relay:entry 20260925T223957Z-x8 author=agent kind=note -->
+Verification (rev 2db96643, clean worktree): PASSED — no backing model names on the Relay Pro row (live), service/role naming in code, catalog 73/0 and picker 62/0; python 183/185 where the 2 are the pre-existing GuiMirror drift (#DX4A) and modelspane 25/1 is #E8V1's stale string (#SYTR). Evidence: docs/qa_evidence/2026-09-25-verify-H7DN/. Moved needs-verification → needs-qa-llm.
+

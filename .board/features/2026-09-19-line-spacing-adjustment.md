@@ -1,10 +1,14 @@
 ---
 id: TJBC
 type: work
-status: planned
+status: needs-verification
+assignee: agent
+implemented_by: glm/glm-5.3
+session: 56ecb4d2-36a8-4036-847c-52a00620b9ed
 rank: zzzzzzzzzzzzzzr
 created: '2026-09-19'
-links: {plans: [], commits: [], evidence: [], related: [], github: null}
+verify: {artifact: code, primary: script, also: [], human: none, sign_off: none, effort: medium, stakes: rework, blast: capability}
+links: {plans: [], commits: [], evidence: [docs/qa_evidence/2026-09-25-tjbc-thinking-spacing/], related: [], github: null}
 ---
 # line spacing adjustment
 
@@ -74,3 +78,17 @@ no extra line break between tools and thoughts (same as you see between two cons
 - `scripts/relay-build`, then `ctest --test-dir build -R transcriptgaps` (table unchanged; must stay green).
 - Live under Xvfb with an isolated `XDG_CONFIG_HOME`, reusing the #5AWD harness (`docs/qa_evidence/2026-09-19-helpful-line-breaks/stub-provider.py` + `drive.sh`; folds: `docs/qa_evidence/2026-09-19-thinking-fold/drive.sh`): a stub turn emitting thinking → tools → thinking → prose → tools. Screenshots must show `▸ ✦ thought for N s` tight against `▸ ran …` rows in both orders, and one blank line before the prose message.
 - Evidence under `docs/qa_evidence/2026-09-20-<slug>/`; land through `scripts/land.py begin/commit`; card to needs-verification with a QA checklist.
+
+## Done means
+- A trace like `thought → tool → thought → prose → tool` renders with `▸ ✦ thought for N s` tight against `▸ ran …` rows in both orders (no blank line between thought and tool rows), and exactly one blank line between a thought-or-tool row and the agent's prose message on either side.
+- The same spacing holds on replay/resume and in the `never` fold-display mode.
+- `ctest -R transcriptgaps` stays green (the gap table itself is unchanged), plus evidence screenshots under `docs/qa_evidence/`.
+
+## Tests
+- `ctest -R 'consolemode|transcriptgaps'` on an isolated export of `main` + the card's hunks (the shared tree was mid-edit by the model-switch session): all passed. `consolemode` includes the new case `thinkingRowsSitWithToolRowsAndApartFromProse` — thought→tool tight in both orders, exactly one blank line either side of prose, link row still tight with the last tool row; `transcriptgaps` proves the gap table itself is unchanged.
+- Fails-before proof: reverting only `printThinkingAnchor`'s classification back to `Block::Agent` makes the new case fail on exactly its two tightness checks (blank line reappears between the thought row and the tool row).
+- Evidence: `docs/qa_evidence/2026-09-25-tjbc-thinking-spacing/` (README, `before.png`, `after.png`).
+
+## Try it
+- Open `docs/qa_evidence/2026-09-25-tjbc-thinking-spacing/after.png` next to `before.png` (built from the landed commit; the transcript is also printed verbatim in that dir's `README.md`). Look at any agent turn with thoughts and tool calls in your own Relay once a build from `main` reaches you.
+- One question: is this the spacing you meant — thoughts and tool rows single-spaced, exactly one blank line either side of an agent-to-user message?

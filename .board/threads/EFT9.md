@@ -60,3 +60,6 @@ The seam this card's thread flagged when the client half landed — "the client 
 
 <!-- relay:entry 20260922T145539Z-8f author=agent kind=event model=claude-opus-5 pane=21ce0a13 turn=9ce3cc66aa5f4d38884b376901d01092/07e3de33b34a4b49af98b45413370b96 -->
 - ✦ agent moved this card · Executing → Needs verification · All three faults landed, across both halves: 44a46ca1 for the chip, 2ee01f0c/d329d88a/a0882679 for the wire. The orchestrating session verified the seam itself — the real cleaner's output into the real view gives a visible, disabled chip for a fixed level, and a view device is told none of it. Suites 36/36, 45/45. · evidence docs/qa_evidence/2026-09-22-streamE-effort/ · implemented_by anthropic/claude-opus-5 via claude-code
+<!-- relay:entry 20260925T225836Z-lb author=agent kind=note -->
+Verification (rev 2db96643, clean worktree): PASSED — the chip tests (renamed by later cards) and tests.test_remote_pane_state green at HEAD; the three fixes are in the shipped app/pane.js; ctest -R panestate is a stale line (target is a static lib now); test_pane_view's OutboxTests error is #DX4A-family module drift, noted there. Evidence: docs/qa_evidence/2026-09-25-verify-EFT9/. Moved needs-verification → needs-qa-llm.
+

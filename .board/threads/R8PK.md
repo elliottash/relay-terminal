@@ -35,3 +35,15 @@ Check · 1 passed. The status is under `## Tests`; earlier checks are in this th
 
 <!-- relay:entry 20260923T190406Z-dg author=agent kind=evidence -->
 Check · 1 passed. The status is under `## Tests`; earlier checks are in this thread.
+
+<!-- relay:entry 20260925T151518Z-7p author=agent kind=evidence -->
+Check · 1 passed. The status is under `## Tests`; earlier checks are in this thread.
+
+<!-- relay:entry 20260926T010039Z-ac author=agent kind=evidence -->
+Check · 1 failed; 1 advisory finding(s). The status is under `## Tests`; earlier checks are in this thread.
+
+<!-- relay:entry 20260926T010143Z-gf author=agent kind=evidence -->
+Check · 1 passed. The status is under `## Tests`; earlier checks are in this thread.
+
+<!-- relay:entry 20260926T010205Z-bk author=agent kind=evidence -->
+Check · 1 passed. The status is under `## Tests`; earlier checks are in this thread.

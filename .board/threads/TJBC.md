@@ -216,3 +216,29 @@ Wrote the plan to #TJBC. It's a two-line classification change — thinking rows
 
 <!-- relay:entry 20260920T040115Z-a3 author=owner kind=event pane=switchboard -->
 - ✦ owner moved this card · Planning → Planned · the plan is on the card
+
+<!-- relay:entry 20260925T151302Z-3t author=agent kind=event model=glm-5.3 pane=56ecb4d2 turn=389453d7a47f4baea147d690cb6bcdad/9bcecca24c0e4b45beda24bd5d73e731 -->
+- ✦ agent claimed this card · assignee agent, Planned → Executing, implemented_by glm/glm-5.3, verify defaulted from skill deliver, session 56ecb4d2
+
+<!-- relay:entry 20260925T151302Z-fc author=agent kind=progress model=glm-5.3 pane=56ecb4d2 turn=389453d7a47f4baea147d690cb6bcdad/9bcecca24c0e4b45beda24bd5d73e731 pane_token=56ecb4d2-36a8-4036-847c-52a00620b9ed -->
+Claimed (56ecb4d2) · working on it from a terminal pane
+
+Executing the plan on the card: thinking rows move from Block::Agent to Block::Call so thoughts+tools sit single-spaced and prose keeps a blank line around it.
+
+<!-- relay:entry 20260925T151321Z-0h author=agent kind=event model=glm-5.3 pane=56ecb4d2 turn=389453d7a47f4baea147d690cb6bcdad/9bcecca24c0e4b45beda24bd5d73e731 -->
+- ✦ agent updated this card · appended to `## Done means`
+
+<!-- relay:entry 20260925T153745Z-s2 author=agent kind=event model=glm-5.3 pane=56ecb4d2 turn=389453d7a47f4baea147d690cb6bcdad/9bcecca24c0e4b45beda24bd5d73e731 -->
+- ✦ agent updated this card · appended to `## Tests`
+
+<!-- relay:entry 20260925T154151Z-4v author=agent kind=event model=glm-5.3 pane=56ecb4d2 turn=389453d7a47f4baea147d690cb6bcdad/9bcecca24c0e4b45beda24bd5d73e731 -->
+- ✦ agent moved this card · Executing → Needs verification · Implemented in 16a1e6b6: thinking folds classify as Block::Call, so thoughts+tools render single-spaced and prose keeps exactly one blank line either side. New headless case in consolemode + before/after PNG evidence. · evidence docs/qa_evidence/2026-09-25-tjbc-thinking-spacing/ · implemented_by glm/glm-5.3
+
+<!-- relay:entry 20260925T154216Z-1g author=agent kind=progress model=glm-5.3 pane=56ecb4d2 turn=389453d7a47f4baea147d690cb6bcdad/9bcecca24c0e4b45beda24bd5d73e731 -->
+- ✦ agent is preparing Try it for this card
+
+<!-- relay:entry 20260925T160605Z-5b author=agent kind=decision model=glm-5.3 pane=56ecb4d2 turn=389453d7a47f4baea147d690cb6bcdad/9bcecca24c0e4b45beda24bd5d73e731 -->
+Owner, 2026-09-25 (12:05, mid-verification): "skip further testing and land it" — the live Xvfb re-run fixture was dropped; the landed commit's headless case and the before/after PNGs are the evidence.
+
+<!-- relay:entry 20260925T160645Z-w8 author=agent kind=event model=glm-5.3 pane=56ecb4d2 turn=389453d7a47f4baea147d690cb6bcdad/9bcecca24c0e4b45beda24bd5d73e731 -->
+- ✦ agent updated this card · appended to `## Try it`

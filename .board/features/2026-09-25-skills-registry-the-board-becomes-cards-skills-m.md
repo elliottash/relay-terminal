@@ -11,7 +11,7 @@ rank: zzzzzzzzzzzzzzzzzzzzzw
 created: '2026-09-25'
 verify: {artifact: visual, primary: script, also: [ai-visual, person], human: required, criteria: 'the Board''s three tabs read as one surface; a skill page answers version, profile, cases and staleness at a glance without a QA plan in view', sign_off: none, effort: high, stakes: rework, blast: capability}
 source: 'owner, Relay conversation, 2026-09-24 and 2026-09-25; the Skills registry phase of #1QKM'
-links: {commits: [e5b1a648d096, d138dc638e9e, b48afea250ef, 6feff54f7f97, 488ff0c853f7, 7ea7d8f05fe5, cd1b0fedcde0, ebcd0f879450], evidence: [docs/qa_evidence/2026-09-25-9FX8-skills-tab/], github: null, plans: [], related: [1QKM, SZ1H, HS7V, MSJ0, 95VZ, Y2MP, P7SJ, GSK7]}
+links: {commits: [e5b1a648d096, d138dc638e9e, b48afea250ef, 6feff54f7f97, 488ff0c853f7, 7ea7d8f05fe5, cd1b0fedcde0, ebcd0f879450, 096b9512a547], evidence: [docs/qa_evidence/2026-09-25-9FX8-skills-tab/], github: null, plans: [], related: [1QKM, SZ1H, HS7V, MSJ0, 95VZ, Y2MP, P7SJ, GSK7]}
 ---
 # Skills registry: the Board becomes Cards | Skills | Memories, Globals gets global skills, and a skill page shows version, profile, cases and staleness
 

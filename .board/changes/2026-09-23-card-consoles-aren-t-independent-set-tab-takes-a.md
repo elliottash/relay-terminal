@@ -41,8 +41,8 @@ No behavior change for: tab consoles' conversation keys, terminal panes' inline 
 
 Evidence: `docs/qa_evidence/2026-09-23-kskh/`.
 
-### Check 2026-09-23 15:03
+### Check 2026-09-25 21:29
 - missing-evidence · unittest:tests.test_board_chat.TabOfTest — no run of tests/test_board_chat.py::TabOfTest for this revision, from any host, and no attached result
-- passed · unittest:tests.test_board_protocol.AskTests.test_a_card_conversation_is_keyed_by_the_tab_and_the_card_only — tests/test_board_protocol.py::AskTests::test_a_card_conversation_is_keyed_by_the_tab_and_the_card_only passed for this revision on spark-dcc9, 2026-09-23T19:03:05Z
-- notice · unittest:tests.test_board_chat.TabOfTest — tests/test_board_chat.py::TabOfTest: 3 of 3 never ran here (test_a_tab_consoles_key_is_still_the_tab_by_another_name, test_a_card_consoles_key_names_a_card_not_the_tab, test_no_spellings_at_all_is_no_tab)
+- passed · unittest:tests.test_board_protocol.AskTests.test_a_card_conversation_is_keyed_by_the_tab_and_the_card_only — tests/test_board_protocol.py::AskTests::test_a_card_conversation_is_keyed_by_the_tab_and_the_card_only passed for this revision on spark-dcc9, 2026-09-26T01:29:32Z
+- notice · unittest:tests.test_board_chat.TabOfTest — tests/test_board_chat.py::TabOfTest: 4 of 4 never ran here (test_a_tab_consoles_key_is_still_the_tab_by_another_name, test_a_card_consoles_key_names_a_card_not_the_tab, test_an_artifact_consoles_key_names_a_file_not_the_tab…)
 history: thread

@@ -27,8 +27,8 @@ The layout saves BoardView navigation (open card, selected card and filter), res
 ## Tests
 `ctest -R ^boardpane$`
 
-### Check 2026-09-23 15:04
-- passed · ctest:boardpane — ctest -R boardpane passed for this revision on spark-dcc9, 2026-09-22T01:37:20Z
+### Check 2026-09-25 21:02
+- passed · ctest:boardpane — ctest -R boardpane passed for this revision on spark-dcc9, 2026-09-26T01:01:55Z
 history: thread
 ## QA checklist
 - [ ] Open a card, quit Relay, relaunch and confirm the same card opens.

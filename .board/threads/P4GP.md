@@ -8,3 +8,6 @@ Evidence against each acceptance item:
 - **Windows and macOS platform plan recorded** — exceeded: native Windows (ConPTY, `packaging/windows`, `.github/workflows/windows.yml`) and native Apple Silicon + Intel DMGs (`packaging/macos`, `macos.yml`) ship in beta.4; documented in `docs/BUILDING.md`. The old dependency on #portable-terminal-engine (`.board/features/2026-09-17-portable-terminal-engine.md`, still `planned`) no longer blocks this card.
 
 Not re-checked here: the live site itself (no network used beyond read-only `gh`). Screenshot refreshes as the UI changes are ongoing marketing work (#W9ST, #K13B), not this card's scope. Owner decisions still open elsewhere, not here: macOS notarization / Windows code signing (unsigned today, per the install copy), and the disabled AUR job.
+
+<!-- relay:entry 20260925T120739Z-j9 author=owner kind=event pane=switchboard -->
+- ✦ owner moved this card · Planned → Dropped · changed in the Board

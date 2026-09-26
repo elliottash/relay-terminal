@@ -10,7 +10,7 @@ rank: zzzzzzzzzzzzzzzzzzzzzzzzzzzy
 created: '2026-09-25'
 verify: {artifact: visual, primary: script, also: [ai-visual, person], human: optional, criteria: 'with two agent panes open on this project, the Cards tab shows one chip per pane with its card; clicking each reveals the pane / opens the card', effort: low}
 source: 'owner decision 3 on #EA37, 2026-09-25'
-links: {plans: [], commits: [579c7d5cab51], evidence: [docs/qa_evidence/2026-09-25-tbrh-live-strip/], related: [EA37, 9FX8], github: null}
+links: {plans: [], commits: [579c7d5cab51, 488ff0c853f7, 4d1ba7c023ad], evidence: [docs/qa_evidence/2026-09-25-tbrh-live-strip/], related: [EA37, 9FX8], github: null}
 ---
 # Live strip on Cards: this project's panes and the card each holds
 

@@ -28,3 +28,11 @@ Check · 3 missing-evidence, 1 not-applicable, 2 passed; 5 advisory finding(s). 
 
 <!-- relay:entry 20260924T032310Z-27 author=agent kind=evidence -->
 Check · 2 missing-evidence, 1 not-applicable, 3 passed; 5 advisory finding(s). The status is under `## Tests`; earlier checks are in this thread.
+<!-- relay:entry 20260925T224947Z-3b author=agent kind=note -->
+Verification (rev 2db96643, clean worktree): PASSED — same landing as #CDP7; modelcatalog 73/0 (fills the missing-evidence line), modelpicker 62/0, modelspane 25/1 (#E8V1 stale string, #SYTR); the two python failures are later drift (#Y4PJ + new harness) filed as #042V. Evidence: docs/qa_evidence/2026-09-25-verify-MPA2/. Moved needs-verification → needs-qa-llm.
+
+<!-- relay:entry 20260926T000806Z-gn author=agent kind=evidence -->
+Check · 2 missing-evidence, 1 not-applicable, 3 passed; 8 advisory finding(s). The status is under `## Tests`; earlier checks are in this thread.
+
+<!-- relay:entry 20260926T005548Z-v7 author=agent kind=evidence -->
+Check · 1 failed, 2 missing-evidence, 1 not-applicable, 2 passed; 8 advisory finding(s). The status is under `## Tests`; earlier checks are in this thread.

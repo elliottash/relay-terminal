@@ -10,7 +10,7 @@ rank: zzzzzzzzzzzzzzzzzzzzzzzzzzzz
 created: '2026-09-25'
 verify: {artifact: code, primary: script, also: [probe], human: optional, criteria: 'tests/test_provider_errors.py passes; a live read-only probe of a spent Z.AI plan fails once with the named window and local reset; the pane shows the failover cause and the helper link, and clicking it drafts/sends the failure in the Models helper.', sign_off: none, effort: medium}
 source: Claude guest pane, 2026-09-25
-links: {plans: [], commits: [4947ff813865], evidence: [docs/qa_evidence/2026-09-25-qk2q/], related: [YJG7, 9R2V, XH4K, 495G], github: null}
+links: {plans: [], commits: [4947ff813865, 771a1ab62bff, efa7596368d8, 0ec8b68a759f], evidence: [docs/qa_evidence/2026-09-25-qk2q/], related: [YJG7, 9R2V, XH4K, 495G], github: null}
 ---
 # Provider failures say which limit or credential failed, and the helper offers the fix
 

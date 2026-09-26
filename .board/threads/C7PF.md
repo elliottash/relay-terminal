@@ -61,3 +61,6 @@ Execute · handed to a new terminal pane beside the Switchboard, whose agent wor
 
 <!-- relay:entry 20260920T051458Z-hd author=agent kind=progress model=glm-5.3 pane=switchboard -->
 Landed per the plan: `#ID` chip (`QLabel#paneCardChip`) after the `auto` badge in the pane header, from the moment a card is handed over until the running turn ends; click opens the card (`onOpenCard`); tooltip names every attached card with its title. No ladder change, work chip untouched. Built green (`scripts/relay-build`); targeted tests pass (`ctest` `panes`/`panestate`/`panestatus`/`themeswitch`). Live drive under Xvfb with an isolated config on a throwaway board: chip at handoff, tooltip, click-through, no chip on plain panes — screenshots in `docs/qa_evidence/2026-09-19-card-tag-in-pane-header/`. Not drivable headless (on the checklist): the chip hiding at `agent_finished` and the work chip naming the card once the task flushes, both of which need a configured agent.
+
+<!-- relay:entry 20260925T223516Z-w8 author=agent kind=event mention=6BY7 model=glm-5.3 pane=switchboard turn=7bdd4488cc34018b5f751db46ca2a292/d8484eb02fb44016ac77fde66d586976 -->
+mentioned in #6BY7 · 2026-09-25 · agent

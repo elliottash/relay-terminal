@@ -5,6 +5,7 @@ status: executing
 labels: [feature, files, editor, artifacts]
 assignee: agent
 implemented_by: anthropic/claude-opus-5-5 via claude-code
+priority: 3
 rank: zzzzzzzzzzzzzzzzzw
 created: '2026-09-23'
 source: Owner in a Relay pane, 2026-09-23; implementation slice from reports/Editable workspaces for Relay.md

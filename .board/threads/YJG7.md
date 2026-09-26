@@ -85,3 +85,6 @@ Follow-up complete; needs-verification. 220 targeted tests and all 14 isolated G
 
 <!-- relay:entry 20260922T165701Z-r2 author=codex-hg26-p2 kind=evidence -->
 Landed follow-up in 24a6b202d8121b35173b9aabe456c9c7eb32a72c through land.py; added commit link. Still needs independent verification.
+
+<!-- relay:entry 20260925T204829Z-nt author=agent kind=event mention=QK2Q model=claude-opus-5-5 pane=7f908958 turn=eb540dbc335b48608bf140f752a963ce/97053e75276c4d7da4511160d884309d -->
+mentioned in #QK2Q · 2026-09-25 · agent

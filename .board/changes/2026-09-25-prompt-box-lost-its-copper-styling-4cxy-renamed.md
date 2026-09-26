@@ -38,3 +38,12 @@ Fix (ba8ccd86): restored the pre-#4CXY structure — editor + corner column dire
 - `ctest -R consolemode` — full themed suite, incl. the busy-line geometry tests whose composer lookup was reverted to the editor's parent (passes).
 - `ctest -R queuecontract` — untouched run-in-background queue semantics (passes).
 - All three ran green in the land verify slot on the exact tree that landed (ba8ccd86).
+
+### Check 2026-09-25 11:16
+- missing-evidence · ctest:composername — no run of ctest -R composername for this revision, from any host, and no attached result
+- failed · ctest:consolemode — ctest -R consolemode failed for this revision on spark-dcc9
+- missing-evidence · ctest:queuecontract — no run of ctest -R queuecontract for this revision, from any host, and no attached result
+- notice · ctest:composername — ctest -R composername has never run here
+- notice · ctest:consolemode — ctest -R consolemode is slow: p95 50.99 s, p50 1.65 s
+- notice · ctest:queuecontract — ctest -R queuecontract is slow: p95 3.52 s, p50 3.49 s
+history: thread

@@ -21,9 +21,10 @@ One line in `src/WindowState.cpp`: an `internals` node whose value is an object 
 `ctest -R windowstate`
 manual: docs/qa_evidence/2026-09-22-verify-ACT1/README.md
 
-### Check 2026-09-21 21:12
-- passed · ctest:windowstate — ctest -R windowstate passed for this revision on spark-dcc9, 2026-09-22T01:12:46Z
+### Check 2026-09-25 14:10
+- passed · ctest:windowstate — ctest -R windowstate passed for this revision on spark-dcc9, 2026-09-25T18:10:13Z
 - not-applicable · manual:docs/qa_evidence/2026-09-22-verify-ACT1/README.md — manual evidence, recorded by hand: docs/qa_evidence/2026-09-22-verify-ACT1/README.md
+- warning · manual:docs/qa_evidence/2026-09-22-verify-ACT1/README.md — manual evidence docs/qa_evidence/2026-09-22-verify-ACT1/README.md is not there
 history: thread
 ## QA checklist
 - [x] Open an Activity pane beside a terminal, quit, reopen with no arguments: the tab is back with both.

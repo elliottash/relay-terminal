@@ -129,3 +129,18 @@ Check · 2 missing-evidence, 2 not-applicable, 7 passed; 7 advisory finding(s). 
 
 <!-- relay:entry 20260923T190432Z-19 author=agent kind=evidence -->
 Check · 2 missing-evidence, 2 not-applicable, 7 passed; 7 advisory finding(s). The status is under `## Tests`; earlier checks are in this thread.
+
+<!-- relay:entry 20260925T151509Z-eb author=agent kind=evidence -->
+Check · 3 missing-evidence, 2 not-applicable, 6 passed; 9 advisory finding(s). The status is under `## Tests`; earlier checks are in this thread.
+
+<!-- relay:entry 20260926T010031Z-0d author=agent kind=evidence -->
+Check · 1 failed, 3 missing-evidence, 2 not-applicable, 5 passed; 12 advisory finding(s). The status is under `## Tests`; earlier checks are in this thread.
+
+<!-- relay:entry 20260926T010136Z-ea author=agent kind=evidence -->
+Check · 3 missing-evidence, 2 not-applicable, 6 passed; 11 advisory finding(s). The status is under `## Tests`; earlier checks are in this thread.
+
+<!-- relay:entry 20260926T010159Z-1v author=agent kind=evidence -->
+Check · 3 missing-evidence, 2 not-applicable, 6 passed; 11 advisory finding(s). The status is under `## Tests`; earlier checks are in this thread.
+
+<!-- relay:entry 20260926T012938Z-s5 author=agent kind=evidence -->
+Check · 2 missing-evidence, 2 not-applicable, 7 passed; 10 advisory finding(s). The status is under `## Tests`; earlier checks are in this thread.

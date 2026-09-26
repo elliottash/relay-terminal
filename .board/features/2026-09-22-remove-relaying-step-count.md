@@ -23,10 +23,10 @@ remove the step count item from the relaying... notifier.
 - `ctest -R consolemode`
 - manual: docs/qa_evidence/2026-09-22-STPC/result.md
 
-### Check 2026-09-24 18:49
-- passed · ctest:consolemode — ctest -R consolemode passed for this revision on spark-dcc9, 2026-09-24T22:49:05Z
+### Check 2026-09-25 11:16
+- failed · ctest:consolemode — ctest -R consolemode failed for this revision on spark-dcc9
 - not-applicable · manual:docs/qa_evidence/2026-09-22-STPC/result.md — manual evidence, recorded by hand: docs/qa_evidence/2026-09-22-STPC/result.md
-- notice · ctest:consolemode — ctest -R consolemode is slow: p95 6.69 s, p50 1.62 s
+- notice · ctest:consolemode — ctest -R consolemode is slow: p95 50.99 s, p50 1.65 s
 history: thread
 ## Execution Summary
 Removed the step-count item and its unused Pane storage. The Relaying notifier retains the current action, elapsed seconds and stop/skip shortcut. Relay builds and the existing consolemode test passes. Live visual evidence is recorded in docs/qa_evidence/2026-09-22-STPC/result.md.

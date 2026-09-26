@@ -65,3 +65,6 @@ Step 2 remainder landed: `CardDetail` (and `PriorityFlagButton`, `drawPriorityFl
 
 <!-- relay:entry 20260925T224500Z-r4 author=agent kind=event mention=HKY4 model=k3 pane=6aaee940 turn=068046613259444ba9b13f19ad048b93/74501cccec2f4288befba1efc58c0835 -->
 mentioned in #HKY4 · 2026-09-25 · agent
+
+<!-- relay:entry 20260925T224500Z-r5 author=agent kind=event mention=6BY7 model=glm-5.3 pane=switchboard turn=7bdd4488cc34018b5f751db46ca2a292/d8484eb02fb44016ac77fde66d586976 -->
+mentioned in #6BY7 · 2026-09-25 · agent

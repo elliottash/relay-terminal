@@ -123,3 +123,17 @@ Executing the plan on the card: reproduce at HEAD, then harden the forced-agent 
 
 <!-- relay:entry 20260920T214816Z-7a author=agent kind=event model=kimi-k3 pane=b2bc87a9 turn=cd14e3411c104989b6ae99393507dcfd/87603178ea23404fb0df731d160403b3 -->
 - ✦ agent moved this card · Executing → Needs verification · Forced-agent decisions now judge explain_invalid like auto mode, and dispatch()'s shell branch gates the note on it; 44 router tests pass and the Xvfb live check shows prose quiet and gti status explained. · evidence docs/qa_evidence/2026-09-20-command-not-found-agent-prompts/ · implemented_by kimi/kimi-k3
+
+<!-- relay:entry 20260925T194043Z-0k author=agent kind=event model=k3 pane=f3ec7a75 turn=6d73ff44e1d94bfc9037568464418adb/db91409d11ad4ed0a9f2b4403d272f26 -->
+- ✦ agent claimed this card · Needs verification → Executing, implemented_by kimi/k3, verify defaulted from skill deliver, session f3ec7a75
+
+<!-- relay:entry 20260925T194043Z-rq author=agent kind=progress model=k3 pane=f3ec7a75 turn=6d73ff44e1d94bfc9037568464418adb/db91409d11ad4ed0a9f2b4403d272f26 pane_token=f3ec7a75-4a7e-4d77-a77f-e0216f601271 -->
+Claimed (f3ec7a75) · working on it from a terminal pane
+
+Recurrence: a multi-line paste whose @-mention attachment sits on its own line makes explain_invalid judge the @path segment as a meant command. Fixing in router.py + tests.
+
+<!-- relay:entry 20260925T194300Z-nq author=agent kind=evidence model=k3 pane=f3ec7a75 turn=6d73ff44e1d94bfc9037568464418adb/db91409d11ad4ed0a9f2b4403d272f26 -->
+Recurrence fixed and landed (2026-09-25, commits b0e017e4e676 + 75782d9da492). Owner's new case: the prompt "remove this diamond prefix in agent prompts. just start at the beginning of the line" pasted with the @mention attachment on its own line printed "command not found: remove" under the echo — while correctly being sent to the agent (relay.log 19:30:29, pane e5ab99a6). Cause: router.explain_invalid judged the "@/home/…png" segment a meant command (a name that is not a plain word, the ./run.sh reading), so the 2026-09-20 prose gate stood aside. Fix: explain_invalid now skips @path / @"path" tokens (new _is_attachment, backend/relay_core/router.py) — composer attachments the shell never sees. gti status and real slips on other segments still explain. Evidence + before/after repro: docs/qa_evidence/2026-09-25-at-mention-command-not-found/. Tests: tests/test_router.py 49 passed, incl. new test_an_at_mention_attachment_is_not_a_mistyped_command. Note: the running worker keeps the old router module until Relay restarts.
+
+<!-- relay:entry 20260925T194303Z-yc author=agent kind=event model=k3 pane=f3ec7a75 turn=6d73ff44e1d94bfc9037568464418adb/db91409d11ad4ed0a9f2b4403d272f26 -->
+- ✦ agent moved this card · Executing → Needs verification · @mention recurrence fixed in router.py, 49 router tests pass, evidence under docs/qa_evidence/2026-09-25-at-mention-command-not-found/ — back for verification with the original QA checklist. · evidence docs/qa_evidence/2026-09-25-at-mention-command-not-found/ · implemented_by kimi/k3

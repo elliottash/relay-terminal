@@ -42,11 +42,12 @@ Built and tested in isolated worktree `/tmp/relay-build-speed-243T` at base `31e
 - `python3 -m unittest tests.test_relay_build`
 - manual: docs/qa_evidence/2026-09-23-build-speed-243T/report.md
 
-### Check 2026-09-23 17:31
-- passed · ctest:editor — ctest -R editor passed for this revision on spark-dcc9, 2026-09-21T13:42:11Z
-- passed · ctest:panetabnavigation — ctest -R panetabnavigation passed for this revision on spark-dcc9, 2026-09-23T21:31:55Z
-- passed · ctest:windowstate — ctest -R windowstate passed for this revision on spark-dcc9, 2026-09-22T01:12:46Z
-- passed · ctest:panestate — ctest -R panestate passed for this revision on spark-dcc9, 2026-09-23T21:31:55Z
-- passed · ctest:boardpane — ctest -R boardpane passed for this revision on spark-dcc9, 2026-09-22T01:37:20Z
+### Check 2026-09-25 21:02
+- missing-evidence · ctest:editor — no run of ctest -R editor for this revision, from any host, and no attached result
+- missing-evidence · ctest:panetabnavigation — no run of ctest -R panetabnavigation for this revision, from any host, and no attached result
+- passed · ctest:windowstate — ctest -R windowstate passed for this revision on spark-dcc9, 2026-09-25T18:10:13Z
+- missing-evidence · ctest:panestate — no run of ctest -R panestate for this revision, from any host, and no attached result
+- passed · ctest:boardpane — ctest -R boardpane passed for this revision on spark-dcc9, 2026-09-26T01:01:55Z
 - not-applicable · manual:docs/qa_evidence/2026-09-23-build-speed-243T/report.md — manual evidence, recorded by hand: docs/qa_evidence/2026-09-23-build-speed-243T/report.md
+- warning · manual:docs/qa_evidence/2026-09-23-build-speed-243T/report.md — manual evidence docs/qa_evidence/2026-09-23-build-speed-243T/report.md is not there
 history: thread

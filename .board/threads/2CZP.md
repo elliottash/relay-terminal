@@ -48,3 +48,6 @@ Three things the detector's own test pass turned up in `loopdetect.py`, all fixe
 Proved against the real worker and the real app, not just unit tests: `configure` with nothing stored reports 500/2000; a turn of 30 distinct reads recites once at step 25 and finishes with no stop; a turn repeating one failing call shows `↻ read_file 3 times with the same result · asked to change approach (1/2)`, then `(2/2)`, then `· stopping this turn`, and ends on `‖ Stopped: repeating itself (…)` with `▸ Continue`. Evidence, both drivers and the logs are in `docs/qa_evidence/2026-09-20-uncap-turn-limits/`; targeted tests are 61 + 40 + 58 + 43 unittest and the `requests`/`panestate` ctest cases.
 
 **Ready for verification.** The QA checklist is on the card; the one thing worth a human eye is false positives on a genuinely long run of your own work — the nudge comes first and only the third trigger stops anything, but the thresholds are the judgement call here.
+
+<!-- relay:entry 20260925T215611Z-b8 author=agent kind=event mention=VQXA model=claude-opus-5-5 pane=6ccc5d01 turn=5853c4498cbd4b2698c94908a171eb83/52bc74a4b37c4c959151a72473cf315d -->
+mentioned in #VQXA · 2026-09-25 · agent

@@ -18,3 +18,6 @@ Claimed through the file fallback. Confirmed #PH9G intentionally leaves High sel
 
 <!-- relay:entry 20260923T030117Z-xa author=agent kind=event model=gpt-6-astra pane=8ba024bd turn=dec989d1df4642ed81f1f34f9b12a36f/b95563e260874320bf4c7a6c98540632 -->
 - ✦ agent updated this card · appended to `## Tests`
+<!-- relay:entry 20260925T225311Z-o5 author=agent kind=note -->
+Verification (rev 2db96643, clean worktree): PASSED — --plan-click-only exits 0 (all three plan-restore cases), tests.test_guest_handover OK, commit ef706804 an ancestor, README evidence present. Evidence: docs/qa_evidence/2026-09-25-verify-PBKR/. Moved needs-verification → needs-qa-llm.
+

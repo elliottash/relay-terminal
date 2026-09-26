@@ -64,3 +64,9 @@ Check · 1 missing-evidence, 3 not-applicable, 1 passed; 1 advisory finding(s). 
 
 <!-- relay:entry 20260924T224912Z-3m author=agent kind=evidence -->
 Check · 1 missing-evidence, 3 not-applicable, 1 passed; 1 advisory finding(s). The status is under `## Tests`; earlier checks are in this thread.
+
+<!-- relay:entry 20260925T151504Z-dh author=agent kind=evidence -->
+Check · 1 failed, 1 missing-evidence, 3 not-applicable; 1 advisory finding(s). The status is under `## Tests`; earlier checks are in this thread.
+
+<!-- relay:entry 20260925T151653Z-qm author=agent kind=evidence -->
+Check · 1 failed, 1 missing-evidence, 3 not-applicable; 1 advisory finding(s). The status is under `## Tests`; earlier checks are in this thread.

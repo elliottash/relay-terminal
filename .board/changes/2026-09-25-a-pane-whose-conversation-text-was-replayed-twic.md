@@ -9,7 +9,7 @@ session: f9aefae5-56c9-4534-9076-e62f84729cbc
 rank: zzzzzzzzzzzzzzzzzzzzzzzzzzzi
 created: '2026-09-25'
 source: guest Claude pane f9aefae5, 2026-09-25
-links: {plans: [], commits: [519ef299d2be, cf5b3f745068], evidence: [docs/qa_evidence/2026-09-25-BJJK-blank-pane/], related: [MTCS, 69BV, MDKN, 0TJ9], github: null}
+links: {plans: [], commits: [519ef299d2be, cf5b3f745068, 0653463cfa42], evidence: [docs/qa_evidence/2026-09-25-BJJK-blank-pane/], related: [MTCS, 69BV, MDKN, 0TJ9], github: null}
 ---
 # A pane whose conversation text was replayed twice draws blank: one prose block anchored in two places overlaps every block between
 

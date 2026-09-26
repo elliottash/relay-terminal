@@ -37,3 +37,9 @@ The prompt is built by `planning.execution_prompt` — reading that now.
 
 <!-- relay:entry 20260924T043411Z-py author=owner kind=event pane=switchboard -->
 - ✦ owner moved this card · Planning → Planned · the plan is on the card
+
+<!-- relay:entry 20260925T171727Z-4a author=agent kind=note model=claude-opus-5-5 pane=33661be1 turn=8dd1ecab2ef5499ca9b35c590b9d82a4/040f3b13420547d28c880609acf79731 -->
+Duplicate of #BCJF, which fixed it: `9f9584ae` updates the stale assertion to #BGRN's deliberate `Run the plan in <path>:` wording (`854c097d`; `tests/test_sessions.py:751` already matched via #JKG2 `f7df0d36`). A clean export now shows the prompt opening `Run the plan in …`, not `# Plan Restore Plan`. No merge tool is available to this guest session, so this card is left for the owner to close as a duplicate.
+
+<!-- relay:entry 20260925T180459Z-91 author=agent kind=event model=k3 pane=789000ea turn=092de508d8e544e4bc77246b0d158157/a40cc42f15b344e5800546a6bff7088f -->
+- ✦ agent moved this card · Planned → Dropped, dropped: duplicate of #BCJF · Duplicate of #BCJF, which fixed it in 9f9584ae; the delivering pane could not fold it (no merge tool then), and #GREM (a0041445b6d3) has since made board_merge_cards an ordinary pane tool so the next duplicate folds itself.

@@ -67,17 +67,21 @@ Follow-up `0dbcbfa5`: the account-row test now waits for its background catalog 
 `tests/test_roles.py`
 manual: docs/qa_evidence/2026-09-23-guest-accounts-M8S2/
 
-### Check 2026-09-23 19:18
-- passed · unittest:tests.test_guest_accounts — tests/test_guest_accounts.py passed for this revision on spark-dcc9, 2026-09-23T23:18:38Z
-- passed · unittest:tests.test_guest_harness_provider — tests/test_guest_harness_provider.py passed for this revision on spark-dcc9, 2026-09-23T23:18:12Z
+### Check 2026-09-25 20:08
+- missing-evidence · unittest:tests.test_guest_accounts — no run of tests/test_guest_accounts.py for this revision, from any host, and no attached result
+- missing-evidence · unittest:tests.test_guest_harness_provider — no run of tests/test_guest_harness_provider.py for this revision, from any host, and no attached result
 - passed · unittest:tests.test_keytest_guest — tests/test_keytest_guest.py passed for this revision on spark-dcc9, 2026-09-23T23:18:38Z
 - passed · unittest:tests.test_guest_sessions — tests/test_guest_sessions.py passed for this revision on spark-dcc9, 2026-09-23T23:18:12Z
-- passed · unittest:tests.test_model_switch — tests/test_model_switch.py passed for this revision on spark-dcc9, 2026-09-23T23:18:38Z
-- passed · unittest:tests.test_roles — tests/test_roles.py passed for this revision on spark-dcc9, 2026-09-23T23:18:12Z
+- missing-evidence · unittest:tests.test_model_switch — no run of tests/test_model_switch.py for this revision, from any host, and no attached result
+- passed · unittest:tests.test_roles — tests/test_roles.py passed for this revision on spark-dcc9, 2026-09-26T00:08:17Z
 - not-applicable · manual:docs/qa_evidence/2026-09-23-guest-accounts-M8S2/ — manual evidence, recorded by hand: docs/qa_evidence/2026-09-23-guest-accounts-M8S2/
-- notice · unittest:tests.test_guest_harness_provider — tests/test_guest_harness_provider.py: 1 of 71 are slow (test_guest_startup_and_changes_report_each_models_supported_efforts)
+- notice · unittest:tests.test_guest_accounts — tests/test_guest_accounts.py: 6 of 26 never ran here (test_the_relay_home_and_the_users_own_are_both_owned, test_claude_names_its_config_dir_and_the_sidecar_file, test_an_env_override_is_owned_and_the_default_stays_listed…)
+- notice · unittest:tests.test_guest_harness_provider — tests/test_guest_harness_provider.py: 12 of 83 never ran here (test_guest_quota_refusal_keeps_a_structured_reason, test_exhausted_guest_retries_on_another_login_without_spending_a_reset, test_guest_tool_before_quota_refusal_is_not_replayed…)
+- notice · unittest:tests.test_guest_harness_provider — tests/test_guest_harness_provider.py: 1 of 83 are slow (test_guest_startup_and_changes_report_each_models_supported_efforts)
+- notice · unittest:tests.test_guest_harness_provider — tests/test_guest_harness_provider.py: 3 of 83 are not in the project any more (test_a_model_picked_after_the_stand_in_replaces_it, test_the_helper_worker_follows_the_priority_list_instead_of_starting_a_guest, test_with_nothing_usable_it_configures_anyway_and_a_turn_says_why)
 - notice · unittest:tests.test_keytest_guest — tests/test_keytest_guest.py: 1 of 9 are slow (test_a_guest_that_never_answers_is_timed_out_and_closed)
-- notice · unittest:tests.test_model_switch — tests/test_model_switch.py: 1 of 26 are slow (test_the_next_request_goes_to_the_other_provider_with_its_history_converted)
-- notice · unittest:tests.test_roles — tests/test_roles.py: 6 of 83 are not in the project any more (test_a_high_override_does_not_move_planning, test_a_high_override_naming_only_a_provider_still_leaves_planning_on_main, test_a_high_override_without_a_key_still_leaves_planning_on_main…)
+- notice · unittest:tests.test_model_switch — tests/test_model_switch.py: 8 of 34 never ran here (test_a_queued_switch_lets_the_turn_finish_whole_and_lands_at_its_end, test_a_queued_switch_does_not_cut_a_retry_wait_short, test_steering_a_queued_switch_lands_it_at_the_next_step…)
+- notice · unittest:tests.test_model_switch — tests/test_model_switch.py: 1 of 34 are slow (test_the_next_request_goes_to_the_other_provider_with_its_history_converted)
+- notice · unittest:tests.test_roles — tests/test_roles.py: 10 of 93 are not in the project any more (test_a_later_set_model_clears_the_note, test_a_role_pick_still_wins_over_where_the_resolver_landed, test_nothing_usable_leaves_the_resolver_on_the_guest_and_says_so…)
+- warning · manual:docs/qa_evidence/2026-09-23-guest-accounts-M8S2/ — manual evidence docs/qa_evidence/2026-09-23-guest-accounts-M8S2/ is not there
 history: thread
-After `0dbcbfa5`: `PYTHONPATH=backend python3 -m unittest tests.test_guest_accounts tests.test_guest_harness_provider tests.test_keytest_guest tests.test_guest_sessions tests.test_model_switch` passed twice (235 tests each run, 2026-09-23). The `c3c4baaa` land gate built the merged Relay target. `tests_check` reports six listed test modules passed; its remaining notices concern slow or retired tests.

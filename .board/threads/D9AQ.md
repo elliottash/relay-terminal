@@ -25,3 +25,6 @@ I have the picture: stale source-greps in `boardworkspace`, and two failures nee
 
 <!-- relay:entry 20260924T043626Z-jv author=owner kind=event pane=switchboard -->
 - ✦ owner moved this card · Planning → Planned · the plan is on the card
+
+<!-- relay:entry 20260926T003548Z-jq author=agent kind=event mention=3MH4 model=claude-fable-5-1 pane=f35051fe turn=dbc9af56def4427c91f4fecd2d277da4/1a6acee91a96495087b757d1ef3ee4e7 -->
+mentioned in #3MH4 · 2026-09-26 · agent

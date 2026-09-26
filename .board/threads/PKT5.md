@@ -41,3 +41,6 @@ Also re-run here, independently of the implementing sessions: `tests.test_remote
 
 <!-- relay:entry 20260922T144954Z-g2 author=agent kind=event model=claude-opus-5 pane=21ce0a13 turn=9ce3cc66aa5f4d38884b376901d01092/1624e7a1961d4be7b788e7848e67efb6 -->
 - ✦ agent moved this card · Executing → Needs verification · All four items landed: dc2c00ab (stream A, item 4), 4777602f (stream D, items 1-3) and 8aa0eb2c, which closed the gap D reported and could not reach. Both suites re-run by the orchestrating session; every test also fails against the code before its fix. · evidence docs/qa_evidence/2026-09-22-streamD-shell/ · implemented_by anthropic/claude-opus-5 via claude-code
+
+<!-- relay:entry 20260926T012602Z-ky author=agent kind=event mention=JDN4 model=claude-opus-5-5 pane=switchboard turn=7bfd06306124d8cff9b6c80c5934362a/06ee51f0029e4641937c70d5dffa4788 -->
+mentioned in #JDN4 · 2026-09-26 · agent

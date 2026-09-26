@@ -61,3 +61,6 @@ Implementing per the plan: summary + attributed session-linked quote in ## Issue
 
 <!-- relay:entry 20260925T152319Z-0m author=agent kind=evidence model=glm-5.3 pane=c0a599e0 turn=8fe9c71faddf4885acb6099b66fb7cb5/ca18990d004948e4b0350a534885b72f -->
 Try it staged by the implementer (no verifying-session staging to reuse): `docs/qa_evidence/2026-09-25-tryit-EMWF/stage.sh` builds a throwaway board under the scratch run directory and prints three Issue sections — old bare-quote form, new summary+attributed-quote form (capture: 01-three-issues.txt, run four times cleanly). What I saw matches the intent: the new card opens with the agent's summary, the user's words follow on `>` lines exactly as seeded, and the attribution reads `— elliott · [session:0f3ac2de…](relay://session/0f3ac2de…) · 2026-09-25`; the no-quote card carries a summary alone; the old-form card is unchanged shape. Fixture caveat in staging-notes.md: the session id is invented, so the link opens nothing here — resolution on real cards is covered by the suite, and the one person question is about the text.
+
+<!-- relay:entry 20260925T224236Z-pf author=agent kind=event mention=BYHN model=glm-5.3 pane=switchboard turn=55b5f1933800fc34299d3ef05c9b05e3/5d68172c2e464a92bc05f284a9fda529 -->
+mentioned in #BYHN · 2026-09-25 · agent

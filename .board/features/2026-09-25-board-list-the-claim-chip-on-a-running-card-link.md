@@ -1,7 +1,7 @@
 ---
 id: YJ4A
 type: work
-status: executing
+status: needs-verification
 labels: [feature, board, panes]
 assignee: agent
 implemented_by: glm/glm-5.3
@@ -10,7 +10,7 @@ rank: zzzzzzzzzzzzzzzzzzzzzzzzzzzy
 created: '2026-09-25'
 verify: {artifact: code, primary: script, also: [], human: none, sign_off: none, effort: medium, stakes: rework, blast: capability}
 source: pane 1, 2026-09-25
-links: {plans: [], commits: [bbcf3b438801], evidence: [], related: [], github: null}
+links: {plans: [], commits: [bbcf3b438801, 0124d5b0ec3b], evidence: [docs/qa_evidence/2026-09-25-claim-chip-link/], related: [], github: null}
 ---
 # Board list: the claim chip on a running card links to its pane
 

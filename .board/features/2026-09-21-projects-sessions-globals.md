@@ -158,8 +158,8 @@ Evidence: [GUI screenshots, driver and notes](../../docs/qa_evidence/2026-09-21-
 - `tests/test_remote_wire.py`
 - manual: docs/qa_evidence/2026-09-21-projects-sessions-globals/
 
-### Check 2026-09-23 20:06
-- passed · unittest:tests.test_board_protocol.InitTests — tests/test_board_protocol.py::InitTests passed for this revision on spark-dcc9, 2026-09-23T19:03:05Z
+### Check 2026-09-25 21:01
+- missing-evidence · unittest:tests.test_board_protocol.InitTests — no run of tests/test_board_protocol.py::InitTests for this revision, from any host, and no attached result
 - not-applicable · manual:docs/qa_evidence/2026-09-21-projects-sessions-globals/07-switchboard-direct.png — manual evidence, recorded by hand: docs/qa_evidence/2026-09-21-projects-sessions-globals/07-switchboard-direct.png
 - missing-evidence · ctest:conversations — no run of ctest -R conversations for this revision, from any host, and no attached result
 - missing-evidence · ctest:projectspane — no run of ctest -R projectspane for this revision, from any host, and no attached result
@@ -167,15 +167,18 @@ Evidence: [GUI screenshots, driver and notes](../../docs/qa_evidence/2026-09-21-
 - missing-evidence · unittest:tests.test_keybindings — no run of tests/test_keybindings.py for this revision, from any host, and no attached result
 - missing-evidence · unittest:tests.test_globals_protocol — no run of tests/test_globals_protocol.py for this revision, from any host, and no attached result
 - missing-evidence · unittest:tests.test_memories — no run of tests/test_memories.py for this revision, from any host, and no attached result
-- passed · unittest:tests.test_agent_context — tests/test_agent_context.py passed for this revision on spark-dcc9, 2026-09-24T00:06:22Z
+- missing-evidence · unittest:tests.test_agent_context — no run of tests/test_agent_context.py for this revision, from any host, and no attached result
 - missing-evidence · unittest:tests.test_remote_wire — no run of tests/test_remote_wire.py for this revision, from any host, and no attached result
 - not-applicable · manual:docs/qa_evidence/2026-09-21-projects-sessions-globals/ — manual evidence, recorded by hand: docs/qa_evidence/2026-09-21-projects-sessions-globals/
+- warning · manual:docs/qa_evidence/2026-09-21-projects-sessions-globals/07-switchboard-direct.png — manual evidence docs/qa_evidence/2026-09-21-projects-sessions-globals/07-switchboard-direct.png is not there
 - notice · ctest:conversations — ctest -R conversations is slow: p95 3.18 s, p50 2.91 s
-- notice · unittest:tests.test_keybindings — tests/test_keybindings.py: 7 of 32 never ran here (test_qwas_defaults, test_plain_ctrl_is_left_to_the_editor_for_asdzxcp, test_f1_is_not_bound…)
+- notice · unittest:tests.test_keybindings — tests/test_keybindings.py: 6 of 32 never ran here (test_plain_ctrl_is_left_to_the_editor_for_asdzxcp, test_f1_is_not_bound, test_no_preset_has_a_conflict…)
 - notice · unittest:tests.test_globals_protocol — tests/test_globals_protocol.py: 1 of 11 never ran here (test_suggestions_have_their_own_list_accept_and_reject)
+- notice · unittest:tests.test_agent_context — tests/test_agent_context.py: 4 of 28 never ran here (test_the_tests_and_sharing_panes_have_briefs_of_their_own, test_the_guis_block_is_read_with_its_file_and_plugin, test_file_and_plugin_are_additive…)
 - notice · unittest:tests.test_remote_wire — tests/test_remote_wire.py: 48 of 48 never ran here (test_every_worker_event_is_classified, test_the_guest_channel_names_are_not_worker_events, test_no_event_is_both_forwarded_and_withheld…)
 - notice · unittest:tests.test_remote_wire — tests/test_remote_wire.py: 48 of 48 were edited since their history began, so it starts over (test_every_worker_event_is_classified, test_the_guest_channel_names_are_not_worker_events, test_no_event_is_both_forwarded_and_withheld…)
 - notice · unittest:tests.test_remote_wire — tests/test_remote_wire.py: 9 of 48 are skipped for good (test_the_client_resumes_under_the_hubs_own_stream_names, test_a_plain_link_parses, test_percent_encoded_separators_still_parse…)
+- warning · manual:docs/qa_evidence/2026-09-21-projects-sessions-globals/ — manual evidence docs/qa_evidence/2026-09-21-projects-sessions-globals/ is not there
 history: thread
 ## QA checklist
 - [ ] Open Projects, click Sessions: existing sessions load without typing or using a shortcut.

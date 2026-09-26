@@ -24,3 +24,6 @@ Claimed via file fallback following the user's “fix it”. Applying the delive
 
 <!-- relay:entry 20260922T173425Z-st author=agent kind=evidence model=gpt-6-astra pane=9fbe8b36 turn=712bf57bf0464b0fa92f3c3cb4dae4e8/9bf900d3f32349f89dc5ccbc7308fb9a -->
 Landed b352aa9efe34861e4e4e465e0418d63b6433ffff. Exact proposed tree built relay-engine-tests, and its isolated SessionTest run passed all 12 checks. Live Xvfb screenshot fixed.png confirms Done → blank row → ls → blank row → listing. New implementation awaits the normal separate verification lane.
+
+<!-- relay:entry 20260925T230513Z-f8 author=agent kind=event mention=JK3T model=claude-opus-5-5 pane=2741413a turn=630cb4fff2074ac8baf257b4f3f543e0/d077964570ab4e4db14a6a63c2399f96 -->
+mentioned in #JK3T · 2026-09-25 · agent

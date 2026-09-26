@@ -8,7 +8,7 @@ implemented_by: anthropic/claude-fable-5-1 via claude-code
 waiting_on: owner
 rank: zzzzzzzzzzzzzzzzy
 created: '2026-09-23'
-verify: {artifact: code, primary: person, also: [script], human: required, criteria: 'every slice card (#Y2BA #S976 #E8V1 #6FDD #2FQ9 #83YV #PBZ4 #R660 #3B1B) reaches needs-verification with its own evidence and the pane model still reads as one agent class across console/artifact/system panes; the owner closes the umbrella when the last slice closes', sign_off: none, effort: high, stakes: rework, blast: capability}
+verify: {artifact: code, primary: person, also: [script], human: required, criteria: 'every slice card (#Y2BA #S976 #E8V1 #6FDD #2FQ9 #83YV #PBZ4 #R660 #3B1B #6BY7) reaches needs-verification with its own evidence and the pane model still reads as one agent class across console/artifact/system panes; the owner closes the umbrella when the last slice closes', sign_off: none, effort: high, stakes: rework, blast: capability}
 source: Owner in a Relay pane, 2026-09-23; research in reports/Editable workspaces for Relay.md (commit d1249048)
 links: {plans: [], commits: [], evidence: [], related: [MDA7, 2GV0], github: null}
 ---
@@ -152,6 +152,7 @@ The six questions of the unified pane model (thread, 2026-09-25) were not answer
 7. **#PBZ4** `ArtifactContext` on file editors: docked agent, manifest actions and slash commands, buffer patches via `open_buffers`.
 8. **#R660** Linked chains shell → TeX → PDF on the group model, with #WYGY's bindings.
 9. **#3B1B** Docked agent on Tests and Sharing.
+10. **#6BY7** Card drawer in a terminal pane: the header chip toggles the card inline (body, `## Plan`, `## Tasks`, stage; read-only plus Done); the pane's conversation never becomes the thread (#CTRN). Reuses #Y2BA's `CardPane` content.
 
 **Risks.** Landing on top of the held cluster (the 2026-09-19 class of incident) — mitigated by the wave split and `--dry-run`. `src/RelayWindow.h` and `src/Pane.h` carry held hunks; wave-1 slices touch them only in named functions. Two workers per tab (a shell pane's own and the tab's console worker) stay as they are until pop-out proves whether they should merge.
 
@@ -159,7 +160,7 @@ The six questions of the unified pane model (thread, 2026-09-25) were not answer
 
 ## Tasks
 
-- [ ] Wave 1: cards as artifact panes (#Y2BA) — builder stopped; relaunch needs src/RelayWindowCore.cpp in its file list <!-- t:kc s=blocked card=Y2BA -->
+- [x] Wave 1: cards as artifact panes (#Y2BA) — landed, in needs-verification <!-- t:kc card=Y2BA -->
 - [ ] Wave 1: Program destination in the GUI (#S976) — steps 1/6/7 landed; 2–5 written in the tree, uncommitted <!-- t:wr s=in-progress card=S976 -->
 - [x] Wave 1: labels for the one pane model (#E8V1) — landed, in needs-verification <!-- t:fy card=E8V1 -->
 - [ ] Wave 1: manifest v2 and relay.shell (#6FDD) — landed except python/plugin.json + docs, held on Q1 <!-- t:nb s=in-progress card=6FDD -->
@@ -169,4 +170,5 @@ The six questions of the unified pane model (thread, 2026-09-25) were not answer
 - [ ] Wave 2: artifact panes on file editors (#PBZ4) <!-- t:vf card=PBZ4 blocked_by=ft,nb -->
 - [ ] Wave 2: linked chains shell → TeX → PDF (#R660) <!-- t:gf card=R660 blocked_by=ft,vf -->
 - [ ] Wave 2: docked agent on Tests and Sharing (#3B1B) <!-- t:mx card=3B1B blocked_by=ft -->
-- [ ] Program-level live verification and evidence <!-- t:7w blocked_by=yf,4q,vf,gf,mx -->
+- [ ] Program-level live verification and evidence <!-- t:7w blocked_by=yf,4q,vf,gf,mx,mj -->
+- [ ] Wave 2: card drawer in a terminal pane (#6BY7) <!-- t:mj card=6BY7 blocked_by=ft,kc -->
