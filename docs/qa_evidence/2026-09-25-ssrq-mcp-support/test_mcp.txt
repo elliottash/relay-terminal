@@ -1,0 +1,32 @@
+============================= test session starts ==============================
+platform linux -- Python 3.12.3, pytest-7.4.4, pluggy-1.4.0 -- /usr/bin/python3
+rootdir: ~/repos/relay-terminal
+plugins: anyio-4.15.1
+collecting ... collected 24 items
+
+tests/test_mcp.py::ConfigTests::test_a_project_file_cannot_declare_itself_trusted PASSED [  4%]
+tests/test_mcp.py::ConfigTests::test_bad_entries_are_problems_and_the_rest_load PASSED [  8%]
+tests/test_mcp.py::ConfigTests::test_cli_list_and_enable PASSED          [ 12%]
+tests/test_mcp.py::ConfigTests::test_global_and_project_merge_project_waits_for_enablement PASSED [ 16%]
+tests/test_mcp.py::ConfigTests::test_secrets_are_never_in_a_summary_or_an_error PASSED [ 20%]
+tests/test_mcp.py::ClientTests::test_a_crash_fails_the_call_readably_and_the_next_call_restarts PASSED [ 25%]
+tests/test_mcp.py::ClientTests::test_a_server_that_will_not_start_or_talks_nonsense PASSED [ 29%]
+tests/test_mcp.py::ClientTests::test_env_references_expand_from_the_worker PASSED [ 33%]
+tests/test_mcp.py::ClientTests::test_lists_across_pages_and_calls PASSED [ 37%]
+tests/test_mcp.py::ClientTests::test_slow_call_times_out_and_stop_cancels PASSED [ 41%]
+tests/test_mcp.py::ClientTests::test_worker_environment_does_not_reach_the_server PASSED [ 45%]
+tests/test_mcp.py::HttpTests::test_streamable_http_json_and_sse PASSED   [ 50%]
+tests/test_mcp.py::HttpTests::test_unreachable_url_fails_readably PASSED [ 54%]
+tests/test_mcp.py::AgentTests::test_a_dead_server_offers_nothing_and_says_why PASSED [ 58%]
+tests/test_mcp.py::AgentTests::test_a_late_server_joins_at_the_next_turn_boundary PASSED [ 62%]
+tests/test_mcp.py::AgentTests::test_a_trusted_servers_tools_load_and_run_without_an_ask PASSED [ 66%]
+tests/test_mcp.py::AgentTests::test_an_executor_that_cannot_ask_refuses_an_untrusted_call PASSED [ 70%]
+tests/test_mcp.py::AgentTests::test_an_untrusted_server_asks_naming_the_server_before_the_call PASSED [ 75%]
+tests/test_mcp.py::AgentTests::test_no_servers_changes_nothing PASSED    [ 79%]
+tests/test_mcp.py::GuestBridgeTests::test_guest_sees_and_calls_mcp_tools_under_the_same_trust PASSED [ 83%]
+tests/test_mcp.py::WorkerTests::test_a_trusted_server_is_loaded_and_called_in_a_real_turn PASSED [ 87%]
+tests/test_mcp.py::WorkerTests::test_an_untrusted_server_asks_in_a_real_turn_and_deny_refuses PASSED [ 91%]
+tests/test_mcp.py::ImportTests::test_cli_preview_writes_nothing PASSED   [ 95%]
+tests/test_mcp.py::ImportTests::test_preview_then_write_only_confirmed_rows PASSED [100%]
+
+============================== 24 passed in 4.52s ==============================
