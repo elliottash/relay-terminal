@@ -957,6 +957,16 @@ class TreeManager:
                         f"workspace {workspace_id} has unlanded work (tip "
                         f"{tip[:12]} is past base {row['base_sha'][:12]}); cleanup "
                         f"needs the queue receipt covering its current tip")
+                else:
+                    # The human checkout can lag behind the publication target. Check
+                    # reachability against that target, not HEAD as `branch -d` does.
+                    rc, _, _ = _git(["merge-base", "--is-ancestor", tip,
+                                     f"refs/heads/{self.repo['target']}"],
+                                    git_dir=self.repo["common_dir"])
+                    if rc != 0:
+                        raise TreeRefusedError(
+                            f"workspace {workspace_id}'s base is no longer reachable "
+                            f"from {self.repo['target']}; retaining it without a receipt")
                 self._check_no_pending_submissions(workspace_id)
                 rc, out, _ = _git(["status", "--porcelain", "--ignored"],
                                   cwd=row["path"])
@@ -968,16 +978,11 @@ class TreeManager:
                         f"deletes user data: {'; '.join(leftovers[:8])}")
                 _git_ok(["worktree", "remove", str(row["path"])],
                         git_dir=self.repo["common_dir"])
-                rc, _, err = _git(["branch", "-d", row["branch"]],
-                                  git_dir=self.repo["common_dir"])
-                if rc != 0:
-                    if receipt is None:
-                        raise TreeRefusedError(
-                            f"worktree removed but branch {row['branch']} is not "
-                            f"merged and there is no receipt to justify deleting "
-                            f"it: {err.strip()}")
-                    _git_ok(["branch", "-D", row["branch"]],
-                            git_dir=self.repo["common_dir"])
+                # Receipt or target reachability already proved the recorded tip safe.
+                # An expected-old value preserves a new commit if someone moved the
+                # released branch concurrently, instead of force-deleting their work.
+                _git_ok(["update-ref", "-d", f"refs/heads/{row['branch']}", tip],
+                        git_dir=self.repo["common_dir"])
                 conn.execute("UPDATE workspaces SET status = 'removed', updated_at = ?"
                              " WHERE id = ?", (_now(), row["id"]))
                 conn.commit()

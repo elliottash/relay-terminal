@@ -103,6 +103,31 @@ class ParallelLandingFlow(unittest.TestCase):
         self.assertIn("not submitted", (path / "shared.txt").read_text())
         self.assertEqual(sha, self.queue.receipt(job["id"])["submitted_sha"])
 
+    def test_unused_workspace_on_new_main_cleans_up_while_human_checkout_lags(self):
+        author, _, sha = self.author("advance-main", "line 2\n", "new baseline\n")
+        self.queue.submit(sha, request_id="advance-main", workspace_id=author["id"])
+        self.queue.process_one(self.verify)
+        self.assertEqual(self.base, self.git(self.repo, "rev-parse", "HEAD"))
+        unused = self.manager.create("unused-on-new-main")
+        self.assertEqual(sha, unused["base_sha"])
+        self.manager.release(unused["id"], owner="unused-on-new-main")
+        result = self.manager.remove(unused["id"])
+        self.assertEqual("removed", result["status"])
+        self.assertFalse(Path(unused["path"]).exists())
+        self.assertNotIn(unused["branch"], self.git(self.repo, "branch", "--format=%(refname:short)"))
+
+    def test_unused_workspace_is_retained_if_its_baseline_disappears_from_main(self):
+        author, _, sha = self.author("advance-before-rewind", "line 2\n", "new baseline\n")
+        self.queue.submit(sha, request_id="advance-before-rewind", workspace_id=author["id"])
+        self.queue.process_one(self.verify)
+        unused = self.manager.create("retained-baseline")
+        self.manager.release(unused["id"], owner="retained-baseline")
+        self.git(self.repo, "update-ref", "refs/heads/main", self.base, sha)
+        with self.assertRaisesRegex(trees.TreeRefusedError, "no longer reachable"):
+            self.manager.remove(unused["id"])
+        self.assertTrue(Path(unused["path"]).is_dir())
+        self.assertEqual(sha, self.git(self.repo, "rev-parse", unused["branch"]))
+
     def test_failed_gate_keeps_main_and_submission_recoverable(self):
         author, path, sha = self.author("broken", "line 2\n", "candidate\n")
         job = self.queue.submit(sha, request_id="broken-v1", workspace_id=author["id"])
