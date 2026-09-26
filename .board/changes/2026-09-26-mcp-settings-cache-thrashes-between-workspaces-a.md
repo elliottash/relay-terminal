@@ -10,7 +10,7 @@ rank: zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzi
 created: '2026-09-26'
 verify: {artifact: code, primary: script, also: [metric], human: none, criteria: Two-workspace regression test passes and MCP refresh does not recur while files remain unchanged., sign_off: none, effort: medium, stakes: rework, blast: capability}
 source: Relay pane, 2026-09-26
-links: {plans: [], commits: [ada6b6705a87], evidence: [], related: [BT7C, J0VY], github: null}
+links: {plans: [], commits: [1c82a9d63a7c], evidence: [], related: [BT7C, J0VY], github: null}
 ---
 # MCP settings cache thrashes between workspaces and floods GUI catalogs
 
@@ -47,7 +47,7 @@ The running Relay process repeatedly launches MCP configuration reads when two w
 The two-workspace regression passed with only two configuration reads for A → B → A. Changing A's `.mcp.json` caused a third read while B stayed cached.
 
 ## Execution Summary
-Committed `ada6b670` on the session workspace branch and submitted queue job `8c61ac2b8362e270`.
+Committed the per-workspace MCP cache fix as `1c82a9d63a7c3afa9b12755f12ec7c22330bada0` after syncing the workspace to target `f85a899e46d304b2a7e7faa3ed99e7ff671bd90c`. Submitted queue job `a7c200ee83b18037` (request `wpyz-mcp-cache-1c82a9d6`); publication is pending.
 
 `src/McpSettings.cpp` now keeps one MCP snapshot per workspace. The async completion callback, file stamp check, and explicit invalidation all address the matching workspace. This removes the A → B → A cache eviction loop while preserving refreshes when a project's `.mcp.json` or the global MCP file changes.
 
