@@ -29,6 +29,7 @@ The Relay preset after the move (action → keys; everything not listed is uncha
 | action id | keys | was |
 |---|---|---|
 | board.open | Ctrl+Shift+A | Ctrl+Shift+S |
+| background.open | Ctrl+Shift+B | — : opens the Board's Background tab |
 | review.open | Ctrl+Shift+R | — (Review queue; the key was freed from pane.restartShell) |
 | sessions.open (new) | Ctrl+Shift+S | — : "Sessions & Projects: sessions, projects, recently closed and globals" |
 | files.explorer | Ctrl+Shift+D | Ctrl+B, Ctrl+Shift+B (Ctrl+D is never bound: end-of-input) |
@@ -44,14 +45,14 @@ The Relay preset after the move (action → keys; everything not listed is uncha
 | globals.open | Ctrl+Shift+G | Restored as the direct Globals shortcut; plain Ctrl+G remains unbound |
 | closed.restore, pane.close, pane.splitRight | Ctrl+Shift+Z; Ctrl+W, Ctrl+Shift+W; Ctrl+E, Ctrl+Shift+E | unchanged |
 
-Freed in the Relay preset: Ctrl+Shift+Y, B, X and Ctrl+B. Ctrl+Shift+G opens Globals; Ctrl+G remains available to the editor or terminal program.
+Freed in the Relay preset: Ctrl+Shift+Y, X and Ctrl+B. Ctrl+Shift+B opens background work; Ctrl+Shift+G opens Globals.
 
 **What the move did to the other presets** (each change keeps the two rules above):
 
 | preset | action | now | why |
 |---|---|---|---|
 | warp | palette.open | — | Actions/help is Ctrl+?; Ctrl+Shift+P opens Projects |
-| warp | files.explorer | Ctrl+Shift+B | the Relay default Ctrl+Shift+D is Warp's split-right here |
+| warp | files.explorer | — | Ctrl+Shift+B now opens Board background work; Ctrl+Shift+D is Warp's split-right |
 | warp | input.toggle | Ctrl+I, Ctrl+Shift+I | was Ctrl+I alone, with Ctrl+Shift+I on `input.modeTerminal`: two actions on one letter breaks the pairing rule |
 | warp | input.modeTerminal | — | as above; the palette remains |
 | vscode | palette.open | — | Actions/help is Ctrl+?; Ctrl+Shift+P opens Projects |
@@ -86,7 +87,8 @@ Sources:
 | palette.open | — | Actions/help is Ctrl+?; Ctrl+Shift+P opens Projects |
 | board.open | Ctrl+Shift+A | Relay default (#QWAS) |
 | sessions.open | Ctrl+Shift+S | Relay default (#QWAS) |
-| files.explorer | Ctrl+Shift+B | **adapt.** The Relay default Ctrl+Shift+D is Warp's split-right, so the explorer keeps its old B here |
+| files.explorer | — | Ctrl+Shift+B opens Board background work; Ctrl+Shift+D remains Warp's split-right |
+| background.open | Ctrl+Shift+B | Relay default |
 | prompt.clear | Ctrl+Shift+Q, Ctrl+Q | Relay default (#CPRQ) |
 | terminal.native | F12 | none in Warp. Kept Relay default: an F-key still works inside programs |
 | terminal.interrupt | — | Warp uses contextual Ctrl+C (W4). Unbound: Ctrl+C already reaches the shell |
@@ -192,8 +194,8 @@ The JSON Relay ships is `Keymap::presetJson()` in `src/Keymap.h`; this copy mirr
     "pane.focusLeft": ["Ctrl+Alt+Left"], "pane.focusRight": ["Ctrl+Alt+Right"], "pane.focusUp": ["Ctrl+Alt+Up"], "pane.focusDown": ["Ctrl+Alt+Down"],
     "pane.moveLeft": [], "pane.moveRight": [], "pane.moveUp": [], "pane.moveDown": [],
     "pane.close": ["Ctrl+Shift+W"], "closed.restore": ["Ctrl+Alt+T"], "palette.open": [],
-    "files.explorer": ["Ctrl+Shift+B"], "agent.resume": ["Ctrl+Shift+Y"], "app.settings": ["Ctrl+Shift+O"],
-    "terminal.native": ["F12"], "terminal.interrupt": [],
+    "files.explorer": [], "agent.resume": ["Ctrl+Shift+Y"], "app.settings": ["Ctrl+Shift+O"],
+    "terminal.native": ["F12"], "terminal.interrupt": ["Alt+Esc"],
     "agent.newChat": [], "agent.stop": [], "agent.requests": [],
     "input.modeAuto": [], "input.modeTerminal": [], "input.modeAgent": [], "input.toggle": ["Ctrl+I", "Ctrl+Shift+I"],
     "keybindings.edit": ["Ctrl+,"], "keybindings.reload": []
@@ -205,8 +207,8 @@ The JSON Relay ships is `Keymap::presetJson()` in `src/Keymap.h`; this copy mirr
     "pane.focusLeft": ["Alt+Left"], "pane.focusRight": ["Alt+Right"], "pane.focusUp": ["Alt+Up"], "pane.focusDown": ["Alt+Down"],
     "pane.close": ["Ctrl+W"], "closed.restore": ["Ctrl+Shift+T"], "palette.open": [],
     "files.explorer": ["Ctrl+Shift+E"], "app.settings": ["Ctrl+Shift+O"],
-    "terminal.native": ["Ctrl+`", "F12"], "terminal.interrupt": [],
-    "agent.newChat": [], "agent.stop": ["Ctrl+Esc"], "agent.requests": [],
+    "terminal.native": ["Ctrl+`", "F12"], "terminal.interrupt": ["Alt+Esc"],
+    "agent.newChat": [], "agent.stop": [], "agent.requests": [],
     "input.modeAuto": [], "input.modeTerminal": [], "input.modeAgent": ["Ctrl+Shift+Alt+I"],
     "keybindings.edit": ["Ctrl+,"], "keybindings.reload": []
   },
@@ -217,7 +219,7 @@ The JSON Relay ships is `Keymap::presetJson()` in `src/Keymap.h`; this copy mirr
     "pane.focusLeft": ["Ctrl+Shift+Left"], "pane.focusRight": ["Ctrl+Shift+Right"], "pane.focusUp": ["Ctrl+Shift+Up"], "pane.focusDown": ["Ctrl+Shift+Down"],
     "pane.close": ["Ctrl+Shift+W"], "closed.restore": [], "palette.open": [],
     "app.settings": ["Ctrl+Shift+O"],
-    "terminal.native": ["F12"], "terminal.interrupt": [],
+    "terminal.native": ["F12"], "terminal.interrupt": ["Alt+Esc"],
     "agent.newChat": [], "agent.stop": [], "agent.requests": [],
     "input.modeAuto": [], "input.modeTerminal": [], "input.modeAgent": [],
     "keybindings.edit": ["Ctrl+Alt+,"], "keybindings.reload": []
@@ -249,7 +251,7 @@ drag onto a pane's bottom edge, and Actions, are the ways to dock a pane beneath
 - Options: `app.settings` is Ctrl+Shift+O in every preset (2026-09-18). The Relay default also keeps Ctrl+,; the Warp and VS Code presets give Ctrl+, to `keybindings.edit`, so there it is Ctrl+Shift+O alone.
 - Warp new conversation: its Ctrl+Shift+N is also Warp's new window (the docs list both on Linux), and its Ctrl+Shift+Enter is Relay's send-to-terminal key; new chat is unbound in the Warp preset (`/new`, or Actions). Warp keeps Ctrl+Shift+Y for `agent.resume`, its conversations key; the Relay default binds nothing there since #QWAS.
 - Warp Esc (back to terminal mode) is Relay's native-input key. Ctrl+Shift+I was used for it until #QWAS; it is now input.toggle's twin (pairing rule), and terminal mode has no key in this preset.
-- Warp split-right (Ctrl+Shift+D) against the explorer's new default: the explorer is Ctrl+Shift+B in the Warp preset.
+- Warp split-right (Ctrl+Shift+D) against the explorer's Relay default: the explorer is unbound in the Warp preset; Ctrl+Shift+B opens background work.
 - VS Code new chat (Ctrl+N) against window.new (Ctrl+Shift+N): the pairing rule leaves new chat unbound.
 - Warp and VS Code Ctrl+C (interrupt, stop agent) and VS Code Ctrl+L (new chat): left unbound so they still reach the shell.
 - VS Code F1: dropped.

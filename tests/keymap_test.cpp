@@ -120,6 +120,9 @@ private slots:
             keymap.setPreset(preset.first);
             QCOMPARE(keymap.actionForKey(QStringLiteral("Ctrl+Shift+R")), QStringLiteral("review.open"));
             QCOMPARE(keymap.actionForKey(QStringLiteral("Ctrl+Shift+S")), QStringLiteral("sessions.open"));
+            QCOMPARE(keymap.actionForKey(QStringLiteral("Ctrl+Shift+B")), QStringLiteral("background.open"));
+            if (preset.first == QStringLiteral("warp"))
+                QVERIFY(keymap.keysFor(QStringLiteral("files.explorer")).isEmpty());
             QCOMPARE(keymap.actionForKey(QStringLiteral("Ctrl+Shift+P")), QStringLiteral("projects.open"));
             QCOMPARE(keymap.actionForKey(QStringLiteral("Ctrl+?")), QStringLiteral("help.shortcuts"));
             QVERIFY(keymap.keysFor(QStringLiteral("palette.open")).isEmpty());

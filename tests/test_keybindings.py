@@ -357,6 +357,7 @@ class GuiDefaultsTests(unittest.TestCase):
         # #QWAS / #KYPR / #CPRQ / #SPSG: the Relay preset after the QWEASDZXC move.
         expected = {
             'board.open': ['Ctrl+Shift+A'],
+            'background.open': ['Ctrl+Shift+B'],
             'sessions.open': ['Ctrl+Shift+S'],
             'files.explorer': ['Ctrl+Shift+D'],
             'palette.open': [],
@@ -382,8 +383,11 @@ class GuiDefaultsTests(unittest.TestCase):
         self.assertRegex(source, r'add\("control\.human", "terminal", "[^"]*give it back to the Relay prompt[^"]*toggle')
         # Freed by the move, and left free in the Relay preset.
         owners = self.owners('relay')
-        for key in ('Ctrl+Shift+Y', 'Ctrl+Shift+B', 'Ctrl+Shift+R', 'Ctrl+Shift+X', 'Ctrl+B'):
+        for key in ('Ctrl+Shift+Y', 'Ctrl+Shift+X', 'Ctrl+B'):
             self.assertNotIn(key, owners, f'{key} was freed by #QWAS')
+        for preset in self.presets():
+            self.assertEqual(self.owners(preset).get('Ctrl+Shift+B'), ['background.open'])
+        self.assertEqual(self.effective('warp')['files.explorer'], [])
 
     def test_plain_ctrl_is_left_to_the_editor_for_asdzxcp(self):
         owners = self.owners('relay')
