@@ -639,13 +639,18 @@ class Queue:
 
     def _service_checkout(self, sha) -> Path:
         """Check `sha` out, detached, in the service-owned worktree and return its path. The
-        worktree belongs to the queue: it is reset hard and cleaned of untracked files between
-        jobs (ignored build output is left for an incremental verifier)."""
+        worktree belongs to the queue: it is reset hard and cleaned of every untracked file,
+        ignored ones included, between candidates — a disposable source; build caches live
+        outside it."""
         wt = self.service_dir / "candidate"
         if (wt / ".git").exists():
             reset = git(wt, "checkout", "--detach", "--force", sha, check=False)
             if reset.returncode == 0:
-                git(wt, "clean", "-fd", "-q")
+                # `-x`: ignored files go too. A previous gate's build output or generated
+                # module left in the source tree could make this candidate pass on bytes
+                # that are not in it; the verified tree is exactly the candidate's. A warm
+                # build belongs outside the source (B1 hands the gate RELAY_BUILD_DIR).
+                git(wt, "clean", "-fdx", "-q")
                 return wt
             # A damaged worktree is thrown away; it holds nothing of anyone's.
         if wt.exists():
@@ -1307,6 +1312,17 @@ def main(argv=None, *, out=None) -> int:
         out.write("\n")
 
     try:
+        if args.verb == "submit":
+            # Queue mode: the service records the author (session, card, workspace) and
+            # resolves the ref against the caller's tree (#AMQQ); None means plain queue.
+            from relay_core import integration_service
+            try:
+                routed = integration_service.cli_submit(args, cwd=args.repo or os.getcwd(), out=out)
+            except integration_service.ServiceError as exc:
+                emit({"error": str(exc), "kind": exc.__class__.__name__})
+                return exc.exit_code
+            if routed is not None:
+                return routed
         queue = Queue(args.repo or os.getcwd(), state_root=args.state_root,
                       repo_id=args.repo_id, target=args.target)
         if args.verb == "submit":

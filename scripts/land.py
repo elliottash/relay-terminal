@@ -112,7 +112,6 @@ import argparse
 import contextlib
 import datetime as _dt
 import difflib
-import fcntl
 import hashlib
 import json
 import os
@@ -123,6 +122,11 @@ import sys
 import tempfile
 import time
 from pathlib import Path
+
+try:
+    import fcntl
+except ImportError:          # Windows: land.py stays usable; the transition lock is POSIX
+    fcntl = None
 
 _USER_DIR = "claude-%d" % os.getuid() if hasattr(os, "getuid") else "claude"
 
@@ -1024,10 +1028,15 @@ def publication_marker(repo):
         data = json.loads(path.read_text(encoding="utf-8"))
     except FileNotFoundError:
         return {"mode": "legacy", "present": False}
-    except (OSError, ValueError):
-        return {"mode": "legacy", "present": True}
+    except (OSError, ValueError) as exc:
+        # Present but unreadable is not legacy: that would put this writer back after state
+        # corruption. Nothing publishes until someone looks at the file.
+        return {"mode": "invalid", "present": True,
+                "error": "%s is unreadable: %s" % (path, exc)}
     if not isinstance(data, dict) or data.get("mode") not in ("legacy", "queue", "paused"):
-        return {"mode": "legacy", "present": True}
+        return {"mode": "invalid", "present": True,
+                "error": "%s has no valid mode (%r)" % (
+                    path, data.get("mode") if isinstance(data, dict) else data)}
     return data
 
 
@@ -1036,6 +1045,10 @@ def require_legacy_publisher(repo, what, marker=None):
     mode = marker.get("mode", "legacy")
     if mode == "legacy":
         return marker
+    if mode == "invalid":
+        raise Fail("refusing to publish: %s. Fix or remove the marker (it is written whole by "
+                   "`relay-land activate/pause/rollback`); until then land.py %s moves nothing."
+                   % (marker.get("error") or "the publication marker is invalid", what), code=2)
     since = marker.get("since") or "?"
     if what == "board-sync":
         raise Fail("this repository has published through relay-land since %s (mode %s); "
@@ -1057,6 +1070,11 @@ def legacy_publication(repo, what):
     this to finish — that is the drain) and flips the marker before it lets go, so a swap that
     started in legacy mode never lands after the cutover."""
     require_legacy_publisher(repo, what)
+    if fcntl is None:
+        # No POSIX locks (Windows): legacy publication carries on as before; queue mode is
+        # Linux/POSIX first, and its marker has already been read above.
+        yield
+        return
     path = common_dir(repo) / PUBLICATION_LOCK
     fd = os.open(str(path), os.O_CREAT | os.O_RDWR, 0o644)
     try:

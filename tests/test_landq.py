@@ -682,6 +682,28 @@ class QueueCase(unittest.TestCase):
 
     # ------------------------------------------------------------ crashes and recovery
 
+    def test_ignored_files_from_a_previous_gate_do_not_survive_into_the_next_candidate(self):
+        """The verified tree is exactly the candidate's: a generated, ignored module a previous
+        gate left in the service checkout must not be there for the next candidate to import."""
+        q = self.queue()
+        base = plumb_commit(self.repo, self.base, {".gitignore": "ghost.py\n"}, "ignore ghost")
+        run_git(self.repo, "update-ref", "refs/heads/main", base)
+        first = plumb_commit(self.repo, base, {"a.txt": "first\n"})
+        second = plumb_commit(self.repo, base, {"b.txt": "second\n"})
+        seen = []
+
+        def gate(job, candidate, path):
+            ghost = Path(path) / "ghost.py"
+            seen.append(ghost.exists())
+            ghost.write_text("GENERATED = True\n")      # ignored: git status stays clean
+            return {"ok": True, "policy_hash": "p", "verified": True, "log": ""}
+
+        q.submit(first, request_id="r1")
+        q.submit(second, request_id="r2")
+        self.assertEqual(q.process_one(gate)["status"], "landed")
+        self.assertEqual(q.process_one(gate)["status"], "landed")
+        self.assertEqual(seen, [False, False], "the second candidate started from a clean source")
+
     def test_crash_before_update_ref_requeues_and_reverifies(self):
         q = self.queue()
         sha = plumb_commit(self.repo, self.base, {"a.txt": "x\n"})

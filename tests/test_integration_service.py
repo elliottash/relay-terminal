@@ -54,7 +54,7 @@ GATE = ('version = 1\n[project]\ntarget = "main"\n[workspace]\nexclude = [".boar
         'pathlib.Path(\'gate-env.txt\').write_text(os.environ.get(\'RELAY_JOBS\', \'\'))"]]\n'
         '[resources]\nmemory_bytes = %d\ndisk_bytes = %d\ncpus = 2\n'
         '[main]\ninstall = [["sh", "-c", "mkdir -p {dest}/bin && cp {source}/app.sh {dest}/bin/app '
-        '&& chmod +x {dest}/bin/app"]]\nexecutable = "bin/app"\n'
+        '&& chmod +x {dest}/bin/app && echo ${RELAY_JOBS:-unset} > {dest}/jobs"]]\nexecutable = "bin/app"\n'
         '[reconcile]\nenabled = true\nmax_attempts = 2\n' % (PY, 10 * MB, 10 * MB))
 
 CARD = """---
@@ -356,9 +356,11 @@ class FlowTests(ServiceCase):
             receipt = service.queue.receipt(job["id"])
             self.assertTrue(receipt["verified"])
             self.assertEqual(receipt["policy_hash"], service.accepted_policy()["hash"])
-        # The gate saw RELAY_JOBS from the granted cpus.
+        # The gate saw RELAY_JOBS from the granted cpus and the external build cache.
         log = Path(service.queue.verifications(bjob["id"])[-1]["log_path"]).read_text()
         self.assertIn("RELAY_JOBS=2", log)
+        self.assertIn("RELAY_BUILD_DIR=%s" % (self.cache / "integration" / service.repo_id / "gate-build"), log)
+        self.assertEqual((apath / "gate-env.txt").exists(), False, "the gate wrote in the candidate, not the workspace")
         # Handoffs: addressed to the author's session, with the card note written once.
         handoffs = service.handoffs()
         self.assertEqual({h["session"] for h in handoffs}, {"alice", "bob"})
@@ -386,6 +388,10 @@ class FlowTests(ServiceCase):
         exe = service.main_executable()
         self.assertEqual(subprocess.run([str(exe)], capture_output=True, text=True).stdout.strip(),
                          "relay-main-ok")
+        self.assertEqual((exe.parent.parent / "jobs").read_text().strip(), "2",
+                         "the main build ran under a host admission grant, RELAY_JOBS from its cpus")
+        released = [e for e in service.events() if e["kind"] == "main_release" and not e.get("error")]
+        self.assertEqual(released[-1]["granted_cpus"], 2.0)
         # tree_status / queue_status shapes for B2/B3.
         ts = service.tree_status(alice["workspace_id"])
         self.assertEqual(ts["board_root"], str(self.board))
@@ -418,7 +424,8 @@ class FlowTests(ServiceCase):
         self.assertEqual(handoff[0]["kind"], "failed")
         self.assertIn("target was not moved", handoff[0]["text"])
         self.assertIn("landq:%s:failed" % job["id"], (self.board / "threads" / "AA11.md").read_text())
-        self.assertEqual(service.main_status()["installed_sha"], None, "nothing was released")
+        self.assertEqual(service.main_status()["installed_sha"], self.base,
+                         "the runnable main follows the target, which did not move")
 
     def test_admission_shortfall_defers_the_job_instead_of_failing_it(self):
         service = self.service(admission=self.admission(limits={"cpus": 1.0, "memory_bytes": 100 * MB,
@@ -429,6 +436,45 @@ class FlowTests(ServiceCase):
         self.assertIn("admission", result["skipped"])
         self.assertEqual(service.queue.status(job["id"])["status"], "queued")
         self.assertEqual(self.tip(), self.base)
+
+    def test_unavailable_admission_fails_closed_for_gates_try_and_main(self):
+        service = self.service(admission=None, activate=False)
+        service._admission_failed = "host admission is POSIX/Linux first"   # what construction said
+        service.activate()
+        ws, path, sha = self.author(service, "w", "line 2\n", "no capacity accounting\n")
+        job = service.submit(workspace_id=ws["workspace_id"], request_id="w-1")
+        result = service.run_once()
+        self.assertIn("host admission is unavailable", result["skipped"])
+        self.assertEqual(service.queue.status(job["id"])["status"], "queued")
+        self.assertEqual(self.tip(), self.base)
+        with self.assertRaises(S.AdmissionUnavailable):
+            service.try_candidate(sha)
+        self.assertIn("admission", service.ensure_main()["error"])
+        self.assertIsNone(service.main_status()["installed_sha"])
+        # A metadata job needs no capacity and still lands.
+        service.queue.cancel(job["id"])
+        write_card(self.board, "CC33", "Meta", "No build needed.", "lands")
+        meta = service.submit_board_snapshot([".board/features/2026-09-25-cc33.md"], session="p")
+        self.assertEqual(service.run_once()["job"]["id"], meta["id"])
+        self.assertEqual(service.queue.status(meta["id"])["status"], "landed")
+
+    def test_a_tick_runs_under_the_shared_transition_lock(self):
+        service = self.service()
+        ws, path, sha = self.author(service, "w", "line 2\n", "waits for the transition\n")
+        job = service.submit(workspace_id=ws["workspace_id"], request_id="w-1")
+        with S.transition_lock(self.repo, exclusive=True):
+            result = service.run_once()
+            self.assertIn("transition in progress", result["skipped"])
+            self.assertEqual(service.queue.status(job["id"])["status"], "queued")
+            with self.assertRaises(S.ServiceBusy):
+                service.capture_policy(accept=False)
+        self.assertEqual(service.run_once()["job"]["status"], "landed")
+        # capture-policy holds the lock exclusively: a tick in flight blocks it, and vice versa.
+        with S.transition_lock(self.repo, exclusive=False):
+            with self.assertRaises(S.ServiceBusy):
+                service.capture_policy(accept=False)
+        captured = service.capture_policy(accept=False)
+        self.assertEqual(captured["hash"], service.accepted_policy()["hash"])
 
     def test_metadata_snapshot_lands_board_files_and_schema_failures_are_refused(self):
         service = self.service()
@@ -469,7 +515,31 @@ class FlowTests(ServiceCase):
         lost = service.submit_board_snapshot([str(thread)], session="pane-1")
         result = service.run_once()
         self.assertEqual(result["job"]["status"], "failed")
-        self.assertIn("lost entries", service.queue.status(lost["id"])["reason"])
+        self.assertIn("thread history changed", service.queue.status(lost["id"])["reason"])
+        # Editing an old entry's text is refused too; only additions after the old bytes pass.
+        landed_thread = git_out(self.repo, "show", "main:.board/threads/AA11.md") + "\n"
+        thread.write_text(landed_thread.replace("first\n", "first, edited\n"))
+        edited = service.submit_board_snapshot([str(thread)], session="pane-1")
+        self.assertEqual(service.run_once()["job"]["status"], "failed")
+        self.assertIn("thread history changed", service.queue.status(edited["id"])["reason"])
+        thread.write_text(landed_thread + "<!-- relay:entry 20260925T000009Z-zz author=owner kind=comment -->\nappended\n")
+        appended = service.submit_board_snapshot([str(thread)], session="pane-1")
+        self.assertEqual(service.run_once()["job"]["status"], "landed")
+        # Deleting a thread is refused; deleting or moving a card is policy and allowed.
+        thread.unlink()
+        gone = service.submit_board_snapshot([str(thread)], session="pane-1")
+        self.assertEqual(service.run_once()["job"]["status"], "failed")
+        self.assertIn("never deleted", service.queue.status(gone["id"])["reason"])
+        (self.board / "features" / "2026-09-25-cc33.md").unlink()
+        removed = service.submit_board_snapshot([".board/features/2026-09-25-cc33.md"], session="pane-1")
+        self.assertEqual(service.run_once()["job"]["status"], "landed")
+        # An unknown status is refused: the schema is the Board's status enum per type.
+        write_card(self.board, "EE55", "Odd status", "Status typo.", "refused")
+        odd = self.board / "features" / "2026-09-25-ee55.md"
+        odd.write_text(odd.read_text().replace("status: executing", "status: exeucting"))
+        typo = service.submit_board_snapshot([str(odd)], session="pane-1")
+        self.assertEqual(service.run_once()["job"]["status"], "failed")
+        self.assertIn("unknown work status 'exeucting'", service.queue.status(typo["id"])["reason"])
         # Code paths cannot ride in a Board snapshot at all.
         with self.assertRaises(S.ServiceUsageError):
             service.submit_board_snapshot(["shared.txt"], session="pane-1")
@@ -642,6 +712,56 @@ class LegacyGuardTests(ServiceCase):
         self.assertEqual(landed.returncode, 0, landed.stdout + landed.stderr)
         self.assertIn("legacy edit", git_out(self.repo, "show", "main:shared.txt"))
 
+    def test_a_corrupt_or_unknown_marker_fails_closed_in_both_publishers(self):
+        service = self.service(activate=False)
+        marker = self.repo / ".git" / S.MARKER_NAME
+        begun = self.land("begin", "s", "shared.txt")
+        self.assertEqual(begun.returncode, 0, begun.stderr)
+        (self.repo / "shared.txt").write_text(self.original.replace("line 1\n", "edit\n"))
+        for bad in ("{not json", json.dumps({"mode": "weird"}), json.dumps(["list"]), ""):
+            marker.write_text(bad)
+            mode, reason = service.mode_detail()
+            self.assertEqual(mode, "paused", bad)
+            self.assertTrue(reason, bad)
+            self.assertIn("mode paused", service.run_once()["skipped"])
+            refused = self.land("commit", "s", "-m", "x")
+            self.assertEqual(refused.returncode, 2, refused.stdout + refused.stderr)
+            self.assertIn("refusing to publish", refused.stderr)
+            self.assertEqual(self.tip(), self.base, "no ref moved")
+            synced = self.land("board-sync", "tok", "-m", "b", ".board/features/2026-09-25-aa11.md")
+            self.assertEqual(synced.returncode, 2, synced.stdout + synced.stderr)
+        if os.geteuid() != 0:
+            marker.write_text(json.dumps({"mode": "legacy"}))
+            os.chmod(str(marker), 0)
+            try:
+                self.assertEqual(service.mode(), "paused", "unreadable is not legacy")
+                refused = self.land("commit", "s", "-m", "x")
+                self.assertEqual(refused.returncode, 2, refused.stdout + refused.stderr)
+            finally:
+                os.chmod(str(marker), 0o644)
+        marker.unlink()
+        self.assertEqual(service.mode(), "legacy", "absent is legacy")
+        landed = self.land("commit", "s", "-m", "x")
+        self.assertEqual(landed.returncode, 0, landed.stdout + landed.stderr)
+
+    def test_land_py_loads_without_fcntl_and_legacy_publication_still_runs(self):
+        import importlib
+        with mock.patch.dict(sys.modules, {"fcntl": None}):
+            spec = importlib.util.spec_from_file_location("landpy_no_fcntl", self.LAND)
+            module = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(module)
+        self.assertIsNone(module.fcntl)
+        with module.legacy_publication(self.repo, "commit"):
+            pass                                  # legacy mode: no lock available, no refusal
+        (self.repo / ".git" / S.MARKER_NAME).write_text(json.dumps({"mode": "queue"}))
+        with self.assertRaises(module.Fail):
+            with module.legacy_publication(self.repo, "commit"):
+                pass
+        with mock.patch.object(S, "fcntl", None):
+            with self.assertRaises(S.ServiceError):
+                with S.transition_lock(self.repo):
+                    pass
+
     def test_activate_waits_for_a_legacy_publication_holding_the_shared_lock(self):
         service = self.service(activate=False)
         with S.transition_lock(self.repo, exclusive=False):
@@ -708,6 +828,71 @@ class CliTests(ServiceCase):
         code, usage = self.cli()
         self.assertEqual(code, 1)
         self.assertIn("activate", usage)
+
+    def test_submit_head_from_a_workspace_cwd_resolves_the_workspace_not_the_human_checkout(self):
+        code, _ = self.cli("activate")
+        self.assertEqual(code, 0)
+        code, ws = self.cli("workspace", "create", "tree-session", "--card", "BB22")
+        path = Path(ws["execution_cwd"])
+        (path / "shared.txt").write_text(self.original.replace("line 2\n", "from the tree\n"))
+        run_git(path, "commit", "-q", "-am", "tree commit")
+        tree_head = git_out(path, "rev-parse", "HEAD")
+        self.assertNotEqual(tree_head, git_out(self.repo, "rev-parse", "HEAD"), "human HEAD differs")
+        out = io.StringIO()
+        code = landq.main(["--repo", str(path), "--state-root", str(self.state), "submit", "HEAD",
+                           "--request-id", "tree-1"], out=out)
+        self.assertEqual(code, 0, out.getvalue())
+        job = json.loads(out.getvalue())
+        self.assertEqual(job["submitted_sha"], tree_head)
+        self.assertEqual(job["workspace_id"], ws["workspace_id"])
+        self.assertEqual(job["session"], "tree-session")
+        self.assertEqual(job["card"], "BB22")
+        service = self.service(activate=False)
+        self.assertEqual(service.queue_status(main=False)["jobs"][0]["session"], "tree-session")
+        # RELAY_WORKSPACE_ID from another tree is refused; a sha not on the branch is refused.
+        code, other = self.cli("workspace", "create", "other-session")
+        with mock.patch.dict(os.environ, {"RELAY_WORKSPACE_ID": other["workspace_id"]}):
+            code = landq.main(["--repo", str(path), "--state-root", str(self.state), "submit", "HEAD",
+                               "--request-id", "tree-2"], out=io.StringIO())
+        self.assertEqual(code, 1)
+        code = landq.main(["--repo", str(self.repo), "--state-root", str(self.state), "submit",
+                           self.base, "--request-id", "tree-3", "--workspace-id", ws["workspace_id"]],
+                          out=io.StringIO())
+        self.assertEqual(code, 0, "the base is on the workspace branch")
+        code = landq.main(["--repo", str(self.repo), "--state-root", str(self.state), "submit",
+                           git_out(Path(other["execution_cwd"]), "rev-parse", "HEAD"),
+                           "--request-id", "tree-4", "--workspace-id", ws["workspace_id"]],
+                          out=io.StringIO())
+        self.assertEqual(code, 0, "same commit as the base: still on the branch")
+        (Path(other["execution_cwd"]) / "shared.txt").write_text("other\n")
+        run_git(Path(other["execution_cwd"]), "commit", "-q", "-am", "other commit")
+        out = io.StringIO()
+        code = landq.main(["--repo", str(self.repo), "--state-root", str(self.state), "submit",
+                           git_out(Path(other["execution_cwd"]), "rev-parse", "HEAD"),
+                           "--request-id", "tree-5", "--workspace-id", ws["workspace_id"]], out=out)
+        self.assertEqual(code, 1, out.getvalue())
+        self.assertIn("not on workspace", out.getvalue())
+        # Legacy mode: the plain queue path, as before.
+        service.rollback()
+        code = landq.main(["--repo", str(self.repo), "--state-root", str(self.state), "submit",
+                           tree_head, "--request-id", "legacy-1"], out=io.StringIO())
+        self.assertEqual(code, 0)
+
+    def test_accepted_config_accessor_is_read_only(self):
+        self.assertIsNone(S.accepted_config(self.repo, state_root=self.state), "unregistered")
+        service = self.service(activate=False)
+        self.assertIsNone(S.accepted_config(self.repo, state_root=self.state), "not activated")
+        service.activate()
+        config = S.accepted_config(self.repo, state_root=self.state)
+        self.assertEqual(config["workspace"]["exclude"], [".board"])
+        self.assertEqual(projectconf.policy_hash(config), service.accepted_policy()["hash"])
+        ws = service.allocate_workspace("s")
+        self.assertEqual(S.accepted_config(ws["execution_cwd"], state_root=self.state), config,
+                         "from inside a workspace too")
+        # Changing the file on the target does not change what is accepted.
+        (self.repo / ".relay" / "project.toml").write_text(GATE.replace('exclude = [".board"]',
+                                                                        'exclude = [".board", "docs"]'))
+        self.assertEqual(S.accepted_config(self.repo, state_root=self.state)["workspace"]["exclude"], [".board"])
 
     def test_module_entry_point_and_installed_layout(self):
         env = {k: v for k, v in os.environ.items() if not k.startswith(("PYTHON", "GIT_"))}

@@ -67,7 +67,10 @@ CLI (`scripts/relay-land`, or `python -m relay_core.integration_service`): `run 
 from __future__ import annotations
 
 import argparse
-import fcntl
+try:
+    import fcntl
+except ImportError:                     # Windows: legacy land.py keeps working there; the
+    fcntl = None                        # queue's publication host is Linux/POSIX first.
 import json
 import os
 import re
@@ -94,6 +97,7 @@ TRY_REF = "refs/relay/try"
 DEFAULT_HUMAN_BRANCH = "human"
 DEFAULT_INTERVAL = 2.0
 DEFAULT_ADMISSION_TIMEOUT = 0.0
+DEFAULT_MAIN_RETRY_SECONDS = 60.0            # after a failed main build, before the next try
 LEGACY_IDLE_HOURS = 12                       # matches scripts/land.py IDLE_HOURS
 HOOK_VERSION = 2
 HOOK_REFUSAL = "commit through scripts/land.py; the shared index is never committed here"
@@ -186,6 +190,10 @@ class GateFailed(ServiceError):
     exit_code = 5
 
 
+class AdmissionUnavailable(ServiceBusy):
+    """Host admission cannot be constructed on this host: nothing that needs capacity runs."""
+
+
 # --------------------------------------------------------------------------- helpers
 
 def _now() -> str:
@@ -245,12 +253,22 @@ def publication_marker(repo) -> dict:
     except FileNotFoundError:
         return {"mode": "legacy", "path": str(path), "present": False}
     except (OSError, ValueError) as exc:
-        return {"mode": "legacy", "path": str(path), "present": True, "error": str(exc)}
+        # A marker that exists but cannot be read is not "legacy": that would put a second
+        # publisher back after state corruption. Nothing publishes until someone looks.
+        return {"mode": "invalid", "path": str(path), "present": True,
+                "error": "publication marker unreadable: %s" % exc}
     if not isinstance(data, dict) or data.get("mode") not in MODES:
-        return {"mode": "legacy", "path": str(path), "present": True,
-                "error": "marker has no valid mode"}
+        return {"mode": "invalid", "path": str(path), "present": True,
+                "error": "publication marker has no valid mode (%r)"
+                         % (data.get("mode") if isinstance(data, dict) else data)}
     data.update({"path": str(path), "present": True})
     return data
+
+
+def _require_posix_locks(what="the publication lock"):
+    if fcntl is None:
+        raise ServiceError("%s needs POSIX file locks; queue publication is Linux/POSIX first "
+                           "and this host gets a clear refusal, not an unlocked fallback" % what)
 
 
 @contextmanager
@@ -259,6 +277,7 @@ def transition_lock(repo, *, exclusive=False, timeout=0.0, what="publication"):
     swap; activate/pause/rollback hold it *exclusive*, which waits for every in-flight legacy
     landing to finish (that is the drain) and keeps new ones out until the marker says what
     the mode is now. `timeout` seconds of waiting, then ServiceBusy."""
+    _require_posix_locks("the %s lock" % what)
     path = common_dir(repo) / LOCK_NAME
     fd = os.open(str(path), os.O_CREAT | os.O_RDWR, 0o644)
     deadline = time.monotonic() + float(timeout)
@@ -450,7 +469,7 @@ class IntegrationService:
 
     def __init__(self, repo, *, state_root=None, cache_root=None, admission=None,
                  reconciler=None, wake=None, admission_timeout=DEFAULT_ADMISSION_TIMEOUT,
-                 land_root=None, register=True):
+                 land_root=None, register=True, main_retry_seconds=DEFAULT_MAIN_RETRY_SECONDS):
         self.repo = Path(repo).resolve()
         if git(self.repo, "rev-parse", "--git-dir", check=False).returncode != 0:
             raise ServiceUsageError("%s is not a git repository" % self.repo)
@@ -487,6 +506,8 @@ class IntegrationService:
         self._release = None
         self._grant = None
         self._updater = None
+        self._main_retry_after = 0.0
+        self.main_retry_seconds = float(main_retry_seconds)
         self._migrate()
 
     # ----------------------------------------------------------------- storage
@@ -564,7 +585,11 @@ class IntegrationService:
 
     @property
     def admission(self):
-        if self._admission is None and self._admission_failed is None:
+        """Host admission, constructed once; None (with `_admission_failed` saying why) when
+        this host cannot account for capacity — and then nothing that needs capacity runs."""
+        if self._admission_failed is not None:
+            return None
+        if self._admission is None:
             from . import integration_slots
             try:
                 self._admission = integration_slots.HostAdmission(state_root=self.state_root)
@@ -597,18 +622,23 @@ class IntegrationService:
             self.target = str(record.get("target") or self.target)
         return self.registry
 
-    def mode(self) -> str:
-        """The publication mode in force: the registry's, which activation keeps equal to the
-        marker's. When they disagree, the *stricter* one wins (a marker saying queue while the
-        registry says legacy means a legacy publisher already refuses; nothing should publish
-        until they agree again)."""
+    def mode_detail(self) -> tuple[str, str]:
+        """(mode, reason). The mode in force is the registry's, which activation keeps equal to
+        the marker's. When they disagree, or the marker is present but unreadable or unknown,
+        nothing publishes: `paused`, with the reason — never `legacy`, which would put a
+        second writer back after state corruption."""
         registry = str(self.registry_record().get("mode") or "legacy")
-        marker = publication_marker(self.repo).get("mode", "legacy")
-        if registry == marker:
-            return registry
-        if "queue" in (registry, marker):
-            return "paused"
-        return "paused" if "paused" in (registry, marker) else "legacy"
+        marker = publication_marker(self.repo)
+        marked = marker.get("mode", "legacy")
+        if marked == "invalid":
+            return "paused", marker.get("error") or "publication marker invalid"
+        if registry == marked:
+            return registry, ""
+        return "paused", ("registry says %s but %s says %s; run `relay-land activate` or "
+                          "`relay-land rollback` to make them agree" % (registry, MARKER_NAME, marked))
+
+    def mode(self) -> str:
+        return self.mode_detail()[0]
 
     def target_sha(self) -> str | None:
         proc = git(self.repo, "rev-parse", "--verify", "--quiet", "refs/heads/%s" % self.target,
@@ -657,10 +687,15 @@ class IntegrationService:
                 "target_sha": row["target_sha"], "captured_at": row["captured_at"],
                 "source": row["source"]}
 
-    def capture_policy(self, *, revision=None, accept=True) -> dict:
+    def capture_policy(self, *, revision=None, accept=True, wait_seconds=0.0) -> dict:
         """Load `.relay/project.toml` at `revision` (default: the target tip), normalize it,
         store it, and — with `accept` — make it the policy in force. Explicit: a candidate that
-        changes the config still runs the old policy until someone runs this."""
+        changes the config still runs the old policy until someone runs this. Takes the
+        transition lock exclusively, so no gate is mid-flight under the policy being replaced."""
+        with transition_lock(self.repo, exclusive=True, timeout=wait_seconds, what="transition"):
+            return self._capture_policy_locked(revision=revision, accept=accept)
+
+    def _capture_policy_locked(self, *, revision=None, accept=True) -> dict:
         revision = revision or self.target_sha()
         if not revision:
             raise TransitionRefused("target branch %s does not exist" % self.target)
@@ -900,17 +935,26 @@ class IntegrationService:
         cfg, hash_ = accepted["config"], accepted["hash"]
         if job["kind"] == "metadata":
             return self._verify_metadata(job, candidate_sha, candidate_path, hash_)
-        env = {}
+        env = self.gate_env()
         grant = self._grant
         if grant is not None and getattr(grant, "cpus", None):
             env["RELAY_JOBS"] = str(max(1, int(grant.cpus)))
         result = projectconf.run_gate(cfg, candidate_path, selected_tests=job.get("selected_tests")
                                       or (), env=env)
         result["policy_hash"] = hash_
-        if env:
-            result["log"] = "RELAY_JOBS=%s (host admission granted %s cpu)\n%s" % (
-                env["RELAY_JOBS"], grant.cpus, result.get("log", ""))
+        result["log"] = "%s\n%s" % (" ".join("%s=%s" % kv for kv in sorted(env.items())),
+                                    result.get("log", ""))
         return result
+
+    def gate_env(self) -> dict:
+        """What a gate gets beyond the scrubbed environment: the *external* build cache. The
+        candidate source checkout is disposable and freshly clean (ignored files included, so a
+        previous gate's build output or generated module cannot make this one pass); a project
+        that wants a warm build puts it under `RELAY_BUILD_DIR` (alias `VERIFY_BUILD`), which
+        lives outside the source tree and is bounded by the cache root."""
+        build = self.cache_root / "integration" / self.repo_id / "gate-build"
+        build.mkdir(parents=True, exist_ok=True)
+        return {"RELAY_BUILD_DIR": str(build), "VERIFY_BUILD": str(build)}
 
     def _verify_metadata(self, job, candidate_sha, candidate_path, policy_hash) -> dict:
         """Schema checks for a Board snapshot: every changed card parses with an id, a known
@@ -927,36 +971,39 @@ class IntegrationService:
             if not line.strip():
                 continue
             status, _, path = line.partition("\t")
-            if status.startswith("D"):
-                checked.append("%s: deleted (allowed)" % path)
-                continue
             rel = path[len(board_rel) + 1:] if path.startswith(board_rel + "/") else path
+            is_thread = rel.startswith("threads/") or "/threads/" in rel
+            if status.startswith("D"):
+                if is_thread:
+                    problems.append("%s: a thread is never deleted (threads are append-only)" % path)
+                else:
+                    checked.append("%s: deleted (allowed: cards move and close by policy)" % path)
+                continue
             if not path.endswith(".md"):
                 checked.append("%s: not a card or thread" % path)
                 continue
-            proc = git(self.repo, "show", "%s:%s" % (candidate_sha, path), check=False)
-            if proc.returncode != 0:
+            blob = git(self.repo, "show", "%s:%s" % (candidate_sha, path), check=False)
+            if blob.returncode != 0:
                 problems.append("%s: unreadable in the candidate" % path)
                 continue
-            text = proc.stdout
-            if rel.startswith("threads/"):
+            text = blob.stdout
+            if is_thread:
                 try:
-                    new_ids = [e.entry_id for e in board_mod.parse_thread(text)]
+                    entries = board_mod.parse_thread(text)
                 except board_mod.BoardError as exc:
                     problems.append("%s: thread does not parse: %s" % (path, exc))
                     continue
                 old = git(self.repo, "show", "%s:%s" % (tip, path), check=False)
                 if old.returncode == 0:
-                    try:
-                        old_ids = [e.entry_id for e in board_mod.parse_thread(old.stdout)]
-                    except board_mod.BoardError:
-                        old_ids = []
-                    lost = [i for i in old_ids if i not in new_ids]
-                    if lost:
-                        problems.append("%s: thread lost entries %s (threads only grow)"
-                                        % (path, ", ".join(lost[:5])))
+                    # Append-only means the old bytes are a prefix of the new bytes: every
+                    # entry the target had, unchanged, in the same order, with additions only
+                    # after them. Editing an old entry's text is refused, not just dropping it.
+                    before = old.stdout
+                    if not text.startswith(before):
+                        problems.append("%s: thread history changed (old entries must stay "
+                                        "byte-for-byte, in order; only additions at the end)" % path)
                         continue
-                checked.append("%s: thread ok (%d entries)" % (path, len(new_ids)))
+                checked.append("%s: thread ok (%d entries)" % (path, len(entries)))
                 continue
             parts = rel.split("/")
             if parts[0] == ".private":
@@ -972,12 +1019,16 @@ class IntegrationService:
             if not card.front:
                 checked.append("%s: markdown without front matter (not a card)" % path)
                 continue
+            known = board_mod.STATUS_FOLDER.get(card.type, {})
             if not card.id:
                 problems.append("%s: card has no id" % path)
             elif card.type not in board_mod.CARD_TYPES:
                 problems.append("%s: unknown card type %r" % (path, card.type))
             elif not card.status:
                 problems.append("%s: card has no status" % path)
+            elif card.status not in known:
+                problems.append("%s: unknown %s status %r (known: %s)"
+                                % (path, card.type, card.status, ", ".join(sorted(known))))
             else:
                 checked.append("%s: card #%s ok" % (path, card.id))
         log = "metadata job %s: %d path(s) changed\n%s\n" % (
@@ -1100,16 +1151,22 @@ class IntegrationService:
                 return job
         return None
 
+    def _require_admission(self, what):
+        """Host admission, or a refusal with the reason it is unavailable. A code gate or a
+        main build never runs with capacity unaccounted for."""
+        adm = self.admission
+        if adm is None:
+            raise AdmissionUnavailable("%s refused: host admission is unavailable (%s)"
+                                       % (what, self._admission_failed or "not constructed"))
+        return adm
+
     @contextmanager
     def _admitted(self, job):
-        """Host admission for one code job, or nothing for a metadata job / no admission."""
+        """Host admission for one code job; a metadata job (schema checks only) needs none."""
         if job["kind"] != "code":
             yield None
             return
-        adm = self.admission
-        if adm is None:
-            yield None
-            return
+        adm = self._require_admission("the gate for job %s" % job["id"])
         res = self._require_policy()["config"]["resources"]
         grant = adm.acquire(self.repo_id, job["id"], memory_bytes=int(res["memory_bytes"]),
                             disk_bytes=int(res["disk_bytes"]), cpus=float(res["cpus"]),
@@ -1123,10 +1180,26 @@ class IntegrationService:
 
     def run_once(self, *, main=True) -> dict:
         """One tick: pick the oldest job (under admission), publish it if its gate passes,
-        request the runnable-main update, deliver handoffs. Returns what happened."""
-        mode = self.mode()
+        request the runnable-main update, deliver handoffs. Returns what happened.
+
+        The mode and policy check, the gate and the publication happen under the *shared*
+        transition lock: `activate`/`pause`/`rollback`/`capture-policy` take it exclusively,
+        so a transition drains this tick and no tick starts under a mode or policy that is
+        being replaced (lock order everywhere: transition, then publisher)."""
+        try:
+            with transition_lock(self.repo, exclusive=False, timeout=0, what="transition"):
+                return self._run_once_locked(main=main)
+        except ServiceBusy as exc:
+            if isinstance(exc, AdmissionUnavailable):
+                raise
+            return {"skipped": "transition in progress: %s" % exc,
+                    "delivered": self.deliver_handoffs()}
+
+    def _run_once_locked(self, *, main=True) -> dict:
+        mode, reason = self.mode_detail()
         if mode != "queue":
-            return {"skipped": "mode %s" % mode, "delivered": self.deliver_handoffs()}
+            return {"skipped": "mode %s%s" % (mode, ": %s" % reason if reason else ""),
+                    "delivered": self.deliver_handoffs()}
         accepted = self.accepted_policy()
         if accepted is None:
             return {"skipped": "no accepted policy", "delivered": self.deliver_handoffs()}
@@ -1154,6 +1227,8 @@ class IntegrationService:
         except integration_slots.AdmissionError as exc:
             return {"skipped": "admission: %s" % exc, "job_id": job["id"],
                     "delivered": self.deliver_handoffs()}
+        except AdmissionUnavailable as exc:
+            return {"skipped": str(exc), "job_id": job["id"], "delivered": self.deliver_handoffs()}
         out = {"job": self._job_row(result) if result else None,
                "granted_cpus": getattr(grant, "cpus", None) if grant else None}
         if result and result["status"] == "landed" and result.get("published_sha"):
@@ -1162,6 +1237,8 @@ class IntegrationService:
                                                  "sha": result["published_sha"], "job_id": result["id"]})
             if main:
                 out["main_release"] = self.request_main_update(result["published_sha"], wait=True)
+        elif main and job["kind"] == "code" and self.main_wanted() and self._updater is None:
+            out["main_release"] = self.ensure_main()
         out["delivered"] = self.deliver_handoffs()
         return out
 
@@ -1170,6 +1247,7 @@ class IntegrationService:
         """The daemon: one per repository (`daemon.lock`), ticking every `interval` seconds
         until `stop` (a threading.Event) is set, SIGTERM/SIGINT arrives, or `max_ticks` ran.
         Main releases build on a background updater so publication never waits for a build."""
+        _require_posix_locks("the run loop's daemon lock")
         stop = stop or threading.Event()
         log = log or (lambda line: None)
         fd = os.open(str(self.daemon_lock_path), os.O_CREAT | os.O_RDWR, 0o600)
@@ -1198,9 +1276,15 @@ class IntegrationService:
                     try:
                         result = self.run_once(main=False)
                         job = result.get("job")
-                        if job and job["status"] == "landed" and updater:
+                        if job and job["status"] == "landed":
                             landed += 1
-                            updater.request(job["published_sha"])
+                        if updater:
+                            # Startup, a request lost to a crash, a failed build: the runnable
+                            # main follows the target whether or not this tick landed anything.
+                            wanted = self.ensure_main(updater=updater)
+                            if wanted.get("requested") and not wanted.get("in_progress") \
+                                    and not wanted.get("deferred"):
+                                log("main release requested for %s" % wanted["requested"][:12])
                         if job:
                             log("job %s: %s%s" % (job["id"], job["status"],
                                                   " (%s)" % job["reason"] if job.get("reason") else ""))
@@ -1403,20 +1487,103 @@ class IntegrationService:
         return self._update_main(sha)
 
     def _update_main(self, sha) -> dict:
+        """Build and install `sha` as the runnable main: under host admission at `try`
+        priority (a landing outranks a release build), in a child process whose environment
+        carries `RELAY_JOBS` from the grant — the release module reads the environment of the
+        process it runs in, and this one must not mutate its own. A failure is recorded with a
+        retry time so the loop tries again later without waiting for a new landing."""
+        from . import integration_slots
+        accepted = self._require_policy()
+        res = accepted["config"]["resources"]
+        try:
+            adm = self._require_admission("the main release build")
+            grant = adm.acquire(self.repo_id, "main-%s" % sha[:12], memory_bytes=int(res["memory_bytes"]),
+                                disk_bytes=int(res["disk_bytes"]), cpus=float(res["cpus"]),
+                                priority="try", timeout=self.admission_timeout)
+        except (integration_slots.AdmissionError, AdmissionUnavailable) as exc:
+            return self._main_failed(sha, "admission: %s" % exc)
+        try:
+            env = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
+            env["RELAY_JOBS"] = str(max(1, int(grant.cpus)))
+            env["PYTHONPATH"] = os.pathsep.join(
+                p for p in (str(Path(__file__).resolve().parents[1]), env.get("PYTHONPATH", "")) if p)
+            argv = [sys.executable, "-m", "relay_core.integration_service", "--repo",
+                    str(self.project_root), "--state-root", str(self.state_root),
+                    "--cache-root", str(self.cache_root), "main-update", sha]
+            timeout = float(accepted["config"]["main"].get("timeout_seconds") or 3600) * 4 + 120
+            proc = subprocess.run(argv, env=env, cwd=str(self.project_root), capture_output=True,
+                                  text=True, timeout=timeout)
+        except (OSError, subprocess.SubprocessError) as exc:
+            return self._main_failed(sha, "%s: %s" % (exc.__class__.__name__, exc))
+        finally:
+            grant.release()
+        try:
+            record = json.loads(proc.stdout) if proc.stdout.strip() else {}
+        except ValueError:
+            record = {}
+        if proc.returncode != 0 or not isinstance(record, dict) or record.get("error"):
+            reason = (record.get("error") if isinstance(record, dict) else None) or \
+                (proc.stderr.strip().splitlines() or ["exit %d" % proc.returncode])[-1]
+            return self._main_failed(sha, reason)
+        self._main_retry_after = 0.0
+        record["granted_cpus"] = grant.cpus
+        with self._tx() as conn:
+            self._event(conn, "main_release", {"repo_id": self.repo_id, "sha": record.get("sha"),
+                                               "changed": record.get("changed"),
+                                               "duration_seconds": record.get("duration_seconds"),
+                                               "granted_cpus": grant.cpus})
+        return record
+
+    def _main_failed(self, sha, reason) -> dict:
+        self._main_retry_after = time.time() + self.main_retry_seconds
+        with self._tx() as conn:
+            self._event(conn, "main_release", {"repo_id": self.repo_id, "sha": sha,
+                                               "error": str(reason)[:500]})
+            self._set_setting(conn, "main_last_error", json.dumps(
+                {"sha": sha, "error": str(reason)[:500], "at": _now()}))
+        return {"sha": sha, "error": str(reason)}
+
+    def main_update_inprocess(self, sha) -> dict:
+        """What the `main-update` child runs: the release module on the accepted config. The
+        parent holds the admission grant; this process carries its `RELAY_JOBS`."""
         from . import main_release
         accepted = self._require_policy()
         try:
             record = self.release.update(sha, accepted["config"])
         except main_release.MainReleaseError as exc:
-            with self._tx() as conn:
-                self._event(conn, "main_release", {"repo_id": self.repo_id, "sha": sha,
-                                                   "error": str(exc)[:500]})
             return {"sha": sha, "error": str(exc)}
-        with self._tx() as conn:
-            self._event(conn, "main_release", {"repo_id": self.repo_id, "sha": record.get("sha"),
-                                               "changed": record.get("changed"),
-                                               "duration_seconds": record.get("duration_seconds")})
+        record.pop("status", None)
         return record
+
+    def main_wanted(self) -> str | None:
+        """The sha the runnable main should be at: the target tip, when the project is in
+        queue mode with an accepted policy and a main contract — else None."""
+        if self.mode() != "queue" or self.accepted_policy() is None or not self.main_configured():
+            return None
+        return self.target_sha()
+
+    def ensure_main(self, *, updater=None) -> dict:
+        """Ask for the runnable main to catch up with the target: at daemon start (so an idle
+        queue still gets a main), after a landing whose request was lost to a crash, and after a
+        failed build once `main_retry_seconds` have passed. Returns what it did."""
+        wanted = self.main_wanted()
+        if wanted is None:
+            return {"skipped": "no runnable-main contract in force"}
+        status = self.release.status()
+        installed = (status.get("current") or {}).get("sha")
+        if installed == wanted:
+            return {"installed": wanted, "up_to_date": True}
+        if updater is not None:
+            state = updater.state()
+            if wanted in (state.get("building_sha"), state.get("pending_sha")):
+                return {"requested": wanted, "in_progress": True}
+        if time.time() < self._main_retry_after:
+            return {"requested": wanted, "deferred": "retry after a failed build",
+                    "retry_in_seconds": round(self._main_retry_after - time.time(), 1)}
+        if updater is not None:
+            updater.request(wanted)
+            return {"requested": wanted, "coalesced": True}
+        return self._update_main(wanted)
 
     def main_status(self) -> dict:
         """The channel's status plus `installed_sha`, `target_sha` and `lag_commits` behind the
@@ -1442,9 +1609,12 @@ class IntegrationService:
         accepted = self.accepted_policy()
         if installed and accepted:
             executable = str(Path(current.get("path", "")) / accepted["config"]["main"]["executable"])
+        last_error = self._setting("main_last_error")
         status.update({"configured": True, "installed_sha": installed, "target_sha": target,
                        "lag_commits": lag, "executable": executable,
-                       "updater": self._updater.state() if self._updater else None})
+                       "updater": self._updater.state() if self._updater else None,
+                       "last_failure": json.loads(last_error) if last_error else None,
+                       "retry_in_seconds": round(max(0.0, self._main_retry_after - time.time()), 1)})
         return status
 
     def main_executable(self) -> Path:
@@ -1507,14 +1677,15 @@ class IntegrationService:
         res = accepted["config"]["resources"]
         grant = None
         try:
-            adm = self.admission
-            if adm is not None:
-                grant = adm.acquire(self.repo_id, "try-%s" % token, memory_bytes=int(res["memory_bytes"]),
-                                    disk_bytes=int(res["disk_bytes"]), cpus=float(res["cpus"]),
-                                    priority="try",
-                                    timeout=self.admission_timeout if timeout is None else float(timeout))
+            adm = self._require_admission("try")
+            grant = adm.acquire(self.repo_id, "try-%s" % token, memory_bytes=int(res["memory_bytes"]),
+                                disk_bytes=int(res["disk_bytes"]), cpus=float(res["cpus"]),
+                                priority="try",
+                                timeout=self.admission_timeout if timeout is None else float(timeout))
             git(self.repo, "worktree", "add", "--detach", "--force", str(wt), candidate)
-            env = {"RELAY_JOBS": str(max(1, int(grant.cpus)))} if grant else {}
+            env = self.gate_env()
+            if grant:
+                env["RELAY_JOBS"] = str(max(1, int(grant.cpus)))
             result = projectconf.run_gate(accepted["config"], wt, selected_tests=selected_tests, env=env)
         except integration_slots.AdmissionError as exc:
             raise ServiceBusy("try: %s" % exc) from exc
@@ -1761,7 +1932,7 @@ class IntegrationService:
             if blockers:
                 raise TransitionRefused("activation refused: " + "; ".join(blockers))
             from_mode = inv["mode"]
-            policy = self.capture_policy(revision=tip, accept=True)
+            policy = self._capture_policy_locked(revision=tip, accept=True)
             stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
             git(self.repo, "update-ref", "%s/%s/target" % (TRANSITION_REF, stamp), tip)
             moved = False
@@ -2010,8 +2181,8 @@ class MainUpdater:
 # --------------------------------------------------------------------------- CLI
 
 SERVICE_VERBS = ("run", "project-init", "inventory", "activate", "pause", "rollback", "try",
-                 "main-status", "main-run", "snapshot", "handoffs", "board-submit", "workspace",
-                 "capture-policy", "events", "hook")
+                 "main-status", "main-update", "main-run", "snapshot", "handoffs", "board-submit",
+                 "workspace", "capture-policy", "events", "hook")
 
 USAGE = """relay-land (service verbs, card #AMQQ):
 
@@ -2072,6 +2243,8 @@ def _build_parser() -> _Parser:
     p.add_argument("--test", action="append", default=[])
     p.add_argument("--admission-timeout", type=float, default=None)
     sub.add_parser("main-status")
+    p = sub.add_parser("main-update")       # the build child `_update_main` spawns
+    p.add_argument("sha")
     p = sub.add_parser("main-run")
     p.add_argument("args", nargs=argparse.REMAINDER)
     sub.add_parser("snapshot")
@@ -2107,6 +2280,84 @@ def _build_parser() -> _Parser:
     p.add_argument("hook_action", choices=["install", "status"])
     p.add_argument("--force", action="store_true")
     return parser
+
+
+def accepted_config(repo, *, state_root=None) -> dict | None:
+    """The accepted policy's normalized config for the registered project containing `repo`,
+    or None when the project is unregistered or never activated. Read-only: registers nothing.
+    B2's workspace helper reads workspace init/exclusions from here, not from the target's
+    file, so a config change on the target cannot change what a pane launches with until it
+    is explicitly accepted."""
+    record = trees.resolve_project(repo, state_root=state_root)
+    if record is None:
+        return None
+    service = IntegrationService(record.get("project_root") or repo, state_root=state_root,
+                                 register=False)
+    accepted = service.accepted_policy()
+    return accepted["config"] if accepted else None
+
+
+def resolve_submission(cwd, ref, *, state_root=None, workspace_id=None) -> dict | None:
+    """What `relay-land submit REF` means when run from `cwd`: the commit `ref` names *in the
+    caller's tree* (HEAD of a workspace, not of the human checkout the service works in), and
+    the workspace that tree is — `RELAY_WORKSPACE_ID`/`workspace_id` validated against the
+    tree, else the registry record whose path is the tree's top level. Returns None when the
+    project is not in queue mode (the caller falls back to the plain queue), a dict
+    `{sha, workspace, record, project_root}` otherwise."""
+    record = trees.resolve_project(cwd, state_root=state_root)
+    if record is None or record.get("mode") != "queue":
+        return None
+    proc = git(cwd, "rev-parse", "--verify", "--quiet", "--end-of-options",
+               "%s^{commit}" % ref, check=False)
+    if proc.returncode != 0:
+        raise ServiceUsageError("%s is not a commit in %s" % (ref, cwd))
+    sha = proc.stdout.strip()
+    top = Path(git_out(cwd, "rev-parse", "--show-toplevel")).resolve()
+    manager = trees.TreeManager(record["id"], state_root=state_root)
+    workspace = None
+    wanted = workspace_id or os.environ.get("RELAY_WORKSPACE_ID") or None
+    if wanted:
+        try:
+            workspace = manager.get(wanted)
+        except trees.TreeError as exc:
+            raise ServiceUsageError("workspace %s: %s" % (wanted, exc)) from exc
+        if Path(workspace["path"]).resolve() != top:
+            # Named from outside the tree (the canonical checkout, a script): the commit must
+            # be the workspace's own, i.e. on its branch — a sha from elsewhere is refused.
+            branch = git(cwd, "rev-parse", "--verify", "--quiet",
+                         "refs/heads/%s" % workspace["branch"], check=False).stdout.strip()
+            if not branch or not landq._is_ancestor(cwd, sha, branch):
+                raise ServiceUsageError("commit %s is not on workspace %s's branch %s (and you are "
+                                        "not in that tree: %s)" % (sha[:12], wanted,
+                                                                   workspace["branch"], top))
+    else:
+        for candidate in manager.list():
+            if Path(candidate["path"]).resolve() == top:
+                workspace = candidate
+                break
+    return {"sha": sha, "workspace": workspace, "record": record,
+            "project_root": record.get("project_root") or str(top)}
+
+
+def cli_submit(args, *, cwd=None, out=None) -> int | None:
+    """The queue CLI's `submit` in queue mode: route through the service so the author's
+    session and card are recorded for handoffs and the ref resolves against the caller's
+    tree. Returns None to let the plain queue handle it (legacy mode / unregistered)."""
+    cwd = Path(cwd or args.repo or os.getcwd())
+    resolved = resolve_submission(cwd, args.sha, state_root=args.state_root,
+                                  workspace_id=args.workspace_id)
+    if resolved is None:
+        return None
+    service = IntegrationService(resolved["project_root"], state_root=args.state_root,
+                                 cache_root=getattr(args, "cache_root", None), register=False)
+    workspace = resolved["workspace"]
+    job = service.submit(resolved["sha"], request_id=args.request_id,
+                         workspace_id=workspace["id"] if workspace else None,
+                         card=args.card, selected_tests=args.test, kind=args.kind)
+    job["session"] = service._session_for(job)
+    json.dump(job, out or sys.stdout, indent=1, sort_keys=True, default=str)
+    (out or sys.stdout).write("\n")
+    return 0
 
 
 def project_init(repo, *, state_root=None, write=False, target=None) -> dict:
@@ -2233,6 +2484,10 @@ def main(argv=None, *, out=None, err=None) -> int:
                 return 5
         elif args.verb == "main-status":
             emit(service.main_status())
+        elif args.verb == "main-update":
+            record = service.main_update_inprocess(args.sha)
+            emit(record)
+            return 5 if record.get("error") else 0
         elif args.verb == "main-run":
             exe = service.main_executable()
             extra = list(args.args[1:]) if args.args and args.args[0] == "--" else list(args.args)
@@ -2285,7 +2540,8 @@ def main(argv=None, *, out=None, err=None) -> int:
 
 
 __all__ = ["IntegrationService", "MainUpdater", "ServiceError", "ServiceUsageError", "ModeError",
-           "TransitionRefused", "ServiceBusy", "GateFailed", "publication_marker",
+           "TransitionRefused", "ServiceBusy", "GateFailed", "AdmissionUnavailable",
+           "accepted_config", "resolve_submission", "cli_submit", "publication_marker",
            "transition_lock", "hook_state", "install_hook", "project_init", "render_config_toml",
            "HOOK", "HOOK_VERSION", "HOOK_REFUSAL", "MARKER_NAME", "LOCK_NAME", "SERVICE_VERBS",
            "main"]

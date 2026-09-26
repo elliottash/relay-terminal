@@ -400,6 +400,74 @@ class DaemonTests(TransitionCase):
         self.assertFalse(service.daemon_state()["running"])
         self.assertTrue(service.daemon_state()["stale"])
 
+    def test_daemon_start_installs_the_current_target_with_an_idle_queue(self):
+        service = self.service()
+        service.activate()
+        self.assertIsNone(service.main_status()["installed_sha"])
+        stop = threading.Event()
+        thread = threading.Thread(target=lambda: service.run(interval=0.05, stop=stop, max_ticks=200))
+        thread.start()
+        try:
+            deadline = time.monotonic() + 20
+            while time.monotonic() < deadline and service.main_status()["installed_sha"] != self.base:
+                time.sleep(0.05)
+        finally:
+            stop.set()
+            thread.join(30)
+        self.assertEqual(service.main_status()["installed_sha"], self.base)
+        self.assertEqual(service.main_status()["lag_commits"], 0)
+
+    def test_a_landing_whose_main_request_was_lost_is_installed_on_restart(self):
+        service = self.service()
+        service.activate()
+        ws, path, sha = self.author(service, "worker", "changed\n")
+        service.submit(workspace_id=ws["workspace_id"], request_id="w-1")
+        self.assertEqual(service.run_once(main=False)["job"]["status"], "landed")   # crashed before the request
+        self.assertIsNone(service.main_status()["installed_sha"])
+        fresh = self.service()
+        self.assertEqual(fresh.ensure_main()["sha"], sha)
+        self.assertEqual(fresh.main_status()["installed_sha"], sha)
+        self.assertTrue(fresh.ensure_main()["up_to_date"])
+
+    def test_a_failed_main_build_is_retried_after_the_backoff_without_a_new_landing(self):
+        service = self.service(main_retry_seconds=0.3)
+        service.activate()
+        calls = []
+        real = service._update_main
+
+        def flaky(sha):
+            calls.append(sha)
+            if len(calls) == 1:
+                return service._main_failed(sha, "simulated build failure")
+            return real(sha)
+        service._update_main = flaky
+        first = service.ensure_main()
+        self.assertEqual(first["error"], "simulated build failure")
+        status = service.main_status()
+        self.assertEqual(status["last_failure"]["error"], "simulated build failure")
+        self.assertGreater(status["retry_in_seconds"], 0)
+        self.assertIn("deferred", service.ensure_main(), "inside the backoff: no hot loop")
+        time.sleep(0.35)
+        self.assertEqual(service.ensure_main()["sha"], self.base)
+        self.assertEqual(service.main_status()["installed_sha"], self.base)
+        self.assertEqual(service.main_status()["retry_in_seconds"], 0.0)
+        self.assertEqual(len(calls), 2)
+
+    def test_main_build_failure_from_the_child_is_reported_not_raised(self):
+        service = self.service()
+        service.activate()
+        # An accepted config whose install cannot succeed: the release module's own error.
+        accepted = service.accepted_policy()
+        broken = dict(accepted["config"])
+        broken["main"] = dict(broken["main"], install=[["sh", "-c", "exit 3"]])
+        with service._tx() as conn:
+            conn.execute("UPDATE policies SET config_json=? WHERE hash=?",
+                         (json.dumps(broken), accepted["hash"]))
+        result = service.ensure_main()
+        self.assertIn("error", result)
+        self.assertIsNone(service.main_status()["installed_sha"])
+        self.assertTrue(any(e.get("error") for e in service.events() if e["kind"] == "main_release"))
+
     def test_main_updater_coalesces_a_burst_into_the_newest_sha(self):
         service = self.service()
         service.activate()
