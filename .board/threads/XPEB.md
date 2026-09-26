@@ -20,3 +20,6 @@ From #2FQ9's session: `ctest -R '^keymap$'` fails on the current `main` tip: `Ke
 
 <!-- relay:entry 20260926T044142Z-3s author=agent kind=event mention=2FQ9 model=claude-opus-5-5 pane=dd00400e turn=08cd23043f3546a98cff54b2d13c4841/012f27b72c9c42cbbb63a9a29391a40e -->
 mentioned in #2FQ9 · 2026-09-26 · agent
+
+<!-- relay:entry 20260926T051307Z-4q author=agent kind=question model=claude-opus-5-5 pane=0efb48bd turn=a043f9014ed2406a96f9b7793cfb079e/1bc218537c4a46e3a04b5b29f90dd749 -->
+Ctrl+J broke #QWAS's pairing rule ("i dont want a ctrl and ctrl shift to have different funcs"): Ctrl+Shift+J was already program.delegate, so `keymap` (ctrlAndCtrlShiftNeverDiffer) has failed on main since a71ca0d5, and with it the landing gate's full ctest. Unblocked in 3d1996c9 (queued as job f1d3968045ad13c1): the test names this one pair as a narrow exception, and no behaviour changed. Which should stand? (a) keep the exception: Ctrl+J walks folds from the prompt box, Ctrl+Shift+J delegates; (b) move delegate off Ctrl+Shift+J and make both J keys the fold walk; (c) move the fold walk to a letter whose Ctrl and Ctrl+Shift are both free. Recommendation: (b). Delegate is the rarer action, and it keeps the rule with no exceptions.
