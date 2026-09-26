@@ -14,6 +14,7 @@ class AuthorHandoffs:
         self._stop = threading.Event()
         self._thread = None
         self._seen = set()
+        self._pending_reasons = {}
         self._event_id = 0
 
     def configure(self, identity: dict, session: str) -> None:
@@ -22,6 +23,7 @@ class AuthorHandoffs:
         if self._identity:
             self._identity["session"] = session
         self._seen.clear()
+        self._pending_reasons.clear()
         self._event_id = 0
         if not self._identity:
             return
@@ -91,6 +93,15 @@ class AuthorHandoffs:
             except (ValueError, AttributeError) as exc:
                 delivered, reason = False, str(exc)
             if not delivered:
+                if self._pending_reasons.get(handoff_id) != reason:
+                    # The event log is durable and tied to the same service database as the
+                    # unacknowledged handoff. No schema change is needed for older projects.
+                    with service._tx() as conn:
+                        service._event(conn, "handoff_pending", {"repo_id": service.repo_id,
+                                                               "handoff_id": handoff_id,
+                                                               "job_id": row.get("job_id"),
+                                                               "reason": reason})
+                    self._pending_reasons[handoff_id] = reason
                 self.emit({"event": "handoff_pending", "handoff_id": handoff_id,
                            "job_id": row.get("job_id"), "reason": reason})
                 continue
@@ -99,5 +110,6 @@ class AuthorHandoffs:
             self._seen.add(handoff_id)
             service.ack_handoff(handoff_id)
             self._seen.discard(handoff_id)
+            self._pending_reasons.pop(handoff_id, None)
             self.emit({"event": "handoff_delivered", "handoff_id": handoff_id,
                        "job_id": row.get("job_id"), "workspace_id": target})

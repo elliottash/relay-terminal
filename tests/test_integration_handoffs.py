@@ -1,13 +1,19 @@
 """Publication handoffs wake their author once and respect Stop."""
+import subprocess
+import tempfile
+from contextlib import contextmanager
+from pathlib import Path
 from unittest import TestCase
 from unittest.mock import Mock
 
 from relay_core.integration_handoffs import AuthorHandoffs
+from relay_core.integration_service import IntegrationService
 from relay_core.queue import TurnSupervisor
 
 
 class FakeService:
     def __init__(self, rows):
+        self.repo_id = "r1"
         self.rows = rows
         self.acked = []
         self.events_rows = [{"id": 1, "kind": "main_moved", "repo_id": "r1",
@@ -27,6 +33,13 @@ class FakeService:
 
     def ack_handoff(self, handoff_id):
         self.acked.append(handoff_id)
+
+    @contextmanager
+    def _tx(self):
+        yield None
+
+    def _event(self, conn, kind, payload):
+        self.events_rows.append({"id": len(self.events_rows) + 1, "kind": kind, **payload})
 
 
 class AuthorHandoffsTests(TestCase):
@@ -62,6 +75,8 @@ class AuthorHandoffsTests(TestCase):
         self.assertEqual(self.service.acked, [])
         self.assertEqual([e["handoff_id"] for e in self.events
                           if e["event"] == "handoff_pending"], [1, 2])
+        self.assertIn("stopped", next(e for e in self.service.events_rows
+                                      if e["kind"] == "handoff_pending")["reason"])
 
     def test_ack_retry_does_not_enqueue_twice(self):
         original = self.service.ack_handoff
@@ -90,3 +105,22 @@ class AuthorHandoffsTests(TestCase):
         turns.resume()
         self.assertTrue(turns.accepts_handoff)
         turns.shutdown(timeout=1)
+
+    def test_pending_reason_is_durable_in_service_events(self):
+        with tempfile.TemporaryDirectory() as root:
+            repo = Path(root, "repo")
+            repo.mkdir()
+            subprocess.run(["git", "init", "-q", "-b", "main", str(repo)], check=True)
+            service = IntegrationService(repo, state_root=Path(root, "state"))
+            with service._tx() as conn:
+                conn.execute("INSERT INTO handoffs(delivery_key,job_id,kind,session,workspace_id,"
+                             "card,text,payload_json,created_at) VALUES (?,?,?,?,?,?,?,?,?)",
+                             ("delivery", "job", "failed", "pane", "tree", "AB12", "fix", "{}", "now"))
+            row = service.handoffs()[0]
+            with service._tx() as conn:
+                service._event(conn, "handoff_pending", {"handoff_id": row["id"],
+                                                         "reason": "author stopped"})
+            reopened = IntegrationService(repo, state_root=Path(root, "state"), register=False)
+            self.assertEqual(reopened.events()[-1]["reason"], "author stopped")
+            reopened.ack_handoff(row["id"])
+            self.assertEqual(reopened.handoffs(), [])
