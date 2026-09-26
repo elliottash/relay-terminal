@@ -5637,7 +5637,11 @@ private:
                                                          : QStringLiteral(" · from %1").arg(author.trimmed())),
                     Ink::UserAgent);
         closeInline();
-        if (decision == QStringLiteral("always")) rememberAlwaysAllowed();
+        // An untrusted MCP server's ask (`mcp:<server>`, card #SSRQ) is no checklist row: the
+        // worker records "always" as that server's trust in its MCP config, so the saved
+        // checklist and the first-launch choice are left alone.
+        if (decision == QStringLiteral("always") && !m_ask.capability.startsWith(QLatin1String("mcp:")))
+            rememberAlwaysAllowed();
         send({{"type", "question_answer"}, {"id", m_ask.id}, {"decision", decision}});
         m_ask = Ask{};
         refreshBackgroundWait();
