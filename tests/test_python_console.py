@@ -352,8 +352,31 @@ class ConsolePtyTest(Base):
         self.assertEqual("ok", tools.run("py_run_cell", {"code": "x", "intent": "still here"})["status"])
 
 
+def assert_repainted(test, text):
+    """The pane erases the prompt row, prints the agent's lines, then sends Ctrl+X Ctrl+P: a
+    second full prompt (A, then B) follows the first, with the half-typed line drawn after it."""
+    marks = MARK.findall(text)
+    test.assertEqual(2, marks.count("B"), marks)
+    tail = text.rsplit("\x1b]133;B\x07", 1)[1]
+    test.assertIn("x = 4", re.sub(r"\x1b\[[0-9;?]*[A-Za-z]|\x1b\][^\x07]*\x07", "", tail))
+
+
+@unittest.skipUnless(CONSOLE, "ipykernel, jupyter_client and jupyter_console are not installed in this Python")
+class ConsoleRedrawTest(Base):
+    def test_ctrl_x_ctrl_p_repaints_the_prompt_after_the_agents_lines(self):
+        text = run_in_pty(self.open_console()["argv"], [(b"x = 4", 1.0, None), (b"\x18\x10", 2.0, None)],
+                          settle=30)
+        assert_repainted(self, text)
+
+
 @unittest.skipUnless(IPYTHON, "IPython is not installed in this Python")
 class PlainIPythonPtyTest(unittest.TestCase):
+    def test_ctrl_x_ctrl_p_repaints_the_prompt(self):
+        text = run_in_pty([sys.executable, "-m", "IPython", "--no-banner",
+                           f"--InteractiveShellApp.exec_files={STARTUP}"],
+                          [(b"x = 4", 1.0, None), (b"\x18\x10", 1.5, None)], settle=20)
+        assert_repainted(self, text)
+
     def test_the_startup_file_marks_plain_ipython(self):
         text = run_in_pty([sys.executable, "-m", "IPython", "--no-banner",
                            f"--InteractiveShellApp.exec_files={STARTUP}"],

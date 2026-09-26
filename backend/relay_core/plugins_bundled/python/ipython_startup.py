@@ -27,6 +27,22 @@ def _relay_wrap_message(message):
     return wrapped
 
 
+def _relay_bind_redraw(session):
+    """Ctrl+X Ctrl+P repaints the prompt where the cursor is, as Relay's Bash integration binds it
+    for Readline: the pane erases the prompt row, prints the agent's lines, then sends these keys.
+    prompt_toolkit would otherwise redraw over what it believes is still its prompt."""
+    from prompt_toolkit.key_binding import KeyBindings, merge_key_bindings
+
+    bindings = KeyBindings()
+
+    @bindings.add("c-x", "c-p")
+    def _redraw(event):
+        event.app.renderer.reset()
+        event.app.invalidate()
+
+    session.key_bindings = merge_key_bindings([b for b in (session.key_bindings, bindings) if b])
+
+
 def _relay_mark(code):
     import sys
     sys.stdout.write(_RELAY_OSC.format(code))
@@ -50,6 +66,7 @@ def _relay_patch_jupyter_console(config):
     def init_prompt_toolkit_cli(self):
         init_cli(self)
         self.pt_cli.message = _relay_wrap_message(self.pt_cli.message)
+        _relay_bind_redraw(self.pt_cli)
 
     def spy_on_replies(self):
         """The execute_reply's status is read inside the shell and dropped; the shell channel's
@@ -120,6 +137,8 @@ def _relay_patch_ipython(shell):
         return result
 
     shell._extra_prompt_options = extra_prompt_options
+    if getattr(shell, "pt_app", None) is not None:
+        _relay_bind_redraw(shell.pt_app)
     shell.events.register("pre_run_cell", lambda info: _relay_mark("C"))
     shell.events.register("post_run_cell", lambda result: _relay_mark(
         "D;1" if result.error_before_exec or result.error_in_exec else "D;0"))

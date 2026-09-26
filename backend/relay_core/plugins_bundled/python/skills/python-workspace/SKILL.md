@@ -11,6 +11,10 @@ The composer and you share one Python kernel: a variable the user defined is vis
 - Run Python through `py_run_cell`, with an `intent` sentence the user sees beside the cell. Do
   not run `python -c` or a script in the shell for analysis: it would not see the kernel's state,
   and its output would not appear in the console.
+- In a Python console pane (header chip "Python · ipython") the person is watching IPython: every
+  `py_run_cell` is shown there as an `[agent]` cell with its output, so do the work there too —
+  a figure is `plt.savefig(...)` in a cell, not a script written with `write_file` and run with
+  `run_command`, and never `run_in_terminal`, which would type a shell command into IPython.
 - Look before you compute: `py_variables` lists the namespace with types, shapes and previews,
   and `py_history` shows the cells already run — the user's and yours — with their output.
 - Keep cells short; print `df.head()` or `df.describe()` rather than a whole frame. Long-running

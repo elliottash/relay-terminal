@@ -13478,7 +13478,9 @@ private:
         m_inlineOpen = false; m_atLineStart = true;
         holdShellResize(false);   // the cursor is on a fresh row: the shell may redraw there
         // Ctrl+X Ctrl+P is bound to a no-op shell function; Readline redraws the prompt after it.
-        if (m_backend && shellIdleAtPrompt()) m_backend->redrawPrompt();
+        // The console's startup file binds the same keys to a prompt_toolkit repaint (#83YV).
+        if (consoleAtPrompt()) sendShellInput(QStringLiteral("\x18\x10"));
+        else if (m_backend && shellIdleAtPrompt()) m_backend->redrawPrompt();
         else if (m_backend && loginAtPrompt()) {
             // The remote shell: the integration binds the same keys there; without it the prompt
             // is printed back as it was, and the remote line editor never knew it was gone.
@@ -13567,6 +13569,13 @@ private:
     // Where inline output may go now: a local shell idle at its prompt, or a remote one (#S5SH).
     // Not under mosh: mosh-client repaints the whole screen from the server's copy, which has
     // never heard of Relay's lines, so they would be drawn over; its replies stay in the panel.
+    // A console program idle at its prompt: the last OSC 133 mark its startup file wrote is the
+    // prompt's (A or B), not a cell's (C, running; D, finished and no prompt drawn yet).
+    bool consoleAtPrompt() const {
+        return m_backend && m_consoleProgram.isValid() && !m_native && !m_altScreen
+            && (m_lastPromptMark == 'A' || m_lastPromptMark == 'B');
+    }
+
     bool inlineReady() const {
         // A console's surface is always ready. The two tests below both ask "is the terminal
         // quiet enough to print into" — a shell at its prompt, or a login at one — and a console
@@ -13574,6 +13583,9 @@ private:
         // `m_inlinePending` forever and the fallback transcript panel became its whole output.
         // Nothing can repaint over it: there is no program (#AGNT).
         if (!hasShell()) return true;
+        // A console program (#83YV) has no Bash to report its prompt: its own OSC 133 marks do,
+        // and the agent's lines print there exactly as they do at a shell's prompt.
+        if (m_consoleProgram.isValid()) return consoleAtPrompt();
         // Never onto the alternate screen: mosh and a remote tmux both repaint it from their own
         // copy, which has never heard of Relay's lines, so they would be drawn over (#S5SH).
         return shellIdleAtPrompt()
