@@ -1,0 +1,10 @@
+verify: all 1 build slot(s) busy; waiting for relay-terminal-1006c7a3-0
+verify: tree 96148314dca6 materialised in /home/elliott/.local/state/relay/land/verify-slots/relay-terminal-1006c7a3-0/src (15 file(s) refreshed)
+verify: RELAY_JOBS=8 lowered to 4: this build may use 8.0 GiB and one compile job peaks near 2 GiB
+verify: cmake --build /home/elliott/.local/state/relay/land/verify-slots/relay-terminal-1006c7a3-0/build --parallel 4
+verify: ctest --test-dir /home/elliott/.local/state/relay/land/verify-slots/relay-terminal-1006c7a3-0/build -R remoteshutdown|sharing|remotesettings|boardpane --output-on-failure
+verify: the exact tree builds
+commit c926b96058460b86eba7ac35b74df8bb22151f48
+src /home/elliott/.local/state/relay/land/verify-slots/relay-terminal-1006c7a3-0/src
+build /home/elliott/.local/state/relay/land/verify-slots/relay-terminal-1006c7a3-0/build
+binary /home/elliott/.local/state/relay/land/verify-slots/relay-terminal-1006c7a3-0/build/relay

@@ -1,0 +1,3 @@
+$ uvx vulture remote/ --min-confidence 80   # exit 3 = findings
+remote/panes.py:103: unused variable 'turn_id' (100% confidence)
+remote/panes.py:106: unused variable 'tool_id' (100% confidence)

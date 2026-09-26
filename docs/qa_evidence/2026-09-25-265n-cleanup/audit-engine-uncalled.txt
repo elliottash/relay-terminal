@@ -1,0 +1,9 @@
+
+=== engine/core/GhosttyCore.cpp ===
+definitions parsed: 69; zero-use names: 0
+
+=== engine/session/TerminalSession.cpp ===
+definitions parsed: 24; zero-use names: 0
+
+=== engine/view/TerminalView.cpp ===
+definitions parsed: 163; zero-use names: 0

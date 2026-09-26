@@ -1,0 +1,58 @@
+key literals: 55 written, 109 read, 20 removed, 5 contains-checked
+
+== written, never read/removed/checked (0) ==
+
+== read, never written/checked (53) ==
+  'agent/app_writes' at src/RelayWindow.h:1692  same-basename written: False
+  'agent/audit_requests' at src/Pane.h:6360  same-basename written: False
+  'agent/clear_tool_results' at src/Pane.h:6361  same-basename written: False
+  'agent/compact_over_enabled' at src/Pane.h:6446  same-basename written: False
+  'agent/compact_over_tokens' at src/Pane.h:6448  same-basename written: False
+  'agent/failover' at src/Pane.h:6375  same-basename written: False
+  'agent/failover_hosted' at src/Pane.h:6376  same-basename written: False
+  'agent/first_token_timeout_s' at src/Pane.h:6359  same-basename written: False
+  'agent/max_auto_turns' at src/Pane.h:5690, src/Pane.h:6474  same-basename written: False
+  'agent/max_steps' at src/Pane.h:6353  same-basename written: False
+  'agent/max_tool_calls' at src/Pane.h:6354  same-basename written: False
+  'agent/plans_dir' at src/Pane.h:6449  same-basename written: False
+  'agent/show_tool_output' at src/Pane.h:6637  same-basename written: False
+  'agent/stall_timeout_s' at src/Pane.h:6358  same-basename written: False
+  'appearance/auto_dim' at src/RelayWindow.cpp:534, src/RelayWindow.h:7660  same-basename written: False
+  'appearance/auto_dim_active' at src/RelayWindow.h:7661  same-basename written: False
+  'appearance/dim_strength' at src/RelayWindowCore.cpp:285, src/RelayWindow.h:7663  same-basename written: False
+  'appearance/focus_mode' at src/RelayWindow.cpp:533, src/RelayWindow.h:7662  same-basename written: False
+  'appearance/font_size' at src/EngineBackend.cpp:28  same-basename written: False
+  'appearance/pane_usage' at src/PaneUsage.cpp:614  same-basename written: False
+  'composer/history_suggestions' at src/Pane.h:14739  same-basename written: False
+  'files/single_click' at src/FilePanes.cpp:289  same-basename written: False
+  'guests/%1/%2' at src/Pane.h:1268  same-basename written: False
+  'guests/memory' at src/PaneRuntime.cpp:1742, src/Pane.h:12305  same-basename written: False
+  'index/terminal_history' at src/Pane.h:8998  same-basename written: False
+  'index/terminal_output' at src/Pane.h:9001  same-basename written: False
+  'isolation/cap_escapees' at src/RelayWindowSettings.cpp:759  same-basename written: False
+  'isolation/enabled' at src/Isolation.h:26  same-basename written: True
+  'isolation/shell_oom_policy' at src/PaneRuntime.cpp:1034  same-basename written: False
+  'memory/import_guests' at src/PaneEvents.cpp:94, src/RelayWindow.h:5325  same-basename written: False
+  'provider/max_tokens' at src/RelayWindow.h:5278, src/Pane.h:2109  same-basename written: False
+  'recap/away' at src/Pane.h:9860  same-basename written: False
+  'security/clipboard_write' at src/Pane.h:5681  same-basename written: False
+  'security/command_denylist' at src/Pane.h:6394  same-basename written: False
+  'security/readable_roots' at src/Pane.h:6395  same-basename written: False
+  'security/secret_patterns' at src/Pane.h:6396  same-basename written: False
+  'security/unattended_full_tools' at src/Pane.h:10324  same-basename written: False
+  'sessions/index_guests' at src/Pane.h:8646, src/Pane.h:8679  same-basename written: False
+  'speech/auto_read' at src/Pane.h:8243  same-basename written: False
+  'ssh/hosts_never' at src/PaneRuntime.cpp:758  same-basename written: False
+  'ssh/persist' at src/PaneRuntime.cpp:754  same-basename written: False
+  'suggestions/next_command' at src/PaneRuntime.cpp:2455, src/Pane.h:15960  same-basename written: False
+  'suggestions/next_prompt' at src/PaneEvents.cpp:620  same-basename written: False
+  'terminal/colour_links' at src/EngineBackend.cpp:41  same-basename written: False
+  'terminal/copy_on_select' at src/RemotePane.cpp:781, src/EngineBackend.cpp:37  same-basename written: False
+  'terminal/persistLocal' at src/PaneRuntime.cpp:992  same-basename written: False
+  'terminal/shell_integration' at src/PaneRuntime.cpp:726  same-basename written: False
+  'theme/commands_set_default' at src/RelayWindow.h:6374  same-basename written: False
+  'theme/per_tab' at src/ThemeTabBar.h:42, src/RelayWindow.h:6365  same-basename written: False
+  'voice/enabled' at src/Pane.h:7956  same-basename written: True
+  'voice/max_seconds' at src/Pane.h:7962  same-basename written: False
+  'voice/tool' at src/RelayWindowSettings.cpp:950, src/RelayWindowSettings.cpp:984  same-basename written: False
+  'window/native_frame' at src/RelayWindow.h:7189  same-basename written: False

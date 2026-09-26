@@ -1,0 +1,7 @@
+$ git archive 5858d5c1 | tar -x; cmake -S . -B b -DRELAY_BUILD_ENGINE=ON; cmake --build b --target relay-vterm-spike -j4
+configure rc=0
+[100%] Building CXX object engine/CMakeFiles/relay-vterm-spike.dir/main.cpp.o
+[100%] Linking CXX executable relay-vterm-spike
+[100%] Built target relay-vterm-spike
+build rc=0
+-rwxrwxr-x 1 elliott elliott 1049416 Sep 25 21:22 b/engine/relay-vterm-spike

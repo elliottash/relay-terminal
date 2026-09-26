@@ -1,0 +1,14 @@
+# Live quit check, 2026-09-25 (~23:13 UTC), #265N
+Binary: verify-slot relay (tip + phone-265n hunks), copied to scratch to dodge slot re-materialisation.
+Env: Xvfb :78, XDG_CONFIG_HOME/XDG_DATA_HOME isolated to scratch; RelayTerminal/relay.conf [General] remote\alwaysOn=true.
+Sequence: launch → sidecar python appears (pid 2867375) → sleep 2 → SIGTERM the relay pid → relay gone in ~1.1 s.
+
+$XDG_DATA_HOME/relay/logs/relay.log (tail):
+2026-09-25T23:05:11.780Z INFO relay.gui gui_quit reason=signal pid=2824426 uptime_s=1 build=2026-09-25.19H.04
+2026-09-25T23:13:16.100Z INFO relay.gui gui_quit reason=signal pid=2867471 uptime_s=1 build=2026-09-25.19H.--
+2026-09-25T23:13:17.085Z INFO relay.gui remote_shutdown clean=1 ms=985
+
+sidecar pid 2867375 after relay exit: gone (`ps -p 2867375` empty; other new python pids on the
+host belong to other sessions' live instances, not this GUI's child)
+stderr 'QProcess: Destroyed while process is still running' count: 0
+stdout/stderr sizes: 539 / 0 bytes

@@ -1,0 +1,635 @@
+header: src/RelayWindow.h (8824 lines)
+method-name candidates parsed: 416
+
+== names with zero occurrences outside src/RelayWindow.h ==
+
+publishSocketAddress: header lines [190, 217]
+  190: publishSocketAddress(address);
+  217: static void publishSocketAddress(const QString &address) {
+
+closedItemForSession: header lines [250]
+  250: QString closedItemForSession(const QString &sessionId) const {
+
+setWindowFlag: header lines [358]
+  358: setWindowFlag(Qt::FramelessWindowHint);
+
+applyFrameMargins: header lines [361, 7421, 7427]
+  361: applyFrameMargins();
+  7421: void applyFrameMargins() {
+  7427: applyFrameMargins();
+
+registerBoardRemote: header lines [430, 5351]
+  430: registerBoardRemote();   // this window can serve its boards to the owner's devices (#SWPH)
+  5351: void registerBoardRemote() {
+
+buildTabBarControls: header lines [449, 7156]
+  449: buildTabBarControls();
+  7156: void buildTabBarControls() {
+
+requestCloseTab: header lines [491, 493, 5517, 7176, 7541, 7553]
+  491: connect(m_tabs, &QTabWidget::tabCloseRequested, this, [this](int index) { requestCloseTab(index); });
+  493: requestCloseTab(index);
+  5517: // ends it — requestCloseTab() → forgetTab() → releaseBoardWorker(page).
+  7176: connect(close, &QAction::triggered, this, [this, index] { requestCloseTab(index); });
+  7541: if (tabs->tabButton(j, QTabBar::RightSide) == close) { requestCloseTab(j); return; }
+  7553: void requestCloseTab(int index) {
+
+stopBoardWorkers: header lines [507, 512, 1043, 5222]
+  507: // stopBoardWorkers() again (closeEvent has usually run already, and it is idempotent): a
+  512: stopBoardWorkers();
+  1043: stopBoardWorkers();   // ask every Switchboard worker to exit; the destructor only kills
+  5222: void stopBoardWorkers() {
+
+serializeTabs: header lines [585]
+  585: QJsonArray serializeTabs() const {
+
+withoutMnemonic: header lines [601, 616]
+  601: if (titles) titles->append(withoutMnemonic(m_tabs->tabText(i)));
+  616: static QString withoutMnemonic(QString text) {
+
+navigateTerminalTo: header lines [836, 5867]
+  836: void navigateTerminalTo(const QString &directory, QWidget *from) {
+  5867: explorer->onNavigateHere = [guard](const QString &dir) { if (auto *w = windowOf(guard)) w->navigateTerminalTo(dir, guard); };
+
+endManualDrag: header lines [1003, 7483, 7505]
+  1003: endManualDrag();
+  7483: void endManualDrag() { m_manualGeometry = QRect(); m_manualEdges = {}; }
+  7505: endManualDrag();
+
+rememberWindow: header lines [1042, 8680]
+  1042: rememberWindow();
+  8680: void rememberWindow() {
+
+settingsPanesIn: header lines [1024, 1135, 1149]
+  1024: && !settingsPanesIn(m_tabs->currentWidget()).isEmpty())
+  1135: static QList<ToolPane *> settingsPanesIn(QWidget *page) {
+  1149: for (ToolPane *tool : settingsPanesIn(page))
+
+markSettingsPaneType: header lines [1155, 1337, 1342]
+  1155: static void markSettingsPaneType(ToolPane *tool) {
+  1337: markSettingsPaneType(tool);
+  1342: markSettingsPaneType(guard);
+
+viewGuard: header lines [1186, 1204, 1206, 1209, 1210, 3512, 3513, 3514, 3516, 3517, 3596, 3597, 3598, 3733, 3741, 3746, 5580, 5581, 5583, 5584]
+  1186: QPointer<View> viewGuard(view);
+  1204: QTimer::singleShot(0, this, [guard, viewGuard] {
+  1206: if (!w || !viewGuard) return;
+  1209: viewGuard->setHelperTabId(w->tabIdOf(page));
+  1210: viewGuard->setHelperWorkspace(w->boardWorkspaceOfTab(page));
+  3512: QPointer<relay::ReviewPane> viewGuard(view);
+  3513: listenToHelper(page, view, [viewGuard](const QJsonObject &event) {
+  3514: if (!viewGuard) return;
+  3516: viewGuard->requestList();
+  3517: else viewGuard->handleEvent(event);
+  3596: QPointer<relay::tests::TestSuitesPane> viewGuard(view);
+  3597: listenToHelper(page, view, [this, guard, viewGuard](const QJsonObject &event) {
+  3598: relay::tests::TestSuitesPane *pane = viewGuard.data();
+  3733: QPointer<relay::profile::ProfilePane> viewGuard(view);
+  3741: listenToHelper(page, view, [guard, viewGuard](const QJsonObject &event) {
+  3746: if (relay::profile::ProfilePane *pane = viewGuard.data()) {
+  5580: QPointer<relay::BoardView> viewGuard(view);
+  5581: QTimer::singleShot(0, this, [guard, viewGuard] {
+  5583: if (!w || !viewGuard) return;
+  5584: if (QWidget *page = w->pageOf(guard)) viewGuard->setTabId(w->tabIdOf(page));
+
+refreshConsoleHosts: header lines [1182, 1217, 5053]
+  1182: // tab's project changes (`refreshConsoleHosts`).
+  1217: void refreshConsoleHosts(QWidget *page) {
+  5053: refreshConsoleHosts(page);
+
+openConsoleModelPicker: header lines [1259]
+  1259: void openConsoleModelPicker() {
+
+searchableActions: header lines [1333, 1365, 1625, 2047]
+  1333: auto *view = new relay::SettingsPane(mode, [this] { return settingsSections(); }, [this] { return searchableActions(); });
+  1365: QList<PaletteItem> searchableActions() {
+  1625: m_appCommands.actions = [this] { return searchableActions(); };
+  2047: m_palette = new relay::ActionPalette(this, [this] { return searchableActions(); },
+
+applyModelsTarget: header lines [1504, 1523, 1572, 1613]
+  1504: applyModelsTarget(tool, served, served->modelsTarget(), QString(), QString());
+  1523: void applyModelsTarget(ToolPane *tool, Pane *served, relay::ModelsPane::Target target,
+  1572: applyModelsTarget(tool, served, target, tab, filter);
+  1613: applyModelsTarget(tool, served, served->modelsTarget(), tab, QString());
+
+closeModelsPane: header lines [1581, 1589, 7249]
+  1581: closeModelsPane(tool);
+  1589: void closeModelsPane(ToolPane *tool) {
+  7249: if (tool->kind() == ToolPane::Kind::Models) { closeModelsPane(tool); return; }
+
+openAppTarget: header lines [1628, 1795]
+  1628: return openAppTarget(command, error);
+  1795: bool openAppTarget(const QJsonObject &command, QString *error) {
+
+deliverAppPrompt: header lines [1657, 1880]
+  1657: return deliverAppPrompt(command, queued, error);
+  1880: bool deliverAppPrompt(const QJsonObject &command, bool *queued, QString *error) {
+
+renameAppTarget: header lines [1660, 1892]
+  1660: return renameAppTarget(command, previous, error);
+  1892: bool renameAppTarget(const QJsonObject &command, QString *previous, QString *error) {
+
+agentWritesEnabled: header lines [1626, 1691]
+  1626: m_appCommands.writesEnabled = [] { return agentWritesEnabled(); };
+  1691: static bool agentWritesEnabled() {
+
+tabIdOfPane: header lines [1677, 1712]
+  1677: {QStringLiteral("tab"), tabIdOfPane(pane)},
+  1712: QString tabIdOfPane(QWidget *leaf) { return tabIdOf(pageOf(leaf)); }
+
+appCatalogForTab: header lines [1716, 1721, 1760]
+  1716: QJsonObject appCatalogFor(QWidget *page) { return appCatalogForTab(tabIdOf(page)); }
+  1721: QJsonObject appCatalogForTab(const QString &tab) {
+  1760: const QJsonObject app = appCatalogForTab(helperTab(worker));
+
+scheduleAppCatalog: header lines [459, 1731]
+  459: relay::SettingsWatch::instance().listen(this, [this] { scheduleAppCatalog(); });
+  1731: void scheduleAppCatalog() {
+
+sendHelperCatalogs: header lines [1751, 1757]
+  1751: sendHelperCatalogs();   // the tab's helper worker runs the same tools (§30.7)
+  1757: void sendHelperCatalogs() {
+
+searchPaletteCards: header lines [1944, 1995]
+  1944: void searchPaletteCards(const QString &query) {
+  1995: searchPaletteCards(query);
+
+openNotificationSource: header lines [1974, 4944, 4982, 7359, 7400]
+  1974: openNotificationSource(QStringLiteral("board:") + project + QLatin1Char('#') + id);
+  4944: void openNotificationSource(const QString &source) {
+  4982: // still loading (waitForBoardCard). Used by openNotificationSource and openBoardCard's paths.
+  7359: openNotificationSource(source);
+  7400: openNotificationSource(note.source);
+
+editShortcutOf: header lines [2052, 2066]
+  2052: m_palette->setEditShortcut([this](const QString &key) { editShortcutOf(key); });
+  2066: void editShortcutOf(const QString &key) {
+
+rememberPaletteChoice: header lines [2050, 2128]
+  2050: [this](const QString &key) { rememberPaletteChoice(key); });
+  2128: void rememberPaletteChoice(const QString &key) {
+
+paletteForThisPane: header lines [2048, 2142]
+  2048: [this] { return paletteForThisPane(); },
+  2142: QList<PaletteItem> paletteForThisPane() {
+
+closeSettingsPane: header lines [1352, 1914, 2183, 2232, 7242, 8551]
+  1352: view->onClose = [guard] { if (auto *w = windowOf(guard)) w->closeSettingsPane(guard); };
+  1914: if (tool->settings()->mode() == mode) { closeSettingsPane(tool); return; }
+  2183: void closeSettingsPane(ToolPane *tool) {
+  2232: closeSettingsPane(tool);
+  7242: if (tool->settings()) { closeSettingsPane(tool); return; }
+  8551: if (auto *tool = dynamic_cast<ToolPane *>(pane); tool && tool->settings()) { closeSettingsPane(tool); return; }
+
+approvalsCautious: header lines [2494, 2503, 2519, 4461]
+  2494: static QStringList approvalsCautious() { return relay::approvals::cautious(); }
+  2503: const bool cautious = approvalsCautious().contains(capability);
+  2519: ask = approvalsCautious();   // start from the set the rows were displaying
+  4461: settings.setValue(QStringLiteral("security/approvals_ask"), approvalsCautious());
+
+modelsCuratedNow: header lines [2611, 2615]
+  2611: connect(m_curatedTimer, &QTimer::timeout, this, [this] { modelsCuratedNow(); });
+  2615: void modelsCuratedNow() {
+
+paletteAliases: header lines [1367, 2686]
+  1367: for (PaletteItem &item : items) item.aliases = (item.aliases + ' ' + paletteAliases(item)).trimmed();
+  2686: static QString paletteAliases(const PaletteItem &item) {
+
+sshHostItem: header lines [2747, 2766, 2770, 2786]
+  2747: PaletteItem sshHostItem(const QString &target, const QString &detail) {
+  2766: items << sshHostItem(target, detail.isEmpty() ? QStringLiteral("recent") : QStringLiteral("recent · ") + detail);
+  2770: if (!listed.contains(host.alias)) items << sshHostItem(host.alias, host.detail());
+  2786: PaletteItem item = sshHostItem(target, QStringLiteral("connect in a new tab"));
+
+sshMenuItems: header lines [2758, 2809]
+  2758: QList<PaletteItem> sshMenuItems() {
+  2809: const auto hosts = sshMenuItems();
+
+connectToHost: header lines [2754, 2842, 2845]
+  2754: item.run = [this, target] { connectToHost(target); };
+  2842: connectToHost(list->currentItem()->data(Qt::UserRole).toString());
+  2845: void connectToHost(const QString &target) {
+
+hostSplitCommand: header lines [2857, 2889]
+  2857: static QString hostSplitCommand(const QString &cwd, const QString &command) {
+  2889: if (m_active && m_active != source) m_active->queueCommand(hostSplitCommand(cwd, command));
+
+hostLoginOf: header lines [2903, 2934, 2994]
+  2903: static HostLogin hostLoginOf(const Pane *pane) {
+  2934: const HostLogin login = hostLoginOf(pane);
+  2994: const HostLogin login = hostLoginOf(pane);
+
+hostControlArgs: header lines [2919, 2970, 3029]
+  2919: static QStringList hostControlArgs(const HostLogin &login, const QString &command) {
+  2970: process->setArguments(hostControlArgs(login, relay::ssh::killSessionCommand(session)));
+  3029: process->setArguments(hostControlArgs(login, command));
+
+localGuard: header lines [2948, 2950, 2952]
+  2948: QPointer<Pane> localGuard(pane);
+  2950: [this, local, localGuard, session](int code, QProcess::ExitStatus status) {
+  2952: if (localGuard) closePane(localGuard, true);
+
+readSessions: header lines [3050, 3069, 3099]
+  3050: const auto readSessions = [&](const auto &then) {
+  3069: [&readSessions, &fill] { readSessions(fill); });  // the next decision is from a fresh list
+  3099: readSessions(fill);
+
+linkSubagentPane: header lines [3250, 3288, 3334]
+  3250: void linkSubagentPane(ToolPane *tool, Pane *owner) {
+  3288: if (pane->scrollbackId() == ownerKey && !pane->subagentTabs()) { linkSubagentPane(tool, pane); return; }
+  3334: linkSubagentPane(tool, ownerPane);
+
+ownerGuard: header lines [3253, 3255, 3410, 3412, 3413, 3415, 3416, 3421, 3422, 3427, 4189, 4195, 4226, 4237, 4239, 4240, 4373, 4374, 4378, 4385, 4386, 4446, 4449, 4455, 4457, 4463]
+  3253: QPointer<Pane> ownerGuard(owner);
+  3255: tool->subagent()->onBackToMain = [ownerGuard] { if (auto *w = windowOf(ownerGuard)) w->backToMainAgent(ownerGuard); };
+  3410: QPointer<Pane> ownerGuard(owner);
+  3412: view->onOpenOutput = [ownerGuard](const QString &turn, const QString &callId) {
+  3413: if (ownerGuard) ownerGuard->requestInternalsOutput(turn, callId);
+  3415: view->onOpenDiff = [ownerGuard](const QString &title, const QString &diff) {
+  3416: if (auto *w = windowOf(ownerGuard)) w->openDiffPane(ownerGuard, title, diff);
+  3421: view->onAskOwner = [ownerGuard](const QString &text) {
+  3422: if (ownerGuard) ownerGuard->insertInComposer(text);
+  3427: connect(view, &QObject::destroyed, owner, [ownerGuard, view] { if (ownerGuard) ownerGuard->detachInternals(view); });
+  4189: QPointer<Pane> ownerGuard(owner);
+  4195: view->onResume = [resume, close, ownerGuard, guard](const QJsonObject &item, bool, bool keepOpen) {
+  4226: if (dir.isEmpty() && ownerGuard) dir = ownerGuard->sessionDir();
+  4237: view->onOpenInfo = [ownerGuard, guard](const QJsonObject &item) {
+  4239: if (!w || !ownerGuard) return;
+  4240: w->openInfoPane(ownerGuard, item.value(QStringLiteral("session_id")).toString(),
+  4373: QPointer<Pane> ownerGuard(owner);
+  4374: view->onClose = [guard, ownerGuard] {
+  4378: if (ownerGuard && ownerGuard->window() == w) { w->setActiveLeaf(ownerGuard); focusLeaf(ownerGuard); }
+  4385: view->onAskOwner = [ownerGuard](const QString &text) {
+  4386: if (ownerGuard) ownerGuard->insertInComposer(text);
+  4446: QPointer<Pane> ownerGuard(owner);
+  4449: view->onAllowEverything = [guard, ownerGuard] {
+  4455: w->approvalsAnswered(guard, ownerGuard, false);
+  4457: view->onChooseChecklist = [guard, ownerGuard] {
+  4463: w->approvalsAnswered(guard, ownerGuard, true);
+
+backToMainAgent: header lines [3245, 3255, 3263]
+  3245: if (!panes.isEmpty()) w->backToMainAgent(panes.first());
+  3255: tool->subagent()->onBackToMain = [ownerGuard] { if (auto *w = windowOf(ownerGuard)) w->backToMainAgent(ownerGuard); };
+  3263: void backToMainAgent(Pane *owner) {
+
+closeToolPane: header lines [3276, 4786, 4790, 4881, 5530, 7229, 7240]
+  3276: closeToolPane(tool);
+  4786: // close path (closeToolPane — the title-bar button and Esc use it too). It used to hand
+  4790: closeToolPane(tool);
+  4881: closeToolPane(tool);
+  5530: if (auto *w = windowOf(guard)) w->closeToolPane(guard);
+  7229: if (ToolPane *open = openToolPane(spec.paneType)) { closeToolPane(open); return; }
+  7240: void closeToolPane(ToolPane *tool) {
+
+linkInternalsPane: header lines [3387, 3405, 3445]
+  3387: linkInternalsPane(tool, owner);
+  3405: void linkInternalsPane(ToolPane *tool, Pane *owner) {
+  3445: linkInternalsPane(tool, owner);
+
+linkReviewPane: header lines [3490, 3503, 3527]
+  3490: linkReviewPane(tool);
+  3503: void linkReviewPane(ToolPane *tool) {
+  3527: linkReviewPane(tool);
+
+openProfileMenu: header lines [3655, 5601]
+  3655: void openProfileMenu(QWidget *anchor) {
+  5601: if (auto *w = windowOf(guard)) w->openProfileMenu(anchor);
+
+startProfile: header lines [3662, 3669]
+  3662: [guard](const QString &target) { if (guard) guard->startProfile(target); },
+  3669: void startProfile(const QString &target) {
+
+profileViewOf: header lines [3647, 3657, 3664, 3707, 3729]
+  3647: static relay::profile::ProfilePane *profileViewOf(ToolPane *tool) {
+  3657: relay::profile::ProfilePane *open = profileViewOf(profilePaneIn(page));
+  3664: [guard] { if (guard) if (auto *view = profileViewOf(profilePaneIn(guard->m_tabs->currentWidget()))) view->stopRun(); });
+  3707: return profileViewOf(open);
+  3729: relay::profile::ProfilePane *view = profileViewOf(tool);
+
+linkProfilePane: header lines [3720, 3728]
+  3720: linkProfilePane(tool);
+  3728: void linkProfilePane(ToolPane *tool) {
+
+nextProfileWriteId: header lines [3787, 3806, 3847]
+  3787: QString nextProfileWriteId() { return QStringLiteral("pf%1-").arg(quintptr(this), 0, 36) + QString::number(++m_profileWriteSeq); }
+  3806: const QString id = nextProfileWriteId();
+  3847: {QStringLiteral("id"), nextProfileWriteId()},
+
+attachProfileToCard: header lines [3768, 3789]
+  3768: if (auto *w = windowOf(guard)) w->attachProfileToCard(guard, markdown, evidence);
+  3789: void attachProfileToCard(ToolPane *tool, const QString &markdown, const QString &evidence) {
+
+handleProfileCardReply: header lines [3745, 3815]
+  3745: if (w && w->handleProfileCardReply(event)) return;
+  3815: bool handleProfileCardReply(const QJsonObject &event) {
+
+nextTestsWriteId: header lines [3859, 3904, 3934, 3994]
+  3859: QString nextTestsWriteId() { return QStringLiteral("ts%1-").arg(quintptr(this), 0, 36) + QString::number(++m_testsWriteSeq); }
+  3904: const QString id = nextTestsWriteId();
+  3934: const QString id = nextTestsWriteId();
+  3994: const QString next = nextTestsWriteId();
+
+bugsTabOf: header lines [3866, 3909]
+  3866: QString bugsTabOf(QWidget *page) const {
+  3909: {QStringLiteral("tab"), bugsTabOf(page)},
+
+testsSectionLine: header lines [3884, 3905, 3935]
+  3884: static QString testsSectionLine(const relay::tests::TestRow &row) {
+  3905: m_testsWrites.insert(id, TestsCardWrite{QPointer<ToolPane>(tool), testsSectionLine(row),
+  3935: m_testsWrites.insert(id, TestsCardWrite{QPointer<ToolPane>(tool), testsSectionLine(row),
+
+makeCardForTest: header lines [3621, 3894]
+  3621: if (auto *w = windowOf(guard)) w->makeCardForTest(guard, row);
+  3894: void makeCardForTest(ToolPane *tool, const relay::tests::TestRow &row) {
+
+attachTestToCard: header lines [3624, 3921]
+  3624: if (auto *w = windowOf(guard)) w->attachTestToCard(guard, row);
+  3921: void attachTestToCard(ToolPane *tool, const relay::tests::TestRow &row) {
+
+pickCard: header lines [3799, 3931, 3944]
+  3799: const QString card = pickCard(board->board()->model(),
+  3931: const QString card = pickCard(board->board()->model(),
+  3944: QString pickCard(const relay::board::Model &model, const QString &title) {
+
+handleTestsCardReply: header lines [3604, 3980]
+  3604: if (handleTestsCardReply(guard, event)) return;
+  3980: bool handleTestsCardReply(const QPointer<ToolPane> &tool, const QJsonObject &event) {
+
+ownerTool: header lines [4175, 4176, 4177, 4178]
+  4175: QPointer<ToolPane> ownerTool(tool);
+  4176: connect(owner, &QObject::destroyed, tool, [ownerTool, owner] {
+  4177: if (ownerTool && ownerTool->property("workspaceOwner").value<QObject *>() == owner)
+  4178: ownerTool->setProperty("workspaceOwner", QVariant());
+
+restoreListFocus: header lines [4197, 4231, 4235]
+  4197: auto restoreListFocus = [guard, focused, keepOpen] {
+  4231: restoreListFocus();
+  4235: restoreListFocus();
+
+finishSessionsTab: header lines [4248, 4269, 4285]
+  4248: void finishSessionsTab(ToolPane *tool, const QString &tab, const QString &query) {
+  4269: finishSessionsTab(tool, tab, query);
+  4285: finishSessionsTab(tool, tab, query);
+
+afterProjectPicked: header lines [4155, 4325]
+  4155: if (board && m_active) afterProjectPicked(m_active, QString());
+  4325: void afterProjectPicked(Pane *owner, const QString &heldCard) {
+
+openSignalThread: header lines [4408, 5730, 7377]
+  4408: void openSignalThread(const QString &threadId, const QString &ownerSession) {
+  5730: if (w) w->openSignalThread(threadId, owner);
+  7377: openSignalThread(thread.first, thread.second);
+
+approvalsAnswered: header lines [4455, 4463, 4480]
+  4455: w->approvalsAnswered(guard, ownerGuard, false);
+  4463: w->approvalsAnswered(guard, ownerGuard, true);
+  4480: void approvalsAnswered(ToolPane *tool, Pane *owner, bool checklist) {
+
+refreshSharingPanes: header lines [408, 410, 532, 4711]
+  408: [this] { refreshSharingPanes(false); });
+  410: [this] { refreshSharingPanes(true); });
+  532: // refreshSharingPanes, QStackedLayout::widget). It was reachable before whenever a pane was
+  4711: void refreshSharingPanes(bool onlyClocks) {
+
+openBoardCardInNewPane: header lines [4910, 5526]
+  4910: void openBoardCardInNewPane(const QString &id, QWidget *anchor = nullptr) {
+  5526: if (auto *w = windowOf(guard)) w->openBoardCardInNewPane(id, guard);
+
+revealBoardCard: header lines [4958, 4967, 4983]
+  4958: w->revealBoardCard(tool, id);
+  4967: revealBoardCard(tool, id);
+  4983: void revealBoardCard(ToolPane *tool, const QString &id) {
+
+boardSearchRoot: header lines [4795, 4995]
+  4795: const QString from = boardSearchRoot();
+  4995: QString boardSearchRoot() const {
+
+helperTab: header lines [1760, 5144]
+  1760: const QJsonObject app = appCatalogForTab(helperTab(worker));
+  5144: QString helperTab(relay::BoardWorker *worker) const {
+
+tabHasBoard: header lines [5371, 5407, 5421, 5423, 5432]
+  5371: host.hasBoard = [guard](const QString &tab) { return guard && guard->tabHasBoard(guard->pageOfTabId(tab)); };
+  5407: bool tabHasBoard(QWidget *page) const {
+  5421: if (tabHasBoard(current)) return tabIdOf(current);
+  5423: if (tabHasBoard(m_tabs->widget(i))) return tabIdOf(m_tabs->widget(i));
+  5432: return tabHasBoard(current) ? tabIdOf(current) : QString();
+
+remoteBoardTab: header lines [5369, 5370, 5418]
+  5369: host.boardTab = [guard] { return guard ? guard->remoteBoardTab(false) : QString(); };
+  5370: host.adoptBoard = [guard] { return guard ? guard->remoteBoardTab(true) : QString(); };
+  5418: QString remoteBoardTab(bool adopt) {
+
+remoteCardPane: header lines [5380, 5383, 5441]
+  5380: return guard ? guard->remoteCardPane(tab, card, QString(), task, true) : QString();
+  5383: return guard && !runner.isEmpty() ? guard->remoteCardPane(tab, card, runner, task, false) : QString();
+  5441: QString remoteCardPane(const QString &tab, const QString &card, const QString &runner, const QString &task,
+
+leafCwd: header lines [622, 5850, 6818, 6990, 7846]
+  622: if (m_activeLeaf) return leafCwd(m_activeLeaf);
+  5850: static QString leafCwd(QWidget *leaf) {
+  6818: QString where = m_activeLeaf ? leafCwd(m_activeLeaf) : QString();
+  6990: QJsonObject spec{{"cwd", leafCwd(anchor)}, {"workspace", workspace}};
+  7846: + (leaf ? leafCwd(leaf) : QString())
+
+consoleGuard: header lines [6060, 6061, 6062, 6063]
+  6060: QPointer<Pane> consoleGuard(console);
+  6061: console->onPromptTargetPane = [consoleGuard](Pane *from) -> Pane * {
+  6062: auto *w = windowOf(from ? from : consoleGuard.data());
+  6063: return w ? w->promptTargetPane(from ? from : consoleGuard.data()) : nullptr;
+
+newTabNewTheme: header lines [6366, 6444]
+  6366: static bool newTabNewTheme() { return QSettings().value(QStringLiteral("theme/new_tab_new_theme"), false).toBool(); }
+  6444: if (!newTabNewTheme()) return;
+
+randomNewTabTheme: header lines [6370, 6432]
+  6370: static bool randomNewTabTheme() { return QSettings().value(QStringLiteral("theme/randomize_new_tab"), false).toBool(); }
+  6432: if (randomNewTabTheme()) {
+
+tabThemeOf: header lines [6375, 6379, 6393, 6468]
+  6375: static QString tabThemeOf(QWidget *page) { return page ? page->property("relayTheme").toString() : QString(); }
+  6379: QString id = tabThemeOf(page);
+  6393: if (QWidget *other = m_tabs->widget(i); other != page && tabThemeOf(other).isEmpty())
+  6468: const QString theme = perTabThemes() ? tabThemeOf(page) : QString();
+
+serializeTab: header lines [585, 587, 597, 1698, 6458, 8634, 8639, 8686]
+  585: QJsonArray serializeTabs() const {
+  587: for (int i = 0; i < m_tabs->count(); ++i) tabs.append(serializeTab(i));
+  597: const QJsonObject node = serializeTab(i);
+  1698: // conversation, so it is minted once, lazily, and saved with the tab (serializeTab / addTab).
+  6458: QJsonObject serializeTab(int index) const {
+  8634: if (record && !serializeTab(index).isEmpty()) {
+  8639: item.record.layout = serializeTab(index);
+  8686: const QJsonObject node = serializeTab(i);
+
+hintPaneFocusByMouse: header lines [500, 6490, 6513]
+  500: if (byMouse && changed) hintPaneFocusByMouse();
+  6490: void hintPaneFocusByMouse() {
+  6513: hintPaneFocusByMouse();
+
+placeTabTitle: header lines [6602, 6611, 6865]
+  6602: const QString place = placeTabTitle(page);
+  6611: QString placeTabTitle(QWidget *page) const {
+  6865: // Tab labels: names set by hand. The automatic label is a place (placeTabTitle), decided in
+
+disconnectRemoteDevices: header lines [6748, 6774]
+  6748: if (relay::RemoteShare::instance().alwaysOn()) disconnectRemoteDevices();
+  6774: void disconnectRemoteDevices() {
+
+boardSplitFloor: header lines [5619, 5667, 5751, 6885, 8424]
+  5619: w->insertBeside(guard, pane, Qt::Horizontal, false, w->boardSplitFloor(guard));
+  5667: w->insertBeside(guard, pane, Qt::Horizontal, false, w->boardSplitFloor(guard));
+  5751: w->insertBeside(guard, pane, Qt::Horizontal, false, w->boardSplitFloor(guard));
+  6885: int boardSplitFloor(QWidget *leaf) const {
+  8424: for (int i = 0; i < splitter->count(); ++i) floors.append(boardSplitFloor(splitter->widget(i)));
+
+anchorGuard: header lines [6935, 6936, 6937]
+  6935: QPointer<QWidget> anchorGuard(anchor), paneGuard(pane);
+  6936: QTimer::singleShot(0, wrapper, [guard, anchorGuard, paneGuard, before, anchorFloor] {
+  6937: if (!guard || !anchorGuard || !paneGuard) return;
+
+pageGuard: header lines [6970, 6971]
+  6970: QPointer<QWidget> pageGuard(pageOf(pane));
+  6971: QTimer::singleShot(0, pane, [this, pageGuard] { if (pageGuard) equalizePage(pageGuard); });
+
+armPlacement: header lines [7005, 7012]
+  7005: if (offerPlacement) armPlacement(pane, anchor);
+  7012: void armPlacement(QWidget *pane, QWidget *anchor) {
+
+showPaneToast: header lines [7023, 7040]
+  7023: showPaneToast(pane, QStringLiteral("← ↑ ↓ to place"));
+  7040: void showPaneToast(QWidget *pane, const QString &text) {
+
+placePlacementHint: header lines [7047, 7052, 7055]
+  7047: placePlacementHint(pane);
+  7052: QTimer::singleShot(0, this, [this, guard] { if (guard) placePlacementHint(guard); });
+  7055: void placePlacementHint(QWidget *pane) {
+
+armBeneathDock: header lines [7089, 8335]
+  7089: void armBeneathDock(QWidget *pane, QWidget *anchor) {
+  8335: if (orientation == Qt::Horizontal) armBeneathDock(current, neighbor);
+
+paneTypeOf: header lines [7207, 7220, 7222]
+  7207: static QString paneTypeOf(QWidget *leaf) {
+  7220: tool && pageOf(tool) == page && paneTypeOf(tool) == paneType) return tool;
+  7222: if (auto *tool = dynamic_cast<ToolPane *>(leaf); tool && paneTypeOf(tool) == paneType) return tool;
+
+setWindowState: header lines [7410]
+  7410: setWindowState(windowState() ^ Qt::WindowFullScreen);
+
+cursorForEdges: header lines [996, 7445]
+  996: const Qt::CursorShape shape = cursorForEdges(edgesAt(event->pos()));
+  7445: static Qt::CursorShape cursorForEdges(Qt::Edges edges) {
+
+startWindowDrag: header lines [989, 7457, 7513]
+  989: if (edges) { startWindowDrag(edges, event->globalPos()); event->accept(); return; }
+  7457: bool startWindowDrag(Qt::Edges edges, const QPoint &pressedAt) {
+  7513: startWindowDrag({}, mouse->globalPos());
+
+continueManualDrag: header lines [994, 7471, 7500]
+  994: if (!m_manualGeometry.isNull()) { continueManualDrag(event->globalPos()); event->accept(); return; }
+  7471: void continueManualDrag(const QPoint &global) {
+  7500: continueManualDrag(mouse->globalPos());
+
+armTabPulse: header lines [7744, 7750]
+  7744: armTabPulse();
+  7750: void armTabPulse() {
+
+tabUsageSample: header lines [7761, 7783, 7833]
+  7761: relay::usage::Sample tabUsageSample(QWidget *page) const {
+  7783: return relay::usage::tabSuffix(tabUsageSample(page));
+  7833: const relay::usage::Sample summed = tabUsageSample(page);
+
+tabBarIndexAt: header lines [7884, 8093, 8132]
+  7884: static int tabBarIndexAt(const QPair<QWidget *, Edge> &target, const QPoint &global) {
+  8093: if (const int tab = tabBarIndexAt(target, global); tab >= 0) {
+  8132: if (const int tab = tabBarIndexAt(target, global); tab >= 0) page = w->m_tabs->widget(tab);
+
+dragPaneMove: header lines [7620, 7932, 8079]
+  7620: pane->onHeaderDragMove = [guard](const QPoint &global) { if (auto *w = windowOf(guard)) w->dragPaneMove(guard, global); };
+  7932: dragPaneMove(m_toolLeaf, mouse->globalPos());
+  8079: void dragPaneMove(QWidget *dragged, const QPoint &global) {
+
+endToolHeaderDrag: header lines [7939, 7945, 7954]
+  7939: endToolHeaderDrag(static_cast<QMouseEvent *>(event)->globalPos(), true);
+  7945: endToolHeaderDrag(QCursor::pos(), false);
+  7954: void endToolHeaderDrag(const QPoint &global, bool drop) {
+
+tabDragMove: header lines [8029, 8034, 8045, 8057]
+  8029: if (m_tabDragTorn) tabDragMove(nullptr, mouse->globalPos());
+  8034: tabDragMove(m_tabDragPage, mouse->globalPos());
+  8045: tabDragMove(nullptr, global);   // the highlight has done its job
+  8057: void tabDragMove(QWidget *page, const QPoint &global) {
+
+tabDragEnd: header lines [8046, 8073]
+  8046: tabDragEnd(m_tabDragPage, global);
+  8073: void tabDragEnd(QWidget *page, const QPoint &global) {
+
+moveTabToWindow: header lines [8072, 8076, 8267, 8306]
+  8072: // another application. moveTabToWindow owns the whole move-out sequence.
+  8076: moveTabToWindow(m_tabs->indexOf(page), target, global);
+  8267: void moveTabToWindow(int index, RelayWindow *target, const QPoint &dropAt) {
+  8306: moveTabToWindow(index, nullptr, geometry().translated(40, 40).center());
+
+dropZoneOverlay: header lines [7990, 8063, 8083]
+  7990: QFrame *dropZoneOverlay(RelayWindow *w) {
+  8063: QFrame *zone = dropZoneOverlay(w);
+  8083: dropZoneOverlay(w);
+
+dragPaneEnd: header lines [7621, 7959, 8104]
+  7621: pane->onHeaderDragEnd = [guard](const QPoint &global, bool drop) { if (auto *w = windowOf(guard)) w->dragPaneEnd(guard, global, drop); };
+  7959: if (leaf) dragPaneEnd(leaf, global, drop);
+  8104: void dragPaneEnd(QWidget *dragged, const QPoint &global, bool drop) {
+
+takeLeaf: header lines [706, 7065, 7073, 7119, 7126, 7131, 7134, 8111, 8135, 8152, 8180, 8258, 8328, 8341, 8363, 8364, 8367, 8370, 8379, 8380, 8387, 8590]
+  706: if (!source->takeLeaf(pane)) return false;
+  7065: // The arrow: re-dock the new pane on that side of the pane it was split from. takeLeaf +
+  7073: if (!takeLeaf(pane) || !anchor || !pane) return;
+  7119: // takeLeaf + insertBeside pair every other keyboard move uses, so the shell, the agent and
+  7126: // Everything is checked BEFORE the pane is detached: takeLeaf leaves it parentless, so a
+  7131: if (!takeLeaf(pane)) return false;
+  7134: // takeLeaf cannot have taken it away; if it ever does, any remaining leaf is a home, and
+  8111: // takeLeaf unhooks it. A drop that docks it beneath is the slow path of the chord.
+  8135: if (!takeLeaf(dragged)) return;
+  8152: if (!takeLeaf(dragged) || !anchor) return;
+  8180: bool takeLeaf(QWidget *leaf) {
+  8258: if (!takeLeaf(leaf)) return;
+  8328: if (!takeLeaf(current) || !anchor) return;
+  8341: // page's rightmost column becomes the whole of a new rightmost column. takeLeaf and a
+  8363: // Read before takeLeaf, while the list still describes the page the pane is leaving;
+  8364: // takeLeaf's unwrapping keeps the root's child count, so the list still fits after.
+  8367: // matching root fills the edge and was refused above — so takeLeaf's unwrapping
+  8370: if (!takeLeaf(current)) return;
+  8379: // place. The root is wrapped BEFORE takeLeaf detaches the pane: on a two-pane page
+  8380: // takeLeaf would otherwise unwrap the root away into the page layout and delete it,
+  8387: if (!takeLeaf(current)) return;   // may collapse the root to its other pane, inside outer
+  8590: if (!takeLeaf(pane)) { background->deleteLater(); return false; }
+
+adoptPage: header lines [8242, 8287]
+  8242: void adoptPage(QWidget *page, QWidget *lastActive) {
+  8287: target->adoptPage(page, lastActive);
+
+movePastPageEdge: header lines [8311, 8318, 8347, 8410]
+  8311: // With no neighbor that way the pane is carried past the page's edge (movePastPageEdge).
+  8318: if (!neighbor) { movePastPageEdge(current, page, direction); return; }
+  8347: void movePastPageEdge(QWidget *current, QWidget *page, relay::panes::Direction direction) {
+  8410: // fallback and movePastPageEdge's outer wrapper use, just applied to every splitter in the
+
+pageArea: header lines [8348, 8354]
+  8348: const QRect pageArea(QPoint(0, 0), page->size());
+  8354: if (relay::panes::fillsTheEdge(area, pageArea, direction)) {
+
+equalizePage: header lines [6967, 6971, 8412, 8443]
+  6967: // splitter: equalizePage, with the Switchboard's floor, once Qt has laid out a newly wrapped
+  6971: QTimer::singleShot(0, pane, [this, pageGuard] { if (pageGuard) equalizePage(pageGuard); });
+  8412: void equalizePage(QWidget *page) {
+  8443: equalizePage(page);
+
+createClosedList: header lines [8468, 8479, 8500]
+  8468: auto *view = createClosedList(this);
+  8479: static relay::closed::ListView *createClosedList(RelayWindow *window) {
+  8500: return createClosedList(window);
+
+closeWindowWithWarning: header lines [7554, 8674]
+  7554: if (m_tabs->count() > 1) closeTab(index, true); else closeWindowWithWarning();
+  8674: void closeWindowWithWarning() {
