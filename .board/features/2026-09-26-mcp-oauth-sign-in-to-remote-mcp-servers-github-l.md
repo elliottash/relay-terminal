@@ -84,3 +84,15 @@ Relay's MCP client (#SSRQ) speaks streamable HTTP but refuses OAuth, so the host
 - One live sign-in to a real hosted server, recorded in `docs/qa_evidence/<date>-mcp-oauth/`.
 
 **Order.** Steps 1–3 are one commit (backend and tests). Steps 4 and 6 are the next. Steps 5 and 7 come last. Publish each with `relay-land submit HEAD --card '#ZA3S'`.
+**Update after the 2026-09-26 decisions.** These decisions settle the three questions under Risks. One step is added:
+
+8. **Client ID Metadata Document.**
+   - Add `site/oauth/mcp-client.json`. Its `client_id` is its own URL, `https://relay-terminal.ai/oauth/mcp-client.json`, with `client_name: "Relay"`, `client_uri: https://relay-terminal.ai/`, and `redirect_uris: ["http://127.0.0.1/callback", "http://localhost/callback"]` (loopback, port-agnostic under RFC 8252 §7.3). It also sets `grant_types: [authorization_code, refresh_token]`, `response_types: [code]` and `token_endpoint_auth_method: none`.
+   - `mcp_oauth.py` uses that URL as `client_id` whenever the AS metadata has `client_id_metadata_document_supported: true`. A test checks that the served file and the constant agree.
+   - The site goes live only through `./deploy.sh` with the owner's authorization (`docs/RELEASING.md`, Website). Until then the fake-AS tests cover CIMD, and live sign-ins use DCR.
+
+## Decisions
+- 2026-09-26: Owner: "I ageee with recs. for the domain, we have relay-terminal.ai".
+  1. Servers without dynamic registration or CIMD take a user-supplied `oauth.client_id`. Relay-owned OAuth apps (GitHub, Slack) come later.
+  2. Relay publishes its Client ID Metadata Document on `relay-terminal.ai`.
+  3. Legacy SSE-only servers stay refused.

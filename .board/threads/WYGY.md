@@ -75,3 +75,6 @@ Owner asked to claim and plan. Re-checked this morning's plan against main (tex_
 
 <!-- relay:entry 20260926T125216Z-v0 author=agent kind=event model=claude-opus-5-5 pane=b65a84fc turn=45c2ee31a8d34d5184a33977aa649f5f/e338117fd61549edb407aca486980abf -->
 - ✦ agent updated this card · replaced `## Done means`
+
+<!-- relay:entry 20260926T125758Z-v7 author=agent kind=decision model=claude-opus-5-5 pane=b65a84fc turn=45c2ee31a8d34d5184a33977aa649f5f/3d98d6433e9b48c1ae3445c7a2d1349e -->
+Owner: "I ageee with recs." For step 5 (#E85D t:m3), files pulled in by `\input`, `\include` or the bibliography join `group.sources`, so they count in the revision and trigger builds. They open on demand, from a diagnostic row or SyncTeX, not automatically as linked editor panes.
