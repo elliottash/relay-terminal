@@ -29,3 +29,43 @@ Committed ada6b670 (per-workspace cache and two-workspace regression); `mcpsetti
 
 <!-- relay:entry 20260926T145246Z-tv author=agent kind=progress model=gpt-6-sol pane=f393dabe turn=a9db98ce062646d8acad3376b00cf347/8c8bd0bd8e564278afd0b8d2be8be9e9 -->
 Queue job 8c61ac2b8362e270 is still queued behind another project's full-suite verification. Started transient user service `relay-watch-wpyz-publish.service` to check every 30 seconds and send a desktop notification on publication or failure; it exits when the queue reaches a terminal status.
+
+<!-- relay:entry 20260926T145814Z-hb author=landq kind=note -->
+Landing job c268d2c1ce7826af (41b1c3c18075) landed.
+Published c8489f9208db onto main (target was 53f9af18297f). <!-- landq:c268d2c1ce7826af:landed -->
+
+<!-- relay:entry 20260926T145819Z-65 author=landq kind=note -->
+Landing job c3c2a1e5dd6ee649 (c284bbd1c2bb) landed.
+Published 221997442edc onto main (target was 412c772dc77c). <!-- landq:c3c2a1e5dd6ee649:landed -->
+
+<!-- relay:entry 20260926T152748Z-7q author=reconcile kind=note -->
+Landing job 8c61ac2b8362e270 could not be reconciled automatically: guest:claude:e-elliottash-com: WorkspacePreparationError: queue development requires a session token. Returned to the author agent with the diagnostics. <!-- reconcile:8c61ac2b8362e270:author_required -->
+
+<!-- relay:entry 20260926T152748Z-an author=landq kind=note -->
+Landing job 8c61ac2b8362e270 (ada6b6705a87 for card #WPYZ) failed the gate.
+Reason: command exited -15: sh -c set -eu
+root="${RELAY_VERIFY_ROOT:-${XDG_CACHE_HOME:-$HOME/.cache}/relay/verify/relay-terminal}"
+mkdir -p "$root/src" "$root/build"
+exec 9>"$root/.lock"; flock 9
+rsync -a --checksum --delete --delete-excluded --exclude=/.git --exclude=/build --exclude='/build-*' ./ "$root/src/"
+[ -f "$root/build/CMakeCache.txt" ] || cmake -S "$root/src" -B "$root/build" -DCMAKE_BUILD_TYPE=Release
+cmake --build "$root/build" --parallel "${RELAY_JOBS:-2}"
+cd "$root/src"
+sh scripts/gate-tests.sh "$root/build"
+; reconcile: guest:claude:e-elliottash-com: WorkspacePreparationError: queue development requires a session token
+Gate log: /home/elliott/.local/state/relay/integration/12c8c9ef12cf3b12/logs/8c61ac2b8362e270/verify-1-ab4dcccc4731.log
+Fix it in your workspace and submit a new commit; the target was not moved. <!-- landq:8c61ac2b8362e270:failed -->
+
+<!-- relay:entry 20260926T152748Z-tg author=landq kind=note -->
+Landing job 8c61ac2b8362e270 (ada6b6705a87 for card #WPYZ) needs its author.
+Landing job 8c61ac2b8362e270 could not be reconciled automatically.
+Target d61445b9ff36 and your submission ada6b6705a87 conflict in: src/McpSettings.cpp, tests/mcpsettings_test.cpp.
+Reason: guest:claude:e-elliottash-com: WorkspacePreparationError: queue development requires a session token
+- attempt 1: fable (guest:claude:ashe-ethz-ch, account ashe-ethz-ch) → error, 0 in / 0 out
+    · WorkspacePreparationError: queue development requires a session token
+- attempt 2: fable (guest:claude:e-elliottash-com, account e-elliottash-com) → error, 0 in / 0 out
+    · WorkspacePreparationError: queue development requires a session token
+Sync your workspace to the current target, resolve these files there, run the project's checks, and submit the new commit. Nothing was changed in your workspace. <!-- landq:8c61ac2b8362e270:author_required -->
+
+<!-- relay:entry 20260926T152757Z-y7 author=agent kind=note model=claude-opus-5-5 pane=21c53ef4 turn=97d268b4846648f49e6aba30a5ebe433/6500e6123b704433b6a9007143955a57 -->
+Landing job 8c61ac2b (ada6b670) was stopped mid-gate at the owner's request, not failed by a test: the owner is switching the queue to a temporary build-only gate to drain outstanding work, with the full test suite run once afterwards. Resubmit the same commit; it will gate in a minute or two.
