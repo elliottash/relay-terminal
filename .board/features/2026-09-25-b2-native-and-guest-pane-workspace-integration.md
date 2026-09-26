@@ -10,7 +10,7 @@ rank: zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzw
 created: '2026-09-25'
 verify: {artifact: code, primary: script, also: [], human: none, criteria: 'Focused real-Git tests prove private native and guest workspace routing, canonical Board, resume, legacy behavior and failure refusal', sign_off: none, effort: high, stakes: rework, blast: capability}
 source: 'Approved #3MH4 implementation workstream, 2026-09-26'
-links: {plans: [], commits: [f5606d58d763, bf6231c20a65, 5d40b83c2239, 34077c2b2802], evidence: [], related: [], github: null}
+links: {plans: [], commits: [f5606d58d763, bf6231c20a65, 5d40b83c2239, 34077c2b2802, b2d455429dea], evidence: [], related: [], github: null}
 ---
 # B2: Native and guest pane workspace integration
 
