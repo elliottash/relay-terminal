@@ -34,6 +34,7 @@
 #include <QPixmap>
 #include <QPushButton>
 #include <QScrollBar>
+#include <QSettings>
 #include <QSignalBlocker>
 #include <QSplitter>
 #include <QStyledItemDelegate>
@@ -82,6 +83,7 @@ QString kindLabel(const QString &kind) {
     if (kind == QLatin1String("tool_output")) return QStringLiteral("Tool output");
     if (kind == QLatin1String("command")) return QStringLiteral("Command");
     if (kind == QLatin1String("command_output")) return QStringLiteral("Command output");
+    if (kind == QLatin1String("shell")) return QStringLiteral("Shell output");
     return kind;
 }
 
@@ -566,6 +568,7 @@ bool isSignalThread(const QJsonObject &item) {
     return isThread(item) && item.value(QStringLiteral("agent_type")).toString() == QLatin1String("signal");
 }
 bool isTerminal(const QJsonObject &item) { return item.value(QStringLiteral("source")).toString() == QLatin1String("terminal"); }
+bool isShell(const QJsonObject &item) { return item.value(QStringLiteral("source")).toString() == QLatin1String("shell"); }
 
 QString escaped(const QString &text) { return text.simplified().toHtmlEscaped(); }
 
@@ -1488,7 +1491,7 @@ SessionManager::SessionManager(QWidget *parent) : QWidget(parent) {
     // same thing, so it is where the Enter hint belongs. The preview's slow path is its own
     // button, wired below.
     connect(m_resume, &QPushButton::clicked, this, [this] {
-        if (onResumeHint) onResumeHint();
+        if (!isShell(selectedItem()) && onResumeHint) onResumeHint();
         activate(true);
     });
     connect(m_info, &QPushButton::clicked, this, [this] {
@@ -1915,6 +1918,8 @@ QJsonObject SessionManager::queryRequest() const {
     QJsonObject request{{QStringLiteral("query"), m_search->text()},
                         {QStringLiteral("scope"), scopeId()},
                         {QStringLiteral("limit"), 100}};
+    if (QSettings().value(QStringLiteral("sessions/search_shell"), false).toBool())
+        request.insert(QStringLiteral("include_shell"), true);
     if (m_openTasks->isChecked()) request.insert(QStringLiteral("has_open_tasks"), true);
     if (m_hasEdits->isChecked()) request.insert(QStringLiteral("has_edits"), true);
     if (m_unfinished->isChecked()) request.insert(QStringLiteral("unfinished"), true);
@@ -2107,6 +2112,9 @@ void SessionManager::fillFacets(const QJsonObject &facets) {
 // (#G2C7) Remember one light listing: every item the pane ever sees feeds the meta table,
 // so the instant filter works over what has loaded even before the meta reply lands.
 void SessionManager::rememberMeta(const QJsonObject &item) {
+    // The instant title index is a conversation listing; shell hits belong only to the current
+    // full-text reply, or they would linger after the option was turned off.
+    if (isShell(item)) return;
     const QString id = item.value(QStringLiteral("session_id")).toString();
     if (id.isEmpty()) return;
     Meta meta;
@@ -2261,7 +2269,7 @@ QTreeWidgetItem *SessionManager::addSessionRow(QTreeWidgetItem *parent, const QJ
     row->setToolTip(3, !tracksRequests ? QStringLiteral("Request tracking is available for Relay agent sessions")
                                     : open == 1 ? QStringLiteral("1 user request still needs completion")
                                                 : QStringLiteral("%1 user requests still need completion").arg(open));
-    row->setText(4, terminal ? QStringLiteral("terminal")
+    row->setText(4, isShell(item) ? QStringLiteral("shell") : terminal ? QStringLiteral("terminal")
                  : isGuestSource(source) ? guestLabel(source)
                                          : rowModelName(item));
     const qint64 tokens = item.value(QStringLiteral("tokens")).toVariant().toLongLong();
@@ -2270,11 +2278,13 @@ QTreeWidgetItem *SessionManager::addSessionRow(QTreeWidgetItem *parent, const QJ
     decorate(row, item);
     spanFirstColumn(row);   // #1Q5V: the title line spans the other columns, id after it
     // An arrow to unfold the quick look: the row needs a child before it has one.
-    auto *placeholder = new QTreeWidgetItem(row);
-    placeholder->setData(0, kKindRole, QStringLiteral("preview"));
-    placeholder->setData(0, kHtmlRole, QStringLiteral("Loading the quick look…"));
-    spanFirstColumn(placeholder);
-    placeholder->setFlags(Qt::ItemIsEnabled);
+    if (!isShell(item)) {
+        auto *placeholder = new QTreeWidgetItem(row);
+        placeholder->setData(0, kKindRole, QStringLiteral("preview"));
+        placeholder->setData(0, kHtmlRole, QStringLiteral("Loading the quick look…"));
+        spanFirstColumn(placeholder);
+        placeholder->setFlags(Qt::ItemIsEnabled);
+    }
     return row;
 }
 
@@ -2306,6 +2316,8 @@ void SessionManager::decorate(QTreeWidgetItem *row, const QJsonObject &item) {
         const QString agent = item.value(QStringLiteral("agent_id")).toString();
         const QString type = item.value(QStringLiteral("agent_type")).toString();
         title = QStringLiteral("↳ %1%2 · %3").arg(agent, type.isEmpty() ? QString() : QLatin1Char(' ') + type, title);
+    } else if (isShell(item)) {
+        title = QStringLiteral("$ ") + title;
     } else if (isTerminal(item)) {
         title = QStringLiteral("$ ") + title;
     }
@@ -2313,8 +2325,9 @@ void SessionManager::decorate(QTreeWidgetItem *row, const QJsonObject &item) {
     row->setData(0, kTitleRole, title);
 
     if (!thread) {
-        const QString recap = item.value(QStringLiteral("summary")).toString().simplified();
-        row->setText(6, recap.isEmpty() ? QStringLiteral("No recap saved") : recap);
+        const QString recap = isShell(item) ? item.value(QStringLiteral("snippet")).toString().simplified()
+                                            : item.value(QStringLiteral("summary")).toString().simplified();
+        row->setText(6, recap.isEmpty() ? (isShell(item) ? QString() : QStringLiteral("No recap saved")) : recap);
         row->setToolTip(6, recap);
         row->setForeground(6, recap.isEmpty() ? m_tree->palette().color(QPalette::PlaceholderText)
                                                 : m_tree->palette().color(QPalette::Text));
@@ -2329,7 +2342,8 @@ void SessionManager::decorate(QTreeWidgetItem *row, const QJsonObject &item) {
     QString closedText;
     if (const auto it = m_closed.constFind(sessionId); it != m_closed.constEnd())
         closedText = closedAgo(it->second, QDateTime::currentMSecsSinceEpoch());
-    row->setData(0, kBadgeRole, thread ? QStringList()
+    row->setData(0, kBadgeRole, thread ? QStringList() : isShell(item)
+                                        ? QStringList{QStringLiteral("journal %1").arg(item.value(QStringLiteral("journal_id")).toString().left(8))}
                                         : badges(item, m_openSessions.contains(openSessionKey(item)), closedText,
                                                  m_liveUsage.value(sessionId)));
 
@@ -2345,7 +2359,8 @@ void SessionManager::decorate(QTreeWidgetItem *row, const QJsonObject &item) {
                        item.value(QStringLiteral("spawn_turn")).isDouble()
                            ? QStringLiteral(", started in turn %1").arg(item.value(QStringLiteral("spawn_turn")).toInt()) : QString(),
                        tip);
-    tip.prepend(QStringLiteral("Session ID: %1\n").arg(sessionId));
+    tip.prepend(isShell(item) ? QStringLiteral("Shell journal: %1\nEnter opens the saved text.\n").arg(item.value(QStringLiteral("journal_id")).toString())
+                             : QStringLiteral("Session ID: %1\n").arg(sessionId));
     const QJsonArray rowMatches = item.value(QStringLiteral("matches")).toArray();
     // (#G2C7) A full-text match shows the piece that matched, in place of the opening prompt:
     // the first hit's line with its matched ranges; the line is a single line by construction,
@@ -2440,7 +2455,7 @@ void SessionManager::rebuildTree(const QString &keep) {
     QTreeWidgetItem *first = nullptr, *wanted = nullptr;
     const QDateTime now = QDateTime::currentDateTime();
     const QString grouping = m_group->currentData().toString();
-    int matches = 0, sessions = 0, threads = 0;
+    int matches = 0, sessions = 0, shells = 0, threads = 0;
     auto groupFor = [this, &groups, &grouping](const QString &name) -> QTreeWidgetItem * {
         QTreeWidgetItem *group = groups.value(name);
         if (!group) {
@@ -2502,7 +2517,8 @@ void SessionManager::rebuildTree(const QString &keep) {
         if (m_awaitingResults) break;   // (#G2C7) stale until this query's reply lands
         if (m_instantIds.contains(item.value(QStringLiteral("session_id")).toString())) continue;
         if (m_open->isChecked() && !m_openSessions.contains(openSessionKey(item))) continue;
-        ++sessions;
+        if (isShell(item)) ++shells;
+        else ++sessions;
         matches += item.value(QStringLiteral("match_count")).toInt();
         QTreeWidgetItem *parent = nullptr;
         if (grouping == QLatin1String("project")) parent = groupFor(item.value(QStringLiteral("project")).toString());
@@ -2609,6 +2625,7 @@ void SessionManager::rebuildTree(const QString &keep) {
             if (row->data(0, kKindRole).toString() == QLatin1String("session")) row->setExpanded(true);
     m_matches = matches;
     m_sessions = sessions;
+    m_shellCount = shells;
     m_threadCount = threads;
     const QSet<QString> collapsedGroups = m_collapsedGroups.value(grouping);
     m_filling = false;
@@ -2652,9 +2669,10 @@ void SessionManager::updateStatus() {
                                                                 : QStringLiteral("all projects");
     // `m_threadCount` is what was *drawn*, signal threads included: they are listed whether or
     // not the box is ticked (#AQ6X), so a count that ignored them would disagree with the list.
-    const QString counted = (m_threads->isChecked() || m_threadCount > 0)
+    QString counted = (m_threads->isChecked() || m_threadCount > 0)
         ? QStringLiteral("%1 session(s), %2 thread(s)").arg(m_sessions).arg(m_threadCount)
         : QStringLiteral("%1 session(s)").arg(m_sessions);
+    if (m_shellCount) counted += QStringLiteral(", %1 shell journal(s)").arg(m_shellCount);
     QString text = m_search->text().trimmed().isEmpty()
         ? QStringLiteral("%1 in %2 · %3 ms").arg(counted, scope).arg(m_elapsed)
         : QStringLiteral("%1, %2 match(es) in %3 · %4 ms").arg(counted).arg(m_matches).arg(scope).arg(m_elapsed);
@@ -2762,6 +2780,7 @@ void SessionManager::closePreview() {
 // reply, so previewing and unfolding do not ask twice.
 void SessionManager::requestPreview(const QString &sessionId) {
     if (sessionId.isEmpty() || !onPreview || m_previewPending == sessionId) return;
+    if (isShell(selectedItem())) return;
     m_previewPending = sessionId;
     onPreview(sessionId, m_search->text());
 }
@@ -2770,6 +2789,7 @@ void SessionManager::requestPreview(const QString &sessionId) {
 // (protocol 14.4) and kept, so folding and unfolding it again costs nothing.
 void SessionManager::unfold(QTreeWidgetItem *row) {
     if (!row || row->data(0, kKindRole).toString() != QLatin1String("session")) return;
+    if (isShell(QJsonDocument::fromJson(row->data(0, kItemRole).toString().toUtf8()).object())) return;
     if (row->data(0, kLoadedRole).toBool()) return;
     const QString id = row->data(0, kIdRole).toString();
     if (m_overviews.contains(id)) { fillUnfolded(row, m_overviews.value(id)); return; }
@@ -2919,6 +2939,7 @@ void SessionManager::updateButtons() {
     const QJsonObject item = selectedItem();
     const bool has = !item.isEmpty();
     const bool terminal = isTerminal(item);
+    const bool shell = isShell(item);
     const bool thread = isThread(item);
     // A guest session (protocol 26.7) is the guest's own file: Relay resumes it by running the
     // tool's command, and everything that reads a Relay session file — the ⓘ view, the summary —
@@ -2926,13 +2947,14 @@ void SessionManager::updateButtons() {
     const bool guest = isGuestItem(item);
     m_resume->setEnabled(has && !terminal);
     m_previewButton->setEnabled(has || m_viewStack->currentIndex() == 1);
-    m_resume->setText(thread ? QStringLiteral("Open history") : QStringLiteral("Resume"));
-    m_info->setEnabled(has && !terminal && !guest);
-    m_rename->setEnabled(has);
-    m_pin->setEnabled(has);
-    m_delete->setEnabled(has);
+    m_resume->setText(shell ? QStringLiteral("Open journal") : thread ? QStringLiteral("Open history") : QStringLiteral("Resume"));
+    m_info->setEnabled(has && !terminal && !guest && !shell);
+    m_rename->setEnabled(has && !shell);
+    m_pin->setEnabled(has && !shell);
+    m_delete->setEnabled(has && !shell);
     m_pin->setText(item.value(QStringLiteral("pinned")).toInt() > 0 ? QStringLiteral("Unpin") : QStringLiteral("Pin"));
-    m_resume->setToolTip(terminal ? QStringLiteral("Terminal history cannot be resumed; it is here to be searched.")
+    m_resume->setToolTip(shell ? QStringLiteral("Open the saved shell journal as a read-only replay.")
+                         : terminal ? QStringLiteral("Terminal history cannot be resumed; it is here to be searched.")
                          : thread ? QStringLiteral("Open this subagent thread's history, with the way back to its owner session.")
                          : guest ? QStringLiteral("Resume in the open pane, or run %1 in a new pane in %2 — %3 resumes its own session.")
                                        .arg(guestCommand(item),
@@ -2943,7 +2965,7 @@ void SessionManager::updateButtons() {
                              : QStringLiteral("Open this conversation in a new pane (Enter) · Shift+Enter keeps this list open."));
     const QString sessionId = item.value(QStringLiteral("session_id")).toString();
     m_reopen->setVisible(m_closed.contains(sessionId));
-    const bool summarisable = has && !thread && !terminal && !guest && bool(onSummarise);
+    const bool summarisable = has && !thread && !terminal && !guest && !shell && bool(onSummarise);
     const bool waiting = m_summarising.contains(sessionId);
     m_summarise->setVisible(summarisable && (waiting || item.value(QStringLiteral("summary")).toString().trimmed().isEmpty()));
     m_summarise->setEnabled(!waiting);
@@ -2953,6 +2975,10 @@ void SessionManager::updateButtons() {
 void SessionManager::activate(bool newPane, bool keepOpen) {
     const QJsonObject item = selectedItem();
     if (item.isEmpty()) return;
+    if (isShell(item)) {
+        if (onOpenShell) onOpenShell(item.value(QStringLiteral("journal_id")).toString());
+        return;
+    }
     if (isTerminal(item)) {
         m_note = QStringLiteral("Terminal history cannot be resumed; use the preview.");
         updateStatus();
@@ -2969,7 +2995,7 @@ void SessionManager::activate(bool newPane, bool keepOpen) {
 // has loaded is opened in a new pane instead; whoever wires onFork says which it is.
 void SessionManager::fork() {
     const QJsonObject item = selectedItem();
-    if (item.isEmpty() || isTerminal(item) || isThread(item)) return;
+    if (item.isEmpty() || isTerminal(item) || isThread(item) || isShell(item)) return;
     if (onFork) onFork(item);
     else activate(true);
 }
@@ -3253,7 +3279,7 @@ void SessionManager::showOperatorHelp() {
 
 void SessionManager::rename() {
     const QJsonObject item = selectedItem();
-    if (item.isEmpty() || !onRename) return;
+    if (item.isEmpty() || isShell(item) || !onRename) return;
     bool ok = false;
     const QString title = QInputDialog::getText(this, QStringLiteral("Rename"),
                                                 QStringLiteral("Title (empty restores the generated one):"),
@@ -3265,14 +3291,14 @@ void SessionManager::rename() {
 
 void SessionManager::togglePin() {
     const QJsonObject item = selectedItem();
-    if (item.isEmpty() || !onPin) return;
+    if (item.isEmpty() || isShell(item) || !onPin) return;
     m_pendingSelect = item.value(QStringLiteral("session_id")).toString();
     onPin(m_pendingSelect, item.value(QStringLiteral("pinned")).toInt() == 0);
 }
 
 void SessionManager::remove() {
     const QJsonObject item = selectedItem();
-    if (item.isEmpty() || !onDelete) return;
+    if (item.isEmpty() || isShell(item) || !onDelete) return;
     const bool terminal = isTerminal(item);
     const bool thread = isThread(item);
     const bool guest = isGuestItem(item);

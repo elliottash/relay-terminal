@@ -8839,6 +8839,9 @@ public:
                                   {"session_id", sessionId}, {"query", query}});
         };
         view->onResume = [self](const QJsonObject &item, bool newPane, bool) { if (self) self->openSavedSession(item, newPane); };
+        view->onOpenShell = [self](const QString &journalId) {
+            if (self && !journalId.isEmpty()) self->readJournal(journalId);
+        };
         // Ctrl+Enter. `fork` copies the conversation the worker is holding (protocol 5), so a saved
         // one nobody has loaded cannot be forked in one step: it opens in a new pane instead, and
         // the pane says which of the two happened rather than pretending.

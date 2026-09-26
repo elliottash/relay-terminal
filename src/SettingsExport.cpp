@@ -271,6 +271,7 @@ const QList<SettingSpec> &registry()
         // Privacy
         {QStringLiteral("instructions/project_auto"), true, QStringLiteral("Offer project instructions")},
         {QStringLiteral("sessions/index_guests"), true, QStringLiteral("Index guest sessions")},
+        {QStringLiteral("sessions/search_shell"), false, QStringLiteral("Search shell output")},
         {QStringLiteral("memory/import_guests"), true, QStringLiteral("Offer guest memories")},
         // Models / providers
         {QStringLiteral("models/custom"), QStringList(), QStringLiteral("Custom model ids")},

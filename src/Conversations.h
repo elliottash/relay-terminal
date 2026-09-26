@@ -206,6 +206,8 @@ public:
     // `keepOpen` is Shift+Enter (card #R6J0 follow-up): resume without closing this list, so
     // several conversations can be reattached in a row.
     std::function<void(const QJsonObject &item, bool newPane, bool keepOpen)> onResume;
+    // Shell search hits open their pane text journal, not a conversation.
+    std::function<void(const QString &journalId)> onOpenShell;
     // Enter on a subagent thread row: open its history (the ⓘ view).
     std::function<void(const QJsonObject &item)> onOpenThread;
     // Info (Ctrl+I) on a session row: its ⓘ view without resuming it.
@@ -439,7 +441,7 @@ private:
     QHash<QString, QPair<QString, qint64>> m_closed;
     QString m_project, m_pendingSelect, m_previewPending, m_batchScope, m_note;
     QString m_previewFor, m_previewHtml;      // the full preview as last filled, and for which row
-    int m_nextOffset = -1, m_matches = 0, m_sessions = 0, m_threadCount = 0;
+    int m_nextOffset = -1, m_matches = 0, m_sessions = 0, m_shellCount = 0, m_threadCount = 0;
     double m_elapsed = 0;
     QTimer *m_debounce = nullptr, *m_ages = nullptr;
     bool m_filling = false, m_batchRunning = false;

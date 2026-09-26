@@ -1697,6 +1697,61 @@ private slots:
         QCOMPARE(asked.last().value(QStringLiteral("branch")).toString(), QStringLiteral("work"));
     }
 
+    void shellSearchOptionAndJournalOpen() {
+        QSettings settings;
+        const QVariant saved = settings.value(QStringLiteral("sessions/search_shell"));
+        struct RestoreSetting {
+            QSettings &settings;
+            QVariant saved;
+            ~RestoreSetting() {
+                if (saved.isValid()) settings.setValue(QStringLiteral("sessions/search_shell"), saved);
+                else settings.remove(QStringLiteral("sessions/search_shell"));
+            }
+        } restore{settings, saved};
+        settings.setValue(QStringLiteral("sessions/search_shell"), false);
+        SessionManager manager;
+        QList<QJsonObject> asked;
+        manager.onQuery = [&asked](const QJsonObject &request) { asked << request; };
+        manager.show();
+        manager.refresh();
+        QVERIFY(!asked.last().contains(QStringLiteral("include_shell")));
+        settings.setValue(QStringLiteral("sessions/search_shell"), true);
+        manager.refresh();
+        QCOMPARE(asked.last().value(QStringLiteral("include_shell")), QJsonValue(true));
+        auto *group = manager.findChild<QComboBox *>(QStringLiteral("sessionsGroup"));
+        QVERIFY(group);
+        group->setCurrentIndex(group->findData(QStringLiteral("none")));
+
+        QJsonObject shell{{QStringLiteral("source"), QStringLiteral("shell")},
+                          {QStringLiteral("session_id"), QStringLiteral("shell-journal-7")},
+                          {QStringLiteral("journal_id"), QStringLiteral("journal-7")},
+                          {QStringLiteral("title"), QStringLiteral("make test")},
+                          {QStringLiteral("snippet"), QStringLiteral("42 tests passed")},
+                          {QStringLiteral("updated"), double(QDateTime::currentSecsSinceEpoch())},
+                          {QStringLiteral("matches"), QJsonArray{QJsonObject{
+                              {QStringLiteral("turn"), 0}, {QStringLiteral("kind"), QStringLiteral("shell")},
+                              {QStringLiteral("line"), QStringLiteral("42 tests passed")}}}}};
+        manager.setResults({{QStringLiteral("items"), QJsonArray{shell}}});
+        auto *tree = manager.findChild<QTreeWidget *>(QStringLiteral("sessionsTree"));
+        QVERIFY(tree);
+        auto *row = tree->topLevelItem(0);
+        QVERIFY(row);
+        QCOMPARE(row->text(0), QStringLiteral("$ make test"));
+        QCOMPARE(row->text(4), QStringLiteral("shell"));
+        QCOMPARE(row->text(6), QStringLiteral("42 tests passed"));
+        QString opened;
+        int resumed = 0, previewRequests = 0;
+        manager.onOpenShell = [&opened](const QString &id) { opened = id; };
+        manager.onResume = [&resumed](const QJsonObject &, bool, bool) { ++resumed; };
+        manager.onPreview = [&previewRequests](const QString &, const QString &) { ++previewRequests; };
+        tree->setCurrentItem(row);
+        QTest::keyClick(tree, Qt::Key_Return);
+        QCOMPARE(opened, QStringLiteral("journal-7"));
+        QCOMPARE(resumed, 0);
+        QTest::keyClick(tree, Qt::Key_P);
+        QCOMPARE(previewRequests, 0);
+    }
+
     void groupingKeepsUnfinishedSessionsInTheirRegularPlace() {
         SessionManager manager;
         manager.onQuery = [](const QJsonObject &) {};

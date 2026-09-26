@@ -1090,6 +1090,9 @@ QList<relay::SettingsSection> RelayWindow::settingsSections() {
         privacy.rows << toggleRow(QStringLiteral("instructions/project_auto"),
                                   QStringLiteral("Load project instruction files automatically"),
                                   QStringLiteral("CLAUDE.md, AGENTS.md and RELAY.md found in the workspace"), true);
+        privacy.rows << toggleRow(QStringLiteral("sessions/search_shell"),
+                                  QStringLiteral("Search shell output"),
+                                  QStringLiteral("Include saved pane shell journals in Sessions search results"), false);
         {
             // Review B1 (protocol 26.7): the Sessions list reads Claude Code's and Codex's own
             // transcripts into Relay's index so they can be listed, searched and resumed. The

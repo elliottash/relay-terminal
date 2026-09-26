@@ -2235,6 +2235,10 @@ line. `turns` is how many commands the journal holds. `time` is the command's st
 seconds, from the journal's `at` records). `match_count` is how many commands matched.
 `conversation_get` does not open a shell row. A hit opens as a read-only replay of the journal
 (`python3 -m relay_core.textjournal cat <journal id>`).
+In the Sessions GUI, Options › Search shell output is off by default. Turning it on adds
+`include_shell: true` to search requests; `has:shell` still enables shell hits for one query
+without changing the option. Shell rows are marked `$` and open the saved journal on Enter or
+double-click. Their matching lines appear in the row and Preview without `conversation_get`.
 
 ### 14.4 `conversation_get`
 
