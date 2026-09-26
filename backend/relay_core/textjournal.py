@@ -241,11 +241,22 @@ def conversation_label(ref: dict) -> str:
 
 
 def render_lines(directory: str | Path, *, plain: bool = False, since_clear: bool = False,
-                 conversation=None) -> list[str]:
+                 conversation=None, from_command: int | None = None) -> list[str]:
     """Every line, in order, as ANSI (or plain) text; conversations through `conversation(ref)`,
     which returns a list of already-formatted lines, or through `conversation_label`."""
     out: list[str] = []
+    command_index = -1
+    in_command = False
     for event in events(directory):
+        if event.kind == "line" and event.line is not None:
+            starts = bool(event.line.marks & (MARK_PROMPT_START | MARK_COMMAND_START | MARK_USER_SHELL))
+            if starts or not in_command:
+                command_index += 1
+                in_command = True
+        else:
+            in_command = False
+        if from_command is not None and command_index < from_command:
+            continue
         if event.kind == "clear":
             if since_clear:
                 out.clear()
@@ -516,6 +527,8 @@ def main(argv: list[str] | None = None) -> int:
     cat.add_argument("--plain", action="store_true", help="no colours")
     cat.add_argument("--since-clear", action="store_true", help="only what follows the last clear")
     cat.add_argument("--no-conversations", action="store_true", help="name conversations, do not draw them")
+    cat.add_argument("--from-command", type=int, default=None,
+                     help="start at this zero-based indexed shell command")
     sub.add_parser("seal-idle", help="seal open segments idle for an hour")
     sub.add_parser("recompress", help="rewrite segments sealed 7 days ago as xz")
     du = sub.add_parser("du", help="disk used, as JSON")
@@ -531,7 +544,7 @@ def main(argv: list[str] | None = None) -> int:
         conversation = (lambda ref: renderer(ref, plain=args.plain)) if renderer else None
         try:
             for text in render_lines(directory, plain=args.plain, since_clear=args.since_clear,
-                                     conversation=conversation):
+                                     conversation=conversation, from_command=args.from_command):
                 sys.stdout.write(text + "\n")
             sys.stdout.flush()
         except BrokenPipeError:   # `less` quit early

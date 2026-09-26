@@ -2976,7 +2976,8 @@ void SessionManager::activate(bool newPane, bool keepOpen) {
     const QJsonObject item = selectedItem();
     if (item.isEmpty()) return;
     if (isShell(item)) {
-        if (onOpenShell) onOpenShell(item.value(QStringLiteral("journal_id")).toString());
+        if (onOpenShell) onOpenShell(item.value(QStringLiteral("journal_id")).toString(),
+                                     item.value(QStringLiteral("command")).toInt(-1));
         return;
     }
     if (isTerminal(item)) {

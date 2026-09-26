@@ -1725,6 +1725,7 @@ private slots:
         QJsonObject shell{{QStringLiteral("source"), QStringLiteral("shell")},
                           {QStringLiteral("session_id"), QStringLiteral("shell-journal-7")},
                           {QStringLiteral("journal_id"), QStringLiteral("journal-7")},
+                          {QStringLiteral("command"), 3},
                           {QStringLiteral("title"), QStringLiteral("make test")},
                           {QStringLiteral("snippet"), QStringLiteral("42 tests passed")},
                           {QStringLiteral("updated"), double(QDateTime::currentSecsSinceEpoch())},
@@ -1740,13 +1741,18 @@ private slots:
         QCOMPARE(row->text(4), QStringLiteral("shell"));
         QCOMPARE(row->text(6), QStringLiteral("42 tests passed"));
         QString opened;
+        int openedCommand = -1;
         int resumed = 0, previewRequests = 0;
-        manager.onOpenShell = [&opened](const QString &id) { opened = id; };
+        manager.onOpenShell = [&opened, &openedCommand](const QString &id, int command) {
+            opened = id;
+            openedCommand = command;
+        };
         manager.onResume = [&resumed](const QJsonObject &, bool, bool) { ++resumed; };
         manager.onPreview = [&previewRequests](const QString &, const QString &) { ++previewRequests; };
         tree->setCurrentItem(row);
         QTest::keyClick(tree, Qt::Key_Return);
         QCOMPARE(opened, QStringLiteral("journal-7"));
+        QCOMPARE(openedCommand, 3);
         QCOMPARE(resumed, 0);
         QTest::keyClick(tree, Qt::Key_P);
         QCOMPARE(previewRequests, 0);

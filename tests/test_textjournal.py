@@ -100,6 +100,11 @@ def test_commands_cut_at_prompts_and_conversations(tmp_path):
         ("$ ls", ["x"]),
     ]
     assert [c.index for c in commands] == [0, 1, 2]
+    assert tj.render_lines(directory, plain=True, from_command=1) == [
+        "$ make", "cc -o x x.c", "error: boom", "── relay conversation " + "0" * 32 + " ──",
+        "$ ls", "x",
+    ]
+    assert tj.render_lines(directory, plain=True, from_command=2) == ["$ ls", "x"]
 
 
 def test_seal_idle_and_recompress(tmp_path):

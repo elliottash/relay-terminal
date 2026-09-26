@@ -207,7 +207,7 @@ public:
     // several conversations can be reattached in a row.
     std::function<void(const QJsonObject &item, bool newPane, bool keepOpen)> onResume;
     // Shell search hits open their pane text journal, not a conversation.
-    std::function<void(const QString &journalId)> onOpenShell;
+    std::function<void(const QString &journalId, int command)> onOpenShell;
     // Enter on a subagent thread row: open its history (the ⓘ view).
     std::function<void(const QJsonObject &item)> onOpenThread;
     // Info (Ctrl+I) on a session row: its ⓘ view without resuming it.

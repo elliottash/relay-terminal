@@ -4283,7 +4283,7 @@ public:
     // The pane's older text (card #HEY7): every line its journal holds, with its colours, read in
     // `less -R` from this pane's own shell — the terminal can hold only its newest rows. `q` goes
     // back. Without `less` (Windows), or with the shell busy, the plain text opens in a file pane.
-    void readJournal(const QString &id) {
+    void readJournal(const QString &id, int fromCommand = -1) {
         const QString dir = relay::textjournal::journalDirectory(id);
         if (dir.isEmpty() || !QFileInfo::exists(dir)) {
             status(QStringLiteral("This pane's earlier text is no longer kept."));
@@ -4292,13 +4292,19 @@ public:
         if (id == m_scrollbackId) m_paneJournal.flush(m_backend);
         const QString script = m_data + QStringLiteral("/backend/relay_core/textjournal.py");
         const QString less = QStandardPaths::findExecutable(QStringLiteral("less"));
+        const QString commandArg = fromCommand >= 0
+            ? QStringLiteral(" --from-command %1").arg(fromCommand) : QString();
         if (!less.isEmpty() && hasShell() && shellIdleAtPrompt() && !m_login.active) {
             sendShellInput(shellQuote(m_python) + QStringLiteral(" -S ") + shellQuote(script) + QStringLiteral(" cat ")
-                           + shellQuote(dir) + QStringLiteral(" | less -R +G\n"));
+                           + shellQuote(dir) + commandArg
+                           + (fromCommand >= 0 ? QStringLiteral(" | less -R\n")
+                                               : QStringLiteral(" | less -R +G\n")));
             return;
         }
         QProcess cat;
-        cat.start(m_python, {QStringLiteral("-S"), script, QStringLiteral("cat"), dir, QStringLiteral("--plain")});
+        QStringList catArgs{QStringLiteral("-S"), script, QStringLiteral("cat"), dir, QStringLiteral("--plain")};
+        if (fromCommand >= 0) catArgs << QStringLiteral("--from-command") << QString::number(fromCommand);
+        cat.start(m_python, catArgs);
         if (!cat.waitForFinished(30000) || cat.exitCode() != 0) {
             status(QStringLiteral("Could not read this pane's earlier text."));
             return;
@@ -4884,7 +4890,7 @@ public:
 
     void applyTranscriptVisibility() {
         if (!m_terminalHost) return;
-        const bool show = !m_hideEmptyTranscript || m_transcriptUsed;
+        const bool show = !m_hideEmptyTranscript || m_transcriptUsed || m_linkedShell;
         // isVisibleTo(this) is false while an embedding page is hidden, even when the
         // terminal host itself has not been hidden. Set its own visibility explicitly.
         if (m_terminalHost->isHidden() == !show) return;
