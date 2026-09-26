@@ -1694,6 +1694,12 @@ public:
     // replaced.
     void adoptSessionText(const QString &id, const QString &directory, const QString &source,
                           const QString &guestId) {
+        // The journal keeps a reference to the conversation, not its lines (card #HEY7): while
+        // one owns the pane its rows are the transcript's, journaled as a {"c":…} record.
+        // Before the early return, because a restored pane re-reports a conversation it
+        // already had, and this journal has not met it yet.
+        m_paneJournal.setConversation(guestId.isEmpty() && source.isEmpty() ? QStringLiteral("relay") : source,
+                                      guestId.isEmpty() ? id : guestId, directory);
         if (id == m_sessionTextId && directory == m_sessionTextDir && source == m_sessionTextSource
             && guestId == m_sessionTextGuestId)
             return;

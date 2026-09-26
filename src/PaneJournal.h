@@ -38,18 +38,34 @@ public:
         backend->setCollectEvicted(true);
     }
 
+    // The conversation this pane's text belongs to from here on (card #HEY7), an empty id when
+    // none does. While a conversation owns the pane its output is the transcript's, so the
+    // journal holds a `{"c":…}` reference in place of its rows rather than a second copy of them.
+    // The pane reports the same conversation on every change; only a real change reaches the
+    // journal, and a conversation the writer has not met yet is written the next time rows
+    // arrive (or on the flush a restore's absorb triggers).
+    void setConversation(const QString &source, const QString &id, const QString &directory) {
+        m_conversation = id;
+        m_conversationSource = source;
+        m_conversationDirectory = directory;
+        if (m_writer) syncConversation(m_writer.get());
+    }
+
     void take(const EvictedText &text) {
         textjournal::Writer *w = writer();
         if (!w) return;
-        int clear = 0;
-        for (int i = 0; i < text.rows.size(); ++i) {
-            while (clear < text.clears.size() && text.clears.at(clear) <= i) {
-                w->appendClear();
-                ++clear;
+        syncConversation(w);
+        if (m_writtenConversation.isEmpty()) {
+            int clear = 0;
+            for (int i = 0; i < text.rows.size(); ++i) {
+                while (clear < text.clears.size() && text.clears.at(clear) <= i) {
+                    w->appendClear();
+                    ++clear;
+                }
+                w->appendRow(text.rows.at(i), text.continuation.value(i), text.marks.value(i));
             }
-            w->appendRow(text.rows.at(i), text.continuation.value(i), text.marks.value(i));
+            for (; clear < text.clears.size(); ++clear) w->appendClear();
         }
-        for (; clear < text.clears.size(); ++clear) w->appendClear();
         if (!m_flushTimer.isActive()) m_flushTimer.start();
     }
 
@@ -78,6 +94,8 @@ public:
     void absorbRows(const QStringList &rows) {
         textjournal::Writer *w = writer();
         if (!w || rows.isEmpty()) return;
+        syncConversation(w);
+        if (!m_writtenConversation.isEmpty()) return;   // the transcript holds these rows
         for (const QString &row : rows) w->appendRow(row, false, 0);
         w->flushPending();
         flush();
@@ -90,11 +108,20 @@ public:
     }
 
 private:
+    // Bring the journal's open-conversation marker in line with what the pane last reported:
+    // `{"c":…}` when a conversation took over, `{"c":null}` when it handed the pane back.
+    void syncConversation(textjournal::Writer *w) {
+        if (!w || m_conversation == m_writtenConversation) return;
+        w->appendConversation(m_conversationSource, m_conversation, m_conversationDirectory);
+        m_writtenConversation = m_conversation;
+    }
+
     textjournal::Writer *writer() {
         const QString id = m_id();
         if (m_writer && m_writer->id() != id) {
             m_writer->seal();
             m_writer.reset();
+            m_writtenConversation.clear();   // a new journal has not met the conversation yet
         }
         if (!m_writer) {
             m_writer = std::make_unique<textjournal::Writer>(id);
@@ -112,6 +139,10 @@ private:
     std::function<QString()> m_cwd;
     std::function<bool(const QString &)> m_skip;
     std::unique_ptr<textjournal::Writer> m_writer;
+    QString m_conversation;          // the conversation the pane reported, "" for the shell
+    QString m_conversationSource;
+    QString m_conversationDirectory;
+    QString m_writtenConversation;   // the conversation the journal's open segment holds
     QTimer m_flushTimer;
 };
 
