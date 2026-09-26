@@ -843,6 +843,10 @@ public:
         if (hasShell() && m_consolePluginRequest.isEmpty())
             QTimer::singleShot(5000, this, [this] {
                 if (!m_seenShell && m_backend) {
+                    // Native until the first prompt, as takeControl() before one is: a shell that
+                    // was only slow (a restart starts every pane at once) hands the prompt box and
+                    // its restored text back when it does report (#MDQ8).
+                    m_autoHuman = true;
                     setNative(true);
                     status(QStringLiteral("Shell integration did not initialize. Native terminal remains available; try --clean-shell."));
                 }

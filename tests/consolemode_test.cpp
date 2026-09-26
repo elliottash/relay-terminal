@@ -2498,23 +2498,30 @@ void aTerminalPaneIsNeverLinked()
 // Card #MDQ8: a restored pane's text came back only after the user typed a command. The `ready`
 // event is written by shell/event.py from inside PROMPT_COMMAND, while that pipeline is still the
 // tty's foreground group, so the replay at the event found the shell busy and waited for "the
-// next prompt". The wrapper below holds the pipeline in the foreground after every `ready`, which
-// is the race made certain: the text must still appear with no command typed. Run on its own
-// (--mdq8-only) because the wrapper goes first on PATH for the whole process.
-void aRestoredPaneReplaysWithoutACommand()
+// next prompt". A python3 wrapper first on PATH makes that race certain; run on its own
+// (--mdq8-only) because the wrapper stays on PATH for the whole process.
+//
+// `before` delays the first `ready` (a shell slowed by a restart's many panes, past the 5 s
+// integration watchdog that puts the pane in native mode); `after` holds every `ready` pipeline
+// in the foreground once the event is written.
+static void restoredPaneReplays(const QString &name, double before, double after)
 {
     const QString bin = home->filePath(QStringLiteral("mdq8-bin"));
     QDir().mkpath(bin);
     // Resolved once: after the first run the wrapper itself is first on PATH (--repeat).
     static const QString real = QStandardPaths::findExecutable(QStringLiteral("python3"));
     CHECK(!real.isEmpty());
+    const QString once = home->filePath(QStringLiteral("mdq8-") + name + QStringLiteral(".first"));
+    QFile::remove(once);
     QFile wrapper(bin + QStringLiteral("/python3"));
     CHECK(wrapper.open(QIODevice::WriteOnly));
     wrapper.write(QStringLiteral("#!/bin/sh\n"
                                  "if [ \"$1\" = -S ] && [ \"$3\" = ready ]; then\n"
-                                 "  \"%1\" \"$@\"; s=$?; sleep 1.5; exit $s\n"
+                                 "  [ -e \"%2\" ] || { : > \"%2\"; sleep %3; }\n"
+                                 "  \"%1\" \"$@\"; s=$?; sleep %4; exit $s\n"
                                  "fi\n"
-                                 "exec \"%1\" \"$@\"\n").arg(real).toUtf8());
+                                 "exec \"%1\" \"$@\"\n")
+                      .arg(real, once, QString::number(before), QString::number(after)).toUtf8());
     wrapper.close();
     wrapper.setPermissions(QFile::ReadOwner | QFile::WriteOwner | QFile::ExeOwner);
     if (!qEnvironmentVariable("PATH").startsWith(bin + QLatin1Char(':')))
@@ -2522,14 +2529,19 @@ void aRestoredPaneReplaysWithoutACommand()
 
     Pane pane(home->path(), home->path(), true);
     pane.onWorkerLine = [](const QJsonObject &) {};
-    CHECK(pane.queueTextReplay({QStringLiteral("RESTORED_MDQ8 line one"), QStringLiteral("RESTORED_MDQ8 line two")},
+    const QString marker = QStringLiteral("RESTORED_MDQ8 ") + name;
+    CHECK(pane.queueTextReplay({marker + QStringLiteral(" line one"), marker + QStringLiteral(" line two")},
                                Pane::RestoredKind::Scrollback));
-    CHECK(waitFor([&pane] { return transcriptOf(pane).contains(QStringLiteral("RESTORED_MDQ8 line two")); }));
-    if (!transcriptOf(pane).contains(QStringLiteral("RESTORED_MDQ8 line two")))
-        std::fprintf(stderr, "mdq8 shell pid %d, tree %s, pane text:\n%s\n", pane.shellPid(),
+    const QString last = marker + QStringLiteral(" line two");
+    CHECK(waitFor([&pane, &last] { return transcriptOf(pane).contains(last); }, 20000));
+    if (!transcriptOf(pane).contains(last))
+        std::fprintf(stderr, "mdq8 %s: shell pid %d, tree %s, pane text:\n%s\n", qPrintable(name), pane.shellPid(),
                      QJsonDocument(pane.treeStatus()).toJson(QJsonDocument::Compact).constData(),
                      qPrintable(transcriptOf(pane)));
 }
+
+void aRestoredPaneReplaysWithoutACommand() { restoredPaneReplays(QStringLiteral("held"), 0, 1.5); }
+void aSlowShellStillReplaysAfterTheWatchdog() { restoredPaneReplays(QStringLiteral("slow"), 6, 0); }
 
 }  // namespace cases
 
@@ -2696,7 +2708,10 @@ int main(int argc, char **argv)
         });
     }
     if (app.arguments().contains(QStringLiteral("--mdq8-only"))) {
-        return runRepeated("mdq8", "mdq8: all cases passed", [] { cases::aRestoredPaneReplaysWithoutACommand(); });
+        return runRepeated("mdq8", "mdq8: all cases passed", [] {
+            cases::aRestoredPaneReplaysWithoutACommand();
+            cases::aSlowShellStillReplaysAfterTheWatchdog();
+        });
     }
     if (app.arguments().contains(QStringLiteral("--activity-history-only"))) {
         return runRepeated("activity-history", nullptr, [] {
