@@ -6,12 +6,13 @@ labels: [feature, board, switchboard, research]
 assignee: agent
 implemented_by: anthropic/claude-opus-5-5 via claude-code
 session: ada00cf0-62a9-4040-9c07-b0a0e535ce97
+blocked_by: [BP15]
 priority: 2
 rank: zzzzzzzzzzzzzzzzzzzzw
 created: '2026-09-24'
 verify: {artifact: system, primary: script, also: [person], human: required, criteria: 'Targeted pytest (test_board_projects, test_projects_protocol) and ctest projects/projectspane pass; under Xvfb with three fixture projects, two sharing a root and one without a checkout, the Projects tab shows three distinct rows, the missing root as missing, the Focus cap, and a posted update; relay-board check refuses a global work card naming one project.', sign_off: none, effort: medium, stakes: rework}
 source: owner in Relay pane, 2026-09-24
-links: {plans: [], commits: [fab830d4f891, 5c4f7e56e03b, 03a9b0500e9a], evidence: [docs/qa_evidence/2026-09-26-projects-feature/], related: [JN7X, 1QKM, GRT2, ZT58, B253], github: null}
+links: {plans: [], commits: [fab830d4f891, 5c4f7e56e03b, 03a9b0500e9a, 4cb0f2252d50], evidence: [docs/qa_evidence/2026-09-26-projects-feature/], related: [JN7X, 1QKM, GRT2, ZT58, B253], github: null}
 ---
 # A Relay-wide Projects feature above per-project Boards
 
