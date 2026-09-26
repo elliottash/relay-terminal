@@ -9,7 +9,7 @@ rank: zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzi
 created: '2026-09-25'
 verify: {artifact: decision, primary: person, also: [ai-text], human: required, criteria: 'the owner reads docs/MAIL-PLUGIN-DESIGN.md and approves the scope, the BYO setup, the tool contract, the skill contract and the build plan, or names what to change', sign_off: none, effort: medium, stakes: reputation, blast: capability}
 source: 'Owner approval on #SZ1H, 2026-09-25'
-links: {plans: [docs/MAIL-PLUGIN-DESIGN.md], commits: [553dd3ac], evidence: [docs/MAIL-PLUGIN-DESIGN.md], related: [9HS0, MEPR], github: null}
+links: {plans: [docs/MAIL-PLUGIN-DESIGN.md], commits: [02ad336f], evidence: [docs/MAIL-PLUGIN-DESIGN.md], related: [9HS0, MEPR], github: null}
 ---
 # Design mail task plugin and thin triage skill
 
@@ -38,7 +38,7 @@ Refreshed 2026-09-26. Design only; nothing enters the bundle until the design is
 2026-09-26, owner ("I agree with the recs. proceed"): Gmail API only first; bring-your-own OAuth client with guided setup; search, read, label, archive and draft, no send. The design can now be written.
 
 ## Execution Summary
-Design written: [`docs/MAIL-PLUGIN-DESIGN.md`](../../docs/MAIL-PLUGIN-DESIGN.md) (commit `553dd3ac`), indexed in `docs/README.md`. No plugin or skill code.
+Design written: [`docs/MAIL-PLUGIN-DESIGN.md`](../../docs/MAIL-PLUGIN-DESIGN.md) (commit `02ad336f`), indexed in `docs/README.md`. No plugin or skill code.
 
 - **Scope.** One Gmail scope, `gmail.modify`: the least one that covers label and archive, and it already covers read and draft. No Gmail scope allows drafts without send (`gmail.compose` and `gmail.modify` both permit `messages.send`), so the no-send rule is enforced in Relay's code. There is no send tool, and the client has a literal method allowlist, tested against Gmail's discovery document, that makes send, delete, trash and settings writes unreachable. `mail.google.com` is never requested.
 - **BYO client and tokens.** A seven-step guided sheet: Cloud project, enable the API, consent screen (Internal on Workspace; on External, publish to production because Testing tokens expire after 7 days), add the scope, create a Desktop client, review, then loopback + PKCE consent. The client ID, secret and refresh token go in the OS keyring under a new `credential mail/gmail/<slug>` keystore namespace, with no env fallback. The access token stays in worker memory only. The non-secret `mail-accounts.json` holds the address and scopes. Revoke is Options › Security › Mail accounts › Disconnect: it calls Google's revoke endpoint and deletes the local copies.
