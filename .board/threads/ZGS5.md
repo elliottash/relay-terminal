@@ -23,3 +23,15 @@ Trace the 71.8k → 68.8k event, stop guest panes using Relay's native auto-comp
 
 <!-- relay:entry 20260926T152127Z-t9 author=agent kind=progress model=gpt-6-sol pane=86c4bdd8 turn=8d9a841055734e508849fda4e0138f20/d8d901e77e52461bb8a872f24baaedef -->
 Fix committed as 40fd7966 and queued for publication as 29e53a9dd80c2978. Focused compaction suite: 12/12 passed; guest aggregate usage tests: 3/3 passed. Awaiting the publisher's accepted gate before moving the card out of Executing.
+
+<!-- relay:entry 20260926T152258Z-dz author=landq kind=note -->
+Landing job 449f7a60897ebaee (faeb608576f9) landed.
+Published faeb608576f9 onto main (target was 722f2494270d). <!-- landq:449f7a60897ebaee:landed -->
+
+<!-- relay:entry 20260926T153046Z-9r author=landq kind=note -->
+Landing job 29e53a9dd80c2978 (40fd7966d12e for card #ZGS5) landed.
+Published 8a425ea53ade onto main (target was 32be56adec21).
+Your workspace wtd0b2c26a53b5e167 may now be released; its receipt is `relay-land receipt 29e53a9dd80c2978`. <!-- landq:29e53a9dd80c2978:landed -->
+
+<!-- relay:entry 20260926T153106Z-10 author=agent kind=event model=gpt-6-sol pane=86c4bdd8 turn=8d9a841055734e508849fda4e0138f20/0a5fb484d62247acac2778b9c4f08e97 -->
+- ✦ agent moved this card · Running → Done, session 86c4bdd8 released, wrote `## Execution Summary`, `## Tests` · Published as 8a425ea53ade by queue job 29e53a9dd80c2978; focused compaction suite passed 12/12 and the guest threshold regression proves the fix. · verified_by openai/gpt-6-sol via codex:ashe-ethz-ch
