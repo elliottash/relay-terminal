@@ -1,12 +1,15 @@
 ---
 id: 9Y7X
 type: work
-status: planned
+status: executing
 labels: [feature, pdf, ui]
+assignee: agent
+implemented_by: openai/gpt-6-sol via codex
+session: cfad5dd0-a071-4afc-9db8-b1699f0bc04e
 rank: zzzzzzzzzzzzzzzzzzzzzzzzzzzzzw
 created: '2026-09-25'
 verify: {artifact: visual, primary: probe, also: [script, ai-visual], human: optional, criteria: 'Open local and SSH-hosted multi-page PDFs in an installed build; pages render inside Relay, scroll normally, and remain visible after reload.', sign_off: none, effort: medium, stakes: rework, blast: capability}
-links: {plans: [], commits: [], evidence: [], related: [WQFS, P2W8], github: null}
+links: {plans: [], commits: [f9c7d5904584, 0d5ac28e32d7, 4b4dd33621a3, 5e58c8fe3fba], evidence: [], related: [WQFS, P2W8], github: null}
 ---
 # Ship the in-app PDF viewer in standard Relay builds
 
