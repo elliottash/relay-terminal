@@ -2192,8 +2192,9 @@ BoardView::BoardView(const QString &workspace, QWidget *parent)
     // unchecked by default"): Done is where dropped cards fold, and a "dropped" id is held for
     // the board that gives one a column. A saved choice still wins — the restore replaces this
     // whole set with `setHiddenSections`, and only when the last visit left something hidden.
-    m_hidden = QSet<QString>::fromList(
-        QList<QString>{board::verifiedSection(), board::doneSection(), QStringLiteral("dropped")});
+    m_hidden.insert(board::verifiedSection());
+    m_hidden.insert(board::doneSection());
+    m_hidden.insert(QStringLiteral("dropped"));
     auto *layout = new QVBoxLayout(this);
     layout->setContentsMargins(0, 0, 0, 0);
     layout->setSpacing(0);
