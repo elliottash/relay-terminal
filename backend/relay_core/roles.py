@@ -24,7 +24,7 @@ from .presets import (EFFORT_LADDER, PRESETS, TIER_LABELS, TIERS, apply_effort, 
                       openrouter_twin, provider_tier_model, tier_default,
                       tier_fallbacks, validate_effort, validate_tier)
 from .provider import MIN_OUTPUT_TOKENS, ProviderConfig
-from . import customproviders, hosted, key_accounts, localmodels, relay_pro
+from . import customproviders, guest_accounts, hosted, key_accounts, keystore, localmodels, relay_pro
 
 
 def _hostname(base_url: str) -> str:
@@ -524,11 +524,34 @@ def ordered_candidates(entries: list[dict], *, choose: bool = False, draw=None,
     median standing in for None), the probability that gave, the uniform draw and the pick. The
     record goes to ``record`` when given, else — for a real draw, not an injected one — to
     `logs.routing_draw`."""
-    groups: dict[int, list[dict]] = {}
+    # A family row in the saved list represents each of its independently paying accounts.
+    # An account ranked explicitly keeps that rank and must not be cloned beside the family.
+    explicit = {(entry.get("preset"), entry.get("model")) for entry in entries}
+    expanded = []
     for index, entry in enumerate(entries, 1):
         rank = entry.get("rank", index)
         if type(rank) is not int or rank < 1:
             rank = index
+        expanded.append((rank, entry))
+        family = entry.get("preset")
+        if family not in ("guest:codex", "guest:claude", *key_accounts.PLANS):
+            continue
+        if family.startswith("guest:"):
+            from . import guest_harness_provider
+            accounts = guest_accounts.accounts(family.removeprefix("guest:"))
+        else:
+            accounts = key_accounts.accounts(family)
+        for account in accounts:
+            if family.startswith("guest:"):
+                if guest_harness_provider.login_status(account.key) is False:
+                    continue
+            elif not keystore.key_source(account.preset_id):
+                continue
+            if (account.preset_id, entry.get("model")) in explicit:
+                continue
+            expanded.append((rank, {**entry, "preset": account.preset_id}))
+    groups: dict[int, list[dict]] = {}
+    for rank, entry in expanded:
         groups.setdefault(rank, []).append(entry)
     result = []
     if record is None and draw is None and choose:

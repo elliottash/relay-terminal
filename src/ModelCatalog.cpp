@@ -64,6 +64,9 @@ QString perKey(const QString &group, const QString &key) { return QStringLiteral
 bool usableRow(const QJsonObject &preset) {
     const bool hosted = preset.value(QStringLiteral("hosted")).toBool();
     if (hosted) return preset.value(QStringLiteral("available")).toBool();
+    if (preset.value(QStringLiteral("harness")).toBool()
+        && preset.value(QStringLiteral("logged_in")).isBool()
+        && !preset.value(QStringLiteral("logged_in")).toBool()) return false;
     return preset.value(QStringLiteral("has_stored_key")).toBool()
         || preset.value(QStringLiteral("local")).toBool()
         || preset.value(QStringLiteral("harness")).toBool()
@@ -1275,10 +1278,37 @@ QList<Entry> live(const Catalog &catalog, qint64 now) {
     return out;
 }
 
+// A family entry stands for every separately signed-in account serving that model. Keep an
+// explicitly ranked account where the user put it rather than adding it a second time here.
+static QList<curation::TierEntry> accountTierList(const Catalog &catalog, const QString &tier) {
+    const QList<curation::TierEntry> saved = curation::activeTierList(tier);
+    QSet<QString> explicitKeys;
+    for (const auto &item : saved) explicitKeys.insert(item.key);
+    QList<curation::TierEntry> result;
+    const QStringList presets = catalog.presets();
+    for (const auto &item : saved) {
+        result << item;
+        QString family, model;
+        if (!Catalog::splitKey(item.key, &family, &model)
+            || (family != QStringLiteral("guest:codex")
+                && family != QStringLiteral("guest:claude")
+                && family != QStringLiteral("glm-coding")
+                && family != QStringLiteral("kimi-code"))) continue;
+        for (const QString &account : presets) {
+            if (!account.startsWith(family + QLatin1Char(':'))) continue;
+            const QString key = Catalog::keyFor(account, model);
+            const Entry *entry = catalog.find(key);
+            if (!entry || !entry->usable || explicitKeys.contains(key)) continue;
+            result << curation::TierEntry{key, item.effort, item.rank};
+        }
+    }
+    return result;
+}
+
 QList<Entry> liveTier(const Catalog &catalog, const QString &tier, qint64 now) {
     if (now <= 0) now = QDateTime::currentSecsSinceEpoch();
     QList<Entry> out;
-    for (const curation::TierEntry &item : curation::activeTierList(tier)) {
+    for (const curation::TierEntry &item : accountTierList(catalog, tier)) {
         const Entry *entry = catalog.find(item.key);
         if (entry && entry->usable && !exhausted(catalog, entry->preset, now)) out << *entry;
     }
@@ -1291,7 +1321,7 @@ Entry drawTier(const Catalog &sourceCatalog, const QString &tier, qint64 now, do
     struct Candidate { Entry entry; double weight; double score = -1.0; };
     QList<Candidate> peers;
     int bestRank = std::numeric_limits<int>::max();
-    const QList<curation::TierEntry> list = curation::activeTierList(tier);
+    const QList<curation::TierEntry> list = accountTierList(catalog, tier);
     for (int i = 0; i < list.size(); ++i) {
         const auto &item = list.at(i);
         const int rank = item.rank > 0 ? item.rank : i + 1;

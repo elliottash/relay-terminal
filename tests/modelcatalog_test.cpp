@@ -1479,6 +1479,64 @@ private Q_SLOTS:
         QCOMPARE(drawTier(catalog, tier, 1000, 0.1).key, QStringLiteral("kimi-code|k3"));
     }
 
+    void registeredGuestAccountsDrawIndependently() {
+        QJsonArray rows = groupPresets();
+        QJsonObject second = rows.first().toObject();
+        second.insert(QStringLiteral("id"), QStringLiteral("guest:codex:second"));
+        rows << second;
+        Catalog catalog = catalogFrom(rows);
+        const QString tier = QStringLiteral("main");
+        curation::setTierList(tier, {
+            {QStringLiteral("guest:codex|gpt-6-sol"), QStringLiteral("medium"), 1},
+            {QStringLiteral("glm-coding|glm-5.3"), QStringLiteral("high"), 1}});
+        const qint64 now = 100000;
+        for (const auto &pair : {qMakePair(QStringLiteral("guest:codex"), 50.0),
+                                 qMakePair(QStringLiteral("guest:codex:second"), 25.0),
+                                 qMakePair(QStringLiteral("glm-coding"), 75.0)}) {
+            catalog.limitUpdatedAt[pair.first] = now;
+            catalog.limits[pair.first] = {LimitWindow{QStringLiteral("weekly"), pair.second, now + 3600}};
+        }
+        QJsonObject trace;
+        QCOMPARE(drawTier(catalog, tier, now, 0.5, &trace).key,
+                 QStringLiteral("guest:codex:second|gpt-6-sol"));
+        const QJsonArray candidates = trace.value(QStringLiteral("candidates")).toArray();
+        QCOMPARE(candidates.size(), 3);
+        QCOMPARE(candidates.at(0).toObject().value(QStringLiteral("p")).toDouble(), 1.0 / 3.0);
+        QCOMPARE(candidates.at(1).toObject().value(QStringLiteral("p")).toDouble(), 0.5);
+        QCOMPARE(candidates.at(2).toObject().value(QStringLiteral("p")).toDouble(), 1.0 / 6.0);
+
+        curation::setTierList(tier, {
+            {QStringLiteral("guest:codex|gpt-6-sol"), QStringLiteral("medium"), 1},
+            {QStringLiteral("guest:codex:second|gpt-6-sol"), QStringLiteral("high"), 2}});
+        drawTier(catalog, tier, now, 0.5, &trace);
+        QCOMPARE(trace.value(QStringLiteral("candidates")).toArray().size(), 1);
+        QCOMPARE(trace.value(QStringLiteral("chosen")).toString(), QStringLiteral("guest:codex|gpt-6-sol"));
+
+        second.insert(QStringLiteral("logged_in"), false);
+        rows.replace(rows.size() - 1, second);
+        catalog = catalogFrom(rows);
+        curation::setTierList(tier, {{QStringLiteral("guest:codex|gpt-6-sol"), QStringLiteral("medium"), 1}});
+        drawTier(catalog, tier, now, 0.5, &trace);
+        QCOMPARE(trace.value(QStringLiteral("candidates")).toArray().size(), 1);
+    }
+
+    void keyedPlanAccountsAlsoDrawIndependently() {
+        QJsonArray rows = groupPresets();
+        QJsonObject second = rows.at(1).toObject();
+        second.insert(QStringLiteral("id"), QStringLiteral("glm-coding:second"));
+        rows << second;
+        Catalog catalog = catalogFrom(rows);
+        const QString tier = QStringLiteral("main");
+        curation::setTierList(tier, {{QStringLiteral("glm-coding|glm-5.3"), QStringLiteral("high"), 1}});
+        QJsonObject trace;
+        drawTier(catalog, tier, 100000, 0.75, &trace);
+        const QJsonArray candidates = trace.value(QStringLiteral("candidates")).toArray();
+        QCOMPARE(candidates.size(), 2);
+        QCOMPARE(candidates.at(0).toObject().value(QStringLiteral("p")).toDouble(), 0.5);
+        QCOMPARE(candidates.at(1).toObject().value(QStringLiteral("key")).toString(),
+                 QStringLiteral("glm-coding:second|glm-5.3"));
+    }
+
     void nearResetAllowanceWeightsOnlyTheBestLiveRank() {
         Catalog catalog = catalogFrom(presets());
         const QString tier = QStringLiteral("main");

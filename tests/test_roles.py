@@ -30,7 +30,8 @@ def setUpModule():
     # (~/.config/relay/local-models.json) would otherwise make the Local tier resolve to it, and
     # "every role stays on main" fail on the one machine the suite runs on most.
     global _no_local_catalog
-    _no_local_catalog = mock.patch.dict(os.environ, {"RELAY_LOCAL_MODELS": os.devnull})
+    _no_local_catalog = mock.patch.dict(os.environ, {"RELAY_LOCAL_MODELS": os.devnull,
+                                                     "RELAY_GUEST_ACCOUNTS": os.devnull})
     _no_local_catalog.start()
 
 
@@ -321,6 +322,50 @@ class DefaultTests(unittest.TestCase):
 
 
 class TiedRankTests(unittest.TestCase):
+    def test_keyed_plan_accounts_join_the_family_draw(self):
+        from relay_core import key_accounts
+        account = key_accounts.Account("second", "glm-coding", "Second")
+        rows = [{"preset": "glm-coding", "model": "glm-5.3", "rank": 1}]
+        with mock.patch.object(key_accounts, "accounts", return_value=[account]), \
+             mock.patch.object(model_roles.keystore, "key_source", return_value="stored"):
+            order = model_roles.ordered_candidates(rows, choose=True, draw=lambda: .75,
+                                                   record=lambda _: None)
+            self.assertEqual([r["preset"] for r in order], [account.preset_id, "glm-coding"])
+
+    def test_each_guest_account_has_its_own_weight_and_explicit_rank_wins(self):
+        from relay_core import guest_accounts, guest_harness_provider
+        now = 100000
+        account = guest_accounts.Account("second", "codex", "Second", "/tmp/second")
+        rows = [{"preset": "guest:codex", "model": "gpt-6-sol", "rank": 1},
+                {"preset": "guest:claude", "model": "opus", "rank": 1}]
+        limits = {"guest:codex": {"updated_at": now, "windows": [
+                      {"used_percent": 50, "resets_at": now + 3600}]},
+                  "guest:codex:second": {"updated_at": now, "windows": [
+                      {"used_percent": 25, "resets_at": now + 3600}]},
+                  "guest:claude": {"updated_at": now, "windows": [
+                      {"used_percent": 75, "resets_at": now + 3600}]}}
+        with mock.patch.object(guest_accounts, "accounts", side_effect=lambda family: [account] if family == "codex" else []), \
+             mock.patch.object(guest_harness_provider, "login_status", return_value=True):
+            records = []
+            model_roles.ordered_candidates(rows, choose=True, draw=lambda: .5,
+                                           limits_lookup=limits.get, now=now,
+                                           record=records.append)
+            candidates = records[0]["steps"][0]["candidates"]
+            self.assertEqual([r["key"] for r in candidates],
+                             ["guest:codex|gpt-6-sol", "guest:codex:second|gpt-6-sol",
+                              "guest:claude|opus"])
+            self.assertEqual([r["p"] for r in candidates], [.3333333333333333, .5, .16666666666666666])
+            explicit = rows + [{"preset": account.preset_id, "model": "gpt-6-sol", "rank": 2}]
+            result = model_roles.ordered_candidates(explicit, choose=True, draw=lambda: 0,
+                                                    limits_lookup=limits.get, now=now, record=lambda _: None)
+            self.assertEqual([r["preset"] for r in result].count(account.preset_id), 1)
+            self.assertEqual(result[-1]["preset"], account.preset_id)
+        with mock.patch.object(guest_accounts, "accounts", return_value=[account]), \
+             mock.patch.object(guest_harness_provider, "login_status", return_value=False):
+            result = model_roles.ordered_candidates(rows, choose=True, draw=lambda: 0,
+                                                    limits_lookup=limits.get, now=now, record=lambda _: None)
+            self.assertNotIn(account.preset_id, [r["preset"] for r in result])
+
     def test_effective_availability_uses_fractional_hours_and_tighter_window(self):
         now = 100000
         limits = {"updated_at": now, "windows": [
