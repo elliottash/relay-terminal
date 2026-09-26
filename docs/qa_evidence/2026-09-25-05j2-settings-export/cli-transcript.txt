@@ -1,0 +1,53 @@
+Headless CLI transcript, built from main (git archive of HEAD) with an isolated XDG_CONFIG_HOME.
+
+$ XDG_CONFIG_HOME=$A relay --export-settings $W/empty.json  (no local customizations)
+exported 0 setting(s), 0 hotkey(s), 0 alias(es), 0 endpoint(s), 0 theme(s) (--include-memories skips memories) -> $W/empty.json
+rc=0
+
+$ seed $A relay.conf, then export again
+exported 3 setting(s), 0 hotkey(s), 0 alias(es), 0 endpoint(s), 0 theme(s) (--include-memories skips memories) -> $W/a.json
+rc=0
+
+$ import into an untouched $C — model id unverifiable headlessly: rc 2, nothing written
+relay: 0 conflict(s) and 1 item(s) needing attention; nothing was changed.
+        Decide in Options > General > Import settings… (the review screen), or pass
+        --import-resolve keep|imported (--import-accept-attention for the latter).
+Import plan for $W/a.json:
+  auto      agent/max_steps                        (default) -> 77  (Not customized locally)
+  attention models/favorites                       (default) -> local/sunset  (Unknown model id on this install: local/sunset)
+  auto      theme/name                             (default) -> sunset  (Not customized locally)
+rc=2
+
+$ customize $C, import without --import-resolve — conflicts, rc 2, file unchanged
+76c8b3a606c8e1b18eb539e411d4d3aa  $W/b/RelayTerminal/relay.conf
+relay: 2 conflict(s) and 1 item(s) needing attention; nothing was changed.
+        Decide in Options > General > Import settings… (the review screen), or pass
+        --import-resolve keep|imported (--import-accept-attention for the latter).
+Import plan for $W/a.json:
+  CONFLICT  agent/max_steps                        12 -> 77
+  attention models/favorites                       (default) -> local/sunset  (Unknown model id on this install: local/sunset)
+  CONFLICT  theme/name                             default -> sunset
+rc=2
+76c8b3a606c8e1b18eb539e411d4d3aa  $W/b/RelayTerminal/relay.conf
+
+$ same import with --import-resolve imported — applied, backup kept
+Import plan for $W/a.json:
+  CONFLICT  agent/max_steps                        12 -> 77
+  attention models/favorites                       (default) -> local/sunset  (Unknown model id on this install: local/sunset)
+  CONFLICT  theme/name                             default -> sunset
+applied 3 change(s); backup: $W/b/RelayTerminal/relay/backups/settings-backup-20260925-222000.json
+rc=0
+[agent]
+max_steps=77
+
+[models]
+favorites=local/sunset
+
+[theme]
+name=sunset
+relay
+relay.conf
+
+$ unknown bundle version — rc 1
+relay: Unsupported bundle version in $W/v99.json
+rc=1
