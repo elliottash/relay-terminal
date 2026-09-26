@@ -206,6 +206,23 @@ class PresetTests(unittest.TestCase):
 
 
 class StartTests(unittest.TestCase):
+    def test_placeholder_model_is_not_passed_to_the_cli(self):
+        # A pane on the CLI's default model holds `config.model == "claude"` until the first
+        # turn reports one; a Board card console copies that into its own request, and
+        # `claude --model claude` is refused ("There's an issue with the selected model").
+        self.assertEqual(ghp.guest_options({"model": "claude"}, "claude")["model"], "")
+        self.assertEqual(ghp.guest_options({"model": "opus"}, "claude")["model"], "opus")
+        for guest in ("claude", "codex"):
+            with self.subTest(guest=guest), tempfile.TemporaryDirectory() as cwd:
+                harness = FakeHarness([], guest=guest)
+                with mock.patch.object(ghp, "make_harness", return_value=harness):
+                    provider = ghp.start_provider("guest:" + guest, {"guest": {"model": guest},
+                                                  "skills": {"enabled": False}}, cwd)
+                try:
+                    self.assertIsNone(harness.starts[0]["model"])
+                finally:
+                    provider.close()
+
     def test_session_replacement_preserves_bridge_and_instructions(self):
         from relay_core.guest_board_bridge import exchange
         from relay_core import board as B, board_tools as T

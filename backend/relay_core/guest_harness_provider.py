@@ -240,7 +240,7 @@ def config_for_preset(preset_id: str, request: dict) -> ProviderConfig:
     account = preset_account(preset_id)
     if account:
         guest_accounts.overrides(guest_id, account)     # a removed account is refused here
-    options = guest_options(request.get("guest"))
+    options = guest_options(request.get("guest"), guest_id)
     model = options["model"] or ""
     config = ProviderConfig(base_url(guest_id, account), model, "", {}, _guest_max_tokens())
     return config
@@ -253,8 +253,14 @@ def _guest_max_tokens() -> int:
     return max(MIN_OUTPUT_TOKENS, 32_768)
 
 
-def guest_options(raw) -> dict:
-    """The `guest` block of a configure/set_model request, validated (29.3)."""
+def guest_options(raw, guest_id: str = "") -> dict:
+    """The `guest` block of a configure/set_model request, validated (29.3).
+
+    A model equal to ``guest_id`` is dropped: it is the placeholder `start_provider` leaves in a
+    config before the CLI has said what it runs, not a model, and a caller that copies a running
+    pane's `config.model` into a new request (a card console, a guest subagent) would otherwise
+    start `claude --model claude`, which the CLI refuses.
+    """
     if raw is None:
         raw = {}
     if not isinstance(raw, dict):
@@ -271,7 +277,10 @@ def guest_options(raw) -> dict:
     fork = raw.get("fork", False)
     if type(fork) is not bool:
         raise ValueError("guest.fork must be true or false.")
-    return {"model": (model or "").strip(), "resume": (resume or "").strip() or None, "fork": fork,
+    model = (model or "").strip()
+    if guest_id and model == guest_id:
+        model = ""
+    return {"model": model, "resume": (resume or "").strip() or None, "fork": fork,
             "permissions": validate_permissions(raw.get("permissions")),
             # The guest's own levels, not Relay's four: `validate_effort` only checks the shape
             # and the guest decides whether it has that one (29.3, owner 2026-09-19).
@@ -862,7 +871,7 @@ def start_provider(preset_id: str, request: dict, workspace: str,
     if guest_id is None:
         raise ValueError(f"Unknown guest preset {preset_id!r}.")
     account = preset_account(preset_id)
-    options = guest_options(request.get("guest"))
+    options = guest_options(request.get("guest"), guest_id)
     from .guest_board_bridge import Bridge
     from .guest_instructions import build_instructions
     from .board_tools import find_board_root
@@ -2160,7 +2169,7 @@ def switch_model(agent, guest_id: str | None, request: dict,
     if guest_id is None or provider is None or provider.guest_id != guest_id \
             or provider.account != (account or ""):
         return None
-    options = guest_options(request.get("guest"))
+    options = guest_options(request.get("guest"), guest_id)
     if options["resume"] or options["fork"]:
         return None
     provider.switch_metrics = {}   # the harness is reused, not resumed: nothing new to account
