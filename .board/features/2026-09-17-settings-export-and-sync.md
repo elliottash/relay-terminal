@@ -1,20 +1,19 @@
 ---
 id: 05J2
 type: work
-status: executing
+status: needs-verification
 labels: [feature]
 component: [gui, worker]
 milestone: desktop-alpha
 workstream: terminal
 assignee: agent
-implemented_by: kimi/k3
-session: 131947ca-655f-4eef-8401-b4970c2f0a2d
+implemented_by: glm/glm-5.3-flashx
 rank: zz05
 created: '2026-09-17'
 acceptance: settings export to a file and import on another machine; a design for optional encrypted sync is recorded
 verify: {artifact: code, primary: script, also: [person], human: optional, criteria: 'export on one machine, import on another: theme, keymap, model roles and global aliases come back; no API key or device identity is in the file', sign_off: none, effort: medium, stakes: reputation, blast: capability}
 source: '`issues/feature_intake.txt`, 2026-09-17: "no accounts, but make it where you can export your settings or otherwise make it easy to share across computers, maybe with a brave-like sync system."'
-links: {plans: [], commits: [6ee5b1603076], evidence: [], related: [], github: null}
+links: {plans: [], commits: [6ee5b1603076, a00a73e41cbb], evidence: [docs/qa_evidence/2026-09-25-05j2-settings-export/], related: [], github: null}
 ---
 # Export settings, and an optional sync across machines
 
@@ -150,3 +149,19 @@ Where the preferences live today:
 ## Decisions
 Owner, 2026-09-25: “05J2, yes, but help the user resolve conflicts for non defaults.” Import merges profiles. When current and incoming values are distinct non-default customizations, preview both and require an explicit per-item or bulk choice before applying. Defaults and identical values merge automatically. This decision also governs the proposed sync design; sync must not silently choose last-writer-wins for such conflicts.
 Owner, 2026-09-25: “deliver 05J@ in a subagent and then lets discuss the next card” (immediately after confirming that settings, model preferences and custom hotkeys are covered). Proceed with the plan as clarified: merge imports with per-item conflict resolution; include customized settings, model preferences and custom hotkeys; keep secrets and machine state out; deliver sync as a design, not an implementation.
+
+## Execution Summary
+Landed across four commits. `9f092a3a`: the settings bundle core — `src/SettingsExport.{h,cpp}` (allow-listed QSettings keys, keybindings/themes/local-models files, per-key merge plan with Conflict/Attention/Skip statuses, staged apply with automatic backup, secrets and machine state never exported), `src/SettingsTransferDialog.{h,cpp}` (export dialog and import review screen with side-by-side values, per-row Keep current/Use imported, Apply anyway for attention items), `tests/settingsexport_test.cpp`.
+
+`6ee5b160`: the remainder — Options › General "Settings on other machines" row (Export…/Import…), `settings.export`/`settings.import` palette entries, `src/SettingsCli.{h,cpp}` behind `--export-settings`/`--import-settings`/`--include-memories`/`--import-resolve`/`--import-accept-attention` (headless: unresolved conflicts or unaccepted attention print the plan, change nothing, exit 2), post-import `settings::invalidate()` + keymap reload + theme reapply + Options refresh (no restart), and the docs: `USER-SETTINGS.md` (moving to another machine), `CONFIG-FILES.md`, `BACKUP-AND-RESTORE.md`, `SETTINGS-SYNC-DESIGN.md` (sync stays design-only: E2E over the existing `remote/pairing.py` machinery, same conflict rules as import), plus the docs/README index rows.
+
+A real bug found during verification: the import dialog took its model/hotkey validation hooks as a public member set *after* the constructor had already planned the rows, so unknown model ids never surfaced. Fixed with `SettingsImportDialog::setHooks()` which re-plans; landed with the salvage commits (`def2cf0b`) and re-verified here on a clean archive of `main`.
+
+Evidence `a00a73e4` under `docs/qa_evidence/2026-09-25-05j2-settings-export/`: import-review screenshots (undecided = Apply disabled; decided with an accepted attention row = applied, values land in `relay.conf`) and the headless CLI transcript (rc 0/2/1, backup written, nothing-written-on-unresolved).
+
+## Tests
+- pass · `relay-settings-export-tests` (ctest): **14 passed, 0 failed** on a clean `git archive` of `main` — round-trip, state/secret exclusion, version refusal, backup, conflict preview and resolution (`docs/qa_evidence/2026-09-25-05j2-settings-export/README.md`).
+- pass · `relay-settings-tests` `settingsTransferRowSitsOnGeneral`: the General page carries the Export/Import row and palette keys (verify-slot build). One pre-existing unrelated failure in that binary (`theHelperConsoleFollowsTheModeAndAsksAsTheOptionsPane`, the #E8V1 label vs a stale test expectation) is another card's, not this change's.
+- pass · GUI import review under offscreen: 2 conflicts + 1 attention row, Apply disabled until every row is decided, accepted attention applies and writes `relay.conf` — `review-undecided.png`, `review-decided.png`.
+- pass · headless CLI transcript: export rc 0; unresolved/attention import rc 2 with nothing written; `--import-resolve imported` applies and writes `relay/backups/settings-backup-<ts>.json`; bad version rc 1 — `cli-transcript.txt`.
+- not applicable · full `ctest`/`scripts/test.sh` suites: owner runs those.
