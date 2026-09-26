@@ -10,6 +10,7 @@
 #include <QDialogButtonBox>
 #include <QFileInfo>
 #include <QFormLayout>
+#include <QHash>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QLabel>
@@ -243,14 +244,16 @@ QStringList addArguments(const AddForm &form, QByteArray *stdinJson, QString *pr
 namespace {
 
 struct Cache {
-    QString workspace, stamp, error;
+    QString stamp, error;
     QJsonObject listed;
     bool loaded = false, loading = false;
 };
 
-Cache &cache() {
-    static Cache instance;
-    return instance;
+Cache &cache(const QString &workspace) {
+    // Options in different windows can ask for different projects during the same catalog
+    // fan-out. One shared slot made them continually replace each other's MCP snapshot.
+    static QHash<QString, Cache> byWorkspace;
+    return byWorkspace[workspace];
 }
 
 QString globalPath() {
@@ -266,10 +269,10 @@ qint64 mtime(const QString &path) {
     return info.exists() ? info.lastModified().toMSecsSinceEpoch() : 0;
 }
 
-// What makes the cached list stale: either file changing, or another project in front.
+// What makes one workspace's cached list stale: its project file or the shared global file.
 QString stampFor(const QString &workspace) {
-    QString project = cache().listed.value(QStringLiteral("project_path")).toString();
-    if (project.isEmpty() || cache().workspace != workspace)
+    QString project = cache(workspace).listed.value(QStringLiteral("project_path")).toString();
+    if (project.isEmpty())
         project = workspace.isEmpty() ? QString() : workspace + QStringLiteral("/.mcp.json");
     return QStringLiteral("%1|%2|%3").arg(workspace).arg(mtime(globalPath())).arg(project.isEmpty() ? 0 : mtime(project));
 }
@@ -326,15 +329,14 @@ QString failure(const QString &err, int code) {
 }
 
 void refresh(QObject *owner, const QString &workspace) {
-    Cache &c = cache();
+    Cache &c = cache(workspace);
     if (c.loading) return;
     c.loading = true;
-    c.workspace = workspace;
     c.stamp = stampFor(workspace);
     QStringList args{QStringLiteral("list"), QStringLiteral("--json")};
     if (!workspace.isEmpty()) args << QStringLiteral("--workspace") << workspace;
     runCli(owner, QStringLiteral("mcp_config"), args, {}, [workspace](int code, const QByteArray &out, const QString &err) {
-        Cache &c = cache();
+        Cache &c = cache(workspace);
         c.loading = false;
         c.loaded = true;
         const QJsonDocument doc = QJsonDocument::fromJson(out);
@@ -345,7 +347,7 @@ void refresh(QObject *owner, const QString &workspace) {
             c.error = failure(err, code);
         }
         // The project path is only known now; take the stamp again so the next draw agrees.
-        if (c.workspace == workspace) c.stamp = stampFor(workspace);
+        c.stamp = stampFor(workspace);
         SettingsWatch::instance().notify();
     });
 }
@@ -516,12 +518,12 @@ void importDialog(QWidget *parent, const QString &workspace, std::function<void(
 }  // namespace
 
 QList<SettingRow> settingsRows(const QString &workspace, QWidget *parent, std::function<void(const QString &)> say) {
-    Cache &c = cache();
-    if (!c.loading && (!c.loaded || c.workspace != workspace || c.stamp != stampFor(workspace)))
+    Cache &c = cache(workspace);
+    if (!c.loading && (!c.loaded || c.stamp != stampFor(workspace)))
         refresh(parent, workspace);
     QPointer<QWidget> owner(parent);
     auto changed = [owner, workspace] {
-        cache().stamp.clear();                    // re-read even if the mtime did not move
+        cache(workspace).stamp.clear();           // re-read even if the mtime did not move
         if (owner) refresh(owner, workspace);
     };
     Hooks hooks;
@@ -538,8 +540,7 @@ QList<SettingRow> settingsRows(const QString &workspace, QWidget *parent, std::f
     };
     hooks.add = [owner, say, changed] { if (owner) addDialog(owner, say, changed); };
     hooks.import = [owner, workspace, say, changed] { if (owner) importDialog(owner, workspace, say, changed); };
-    return rowsFor(c.workspace == workspace ? c.listed : QJsonObject{}, workspace, hooks,
-                   !c.loaded || (c.loading && c.workspace != workspace), c.workspace == workspace ? c.error : QString());
+    return rowsFor(c.listed, workspace, hooks, !c.loaded, c.error);
 }
 
 }  // namespace relay::mcp
