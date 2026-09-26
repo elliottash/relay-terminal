@@ -562,7 +562,8 @@ tests in `tests/test_routing_thinking_skills.py`; live evidence in
   `reasoning_details` text/summary items are used only when neither `reasoning_content` nor `reasoning` is present.
   Subscribed subagents also forward `thinking_delta`, `thinking_done` and `turn_summary` in `subagent_event`.
 - **`turn_transcript`** is `{turn_id, outcome, running, items}`; each item has the `subagent_transcript` message shape
-  `{role, content (≤ 8000 chars), tool_calls?: [names]}` plus `tool_call_id` on tool results. Items are recorded as
+  `{role, content (≤ 8000 chars), tool_calls?: [names]}` plus `tool_call_id` on tool results, and `at` (epoch
+  seconds the result landed, #BXF1) on tool results recorded since then, which a surface shows as the row's time. Items are recorded as
   the turn runs, so a cancelled or failed turn keeps its transcript even though the conversation rolls it back.
 - **Skills search order** (default directories only; an explicit `configure.skills.dirs` list is used as given):
   `~/.config/relay/skills` (refined copies, `XDG_CONFIG_HOME` aware) first, then the existing locations, then

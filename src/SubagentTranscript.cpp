@@ -405,8 +405,10 @@ QString SubagentTranscriptView::rowText(const ToolCall &call) const {
     const QString marker = call.done && call.label.failed() ? QStringLiteral("✗")
                          : call.expanded                    ? QStringLiteral("▾")
                                                             : QStringLiteral("▸");
-    const calllines::Row row = call.done ? calllines::finishedRow(call.label, 0, call.timestamp)
-                                         : calllines::runningRow(call.label, 0, 0, call.timestamp);
+    calllines::Row row = call.done ? calllines::finishedRow(call.label, 0, call.timestamp)
+                                   : calllines::runningRow(call.label, 0, 0, call.timestamp);
+    // The leading ✗ already says the call failed; finishedRow's trailing one would say it twice.
+    if (call.done && call.label.failed() && row.title.endsWith(QStringLiteral(" ✗"))) row.title.chop(2);
     const QString text = row.text();
     return marker + QLatin1Char(' ') + (text.isEmpty() ? call.label.title : text);
 }
@@ -652,6 +654,10 @@ void SubagentTranscriptView::handleEvent(const QJsonObject &event) {
                     ToolCall call;
                     call.label = toollabel::fromEvent(message);
                     call.done = true;
+                    // When the call landed (`at`, epoch seconds, #BXF1), like a live row's time.
+                    if (const double at = message.value(QStringLiteral("at")).toDouble(); at > 0)
+                        call.timestamp = QDateTime::fromMSecsSinceEpoch(qint64(at * 1000))
+                                             .toString(QStringLiteral("HH:mm:ss"));
                     call.detail = content.left(8000);
                     const int start = m_log->document()->characterCount() - 1;
                     append(QStringLiteral(" \n"), Ink::Tool);   // a block to rewrite in place

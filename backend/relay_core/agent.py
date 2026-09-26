@@ -2742,6 +2742,11 @@ class Agent:
         logs.prompt(_log, "turn_prompt", prompt, session=self.session_id, turn=turn_id)
 
         def add(message: dict) -> None:
+            if message.get("role") == "tool":
+                # When the call landed (#BXF1): a transcript reopened later (subagent_transcript,
+                # turn_transcript) draws each tool row with its time, as the live rows are.
+                # `wire_messages` drops relay_* keys, so no provider sees it.
+                message.setdefault("relay_at", round(time.time(), 3))
             self.messages.append(message)
             record["messages"].append(message)
 
@@ -4376,7 +4381,8 @@ class Agent:
                     if call.get("id") not in answered:
                         self.messages.append({"role": "tool", "tool_call_id": call.get("id"), "content": json.dumps(
                             {"error": "Not completed: the turn stopped before this tool call finished. "
-                                      "It may have partly run; reinspect state."})})
+                                      "It may have partly run; reinspect state."}),
+                            "relay_at": round(time.time(), 3)})
             break
         self.messages.append({"role": "user", "relay_kind": "note", "content": (
             f"[Relay note: the turn above was {how} before it finished. The request above is not finished. "
@@ -5419,6 +5425,8 @@ def transcript_item(message: dict) -> dict:
         item["tool_calls"] = [c.get("function", {}).get("name") for c in message["tool_calls"]]
     if message.get("role") == "tool" and message.get("tool_call_id"):
         item["tool_call_id"] = message["tool_call_id"]
+    if isinstance(message.get("relay_at"), (int, float)) and not isinstance(message["relay_at"], bool):
+        item["at"] = message["relay_at"]
     return item
 
 

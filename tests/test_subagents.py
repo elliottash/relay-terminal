@@ -379,6 +379,18 @@ class TranscriptItemsTests(unittest.TestCase):
         items = transcript_items(messages)
         self.assertEqual(items[1]['tool_calls'], ['read_file', 'edit_file (pending)'])
 
+    def test_tool_item_carries_when_it_landed(self):
+        # #BXF1: the reopened transcript draws each tool row with its time, as the live row did.
+        messages = [
+            {'role': 'assistant', 'content': '', 'tool_calls': [self.call('c1', 'read_file', {'path': 'a.py'})]},
+            {'role': 'tool', 'tool_call_id': 'c1', 'content': '{"ok": true}', 'relay_at': 1790000000.25},
+            {'role': 'tool', 'tool_call_id': 'c2', 'content': '{"ok": true}'},
+        ]
+        items = transcript_items(messages)
+        self.assertEqual(items[1]['at'], 1790000000.25)
+        self.assertNotIn('at', items[2])                         # recorded before #BXF1: no time
+        self.assertNotIn('relay_at', items[1])
+
     def test_unpaired_tool_message_stays_raw(self):
         # A window that cut off the assistant's calls (subscribe takes the last 200): the tool
         # message keeps the old bare shape and the surface renders it as capped lines.

@@ -3,6 +3,7 @@
 #include "CurrentTextComboBox.h"
 #include "SubagentsPanel.h"
 
+#include <QDateTime>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QLineEdit>
@@ -549,6 +550,24 @@ private slots:
         QVERIFY(!view.plainText().contains(QStringLiteral("assert 1 == 2")));
     }
 
+    // #BXF1: a reopened transcript's tool rows carry the time each call landed (`at`), like the
+    // live rows; a row recorded before that has no time and draws none.
+    void transcriptSnapshotRowsShowTheirTime() {
+        const qint64 ms = QDateTime(QDate(2026, 9, 25), QTime(14, 3, 7)).toMSecsSinceEpoch();
+        SubagentTranscriptView view(QStringLiteral("a1"));
+        view.handleEvent(json(QStringLiteral(
+            "{'event':'subagent_transcript','id':'a1','status':'running','messages':["
+            "{'role':'tool','tool':'read_file','tool_call_id':'c1','content':'{}','at':%1,"
+            "'label':{'kind':'read','title':'read a.py','ok':true}},"
+            "{'role':'tool','tool':'read_file','tool_call_id':'c2','content':'{}',"
+            "'label':{'kind':'read','title':'read b.py','ok':true}}]}").arg(double(ms) / 1000.0, 0, 'f', 3).toUtf8().constData()));
+        const QStringList lines = view.toolLines();
+        QCOMPARE(lines.size(), 2);
+        QVERIFY2(lines.at(0).startsWith(QStringLiteral("▸ read a.py")) && lines.at(0).contains(QStringLiteral("14:03:07")),
+                 qPrintable(lines.at(0)));
+        QVERIFY2(!lines.at(1).contains(QLatin1Char(':')), qPrintable(lines.at(1)));
+    }
+
     // Card #TK9C, protocol § 23: one concise line per tool call, rewritten in place when the call
     // lands, with the detail one click away.
     void transcriptDrawsOneLinePerToolCall() {
@@ -557,7 +576,7 @@ private slots:
                               "'tool':'run_command','call_id':'c1','preview':'RUN COMMAND\\n\\npytest -q',"
                               "'label':{'kind':'run','running':'running pytest','title':'ran pytest'}}}"));
         // While it runs the row is the present tense, and it is the only tool line.
-        QVERIFY(view.toolLines().first().startsWith(QStringLiteral("▸ running pytest · ")));
+        QVERIFY(view.toolLines().first().startsWith(QStringLiteral("▸ running pytest… · ")));
         view.handleEvent(json("{'event':'subagent_event','id':'a1','payload':{'event':'tool_result',"
                               "'tool':'run_command','call_id':'c1','ms':8100,'result':{'exit_code':1},"
                               "'label':{'kind':'run','running':'running pytest','title':'ran pytest',"
