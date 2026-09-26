@@ -115,3 +115,68 @@ Live check of the two open cases (Recently closed; mixed shell + conversation pa
 3. A restored turn printed twice and out of order (a #KDB4 fill on top of the journal). Panes with a journal skip the fill.
 After the fixes: 12,000 of 12,000 lines kept in shell-only, turn-then-50 and turn-then-11000; the turn is printed once, in order. ctest textjournal/windowstate/transcriptreplay pass, and 144 pytest pass.
 Not met: Done-means bullet 2 (no text in two stores). Conversation rows that scroll out are now in both the journal and the transcript. The fix is plan step 3, not yet built: an OSC 7772 `reply` row role on agent rows, turn ranges on references, and row ranges for guest TUIs.
+
+<!-- relay:entry 20260926T071058Z-09 author=reconcile kind=note -->
+Landing job 1bfc4e76dfd89992 could not be reconciled automatically: src/Pane.h is 1,156,404 bytes; files over 400,000 bytes are the author's.. Returned to the author agent with the diagnostics. <!-- reconcile:1bfc4e76dfd89992:author_required -->
+
+<!-- relay:entry 20260926T071058Z-6p author=landq kind=note -->
+Landing job 1bfc4e76dfd89992 (e8c4857212e7 for card #HEY7) failed the gate.
+Reason: command exited 8: sh -c set -eu
+root="${RELAY_VERIFY_ROOT:-${XDG_CACHE_HOME:-$HOME/.cache}/relay/verify/relay-terminal}"
+mkdir -p "$root/src" "$root/build"
+exec 9>"$root/.lock"; flock 9
+rsync -a --checksum --delete --delete-excluded --exclude=/.git --exclude=/build --exclude='/build-*' ./ "$root/src/"
+[ -f "$root/build/CMakeCache.txt" ] || cmake -S "$root/src" -B "$root/build" -DCMAKE_BUILD_TYPE=Release
+cmake --build "$root/build" --parallel "${RELAY_JOBS:-2}"
+ctest --test-dir "$root/build" --output-on-failure --no-tests=error -j "${RELAY_JOBS:-2}"
+cd "$root/src"
+scripts/test.sh
+; reconcile: src/Pane.h is 1,156,404 bytes; files over 400,000 bytes are the author's.
+Gate log: /home/elliott/.local/state/relay/integration/12c8c9ef12cf3b12/logs/1bfc4e76dfd89992/verify-1-e52cefaf10da.log
+Fix it in your workspace and submit a new commit; the target was not moved. <!-- landq:1bfc4e76dfd89992:failed -->
+
+<!-- relay:entry 20260926T071058Z-zg author=landq kind=note -->
+Landing job 1bfc4e76dfd89992 (e8c4857212e7 for card #HEY7) needs its author.
+Landing job 1bfc4e76dfd89992 could not be reconciled automatically.
+Target 43c6429eafcd and your submission e8c4857212e7 conflict in: (no paths found).
+Reason: src/Pane.h is 1,156,404 bytes; files over 400,000 bytes are the author's.
+Sync your workspace to the current target, resolve these files there, run the project's checks, and submit the new commit. Nothing was changed in your workspace. <!-- landq:1bfc4e76dfd89992:author_required -->
+
+<!-- relay:entry 20260926T073354Z-c2 author=reconcile kind=note -->
+Landing job d6c0df4f8d6ef262 could not be reconciled automatically: docs/qa_evidence/2026-09-26-hey7-mixed/shell-only/01-before-close.png is binary in c5c168a68e6c; a binary conflict is the author's.. Returned to the author agent with the diagnostics. <!-- reconcile:d6c0df4f8d6ef262:author_required -->
+
+<!-- relay:entry 20260926T073354Z-st author=landq kind=note -->
+Landing job d6c0df4f8d6ef262 (c5c168a68e6c for card #HEY7) failed the gate.
+Reason: command exited 8: sh -c set -eu
+root="${RELAY_VERIFY_ROOT:-${XDG_CACHE_HOME:-$HOME/.cache}/relay/verify/relay-terminal}"
+mkdir -p "$root/src" "$root/build"
+exec 9>"$root/.lock"; flock 9
+rsync -a --checksum --delete --delete-excluded --exclude=/.git --exclude=/build --exclude='/build-*' ./ "$root/src/"
+[ -f "$root/build/CMakeCache.txt" ] || cmake -S "$root/src" -B "$root/build" -DCMAKE_BUILD_TYPE=Release
+cmake --build "$root/build" --parallel "${RELAY_JOBS:-2}"
+ctest --test-dir "$root/build" --output-on-failure --no-tests=error -j "${RELAY_JOBS:-2}"
+cd "$root/src"
+scripts/test.sh
+; reconcile: docs/qa_evidence/2026-09-26-hey7-mixed/shell-only/01-before-close.png is binary in c5c168a68e6c; a binary conflict is the author's.
+Gate log: /home/elliott/.local/state/relay/integration/12c8c9ef12cf3b12/logs/d6c0df4f8d6ef262/verify-1-0748ea6a2712.log
+Fix it in your workspace and submit a new commit; the target was not moved. <!-- landq:d6c0df4f8d6ef262:failed -->
+
+<!-- relay:entry 20260926T073354Z-su author=landq kind=note -->
+Landing job d6c0df4f8d6ef262 (c5c168a68e6c for card #HEY7) needs its author.
+Landing job d6c0df4f8d6ef262 could not be reconciled automatically.
+Target 3a34374dda59 and your submission c5c168a68e6c conflict in: (no paths found).
+Reason: docs/qa_evidence/2026-09-26-hey7-mixed/shell-only/01-before-close.png is binary in c5c168a68e6c; a binary conflict is the author's.
+Sync your workspace to the current target, resolve these files there, run the project's checks, and submit the new commit. Nothing was changed in your workspace. <!-- landq:d6c0df4f8d6ef262:author_required -->
+
+<!-- relay:entry 20260926T073356Z-zr author=landq kind=note -->
+Landing job e2e7965cceca5ed8 (48fd12cf6934) landed.
+Published 7eba7facb806 onto main (target was 3a34374dda59). <!-- landq:e2e7965cceca5ed8:landed -->
+
+<!-- relay:entry 20260926T074455Z-5q author=agent kind=event mention=BP15 model=claude-opus-5-5 pane=ada00cf0 turn=566e6500a48749618432928c77e7df95/48c246d035344ae7a822ec17cd4d8380 -->
+mentioned in #BP15 · 2026-09-26 · agent
+
+<!-- relay:entry 20260926T074502Z-2x author=agent kind=event mention=V3R3 model=claude-opus-5-5 pane=ada00cf0 turn=566e6500a48749618432928c77e7df95/48c246d035344ae7a822ec17cd4d8380 -->
+mentioned in #V3R3 · 2026-09-26 · agent
+
+<!-- relay:entry 20260926T074837Z-1x author=agent kind=progress model=claude-opus-5-5 pane=c30592c5 turn=4c2d2da03628442180f8e51eb861c141/11d72950d83b40b59c9f0d6ad06a8fda -->
+Resubmitted as job 7088516c0d55985f (7abdf201): the earlier fixes rebased onto main dd23bacc, because src/Pane.h is too big for the queue to merge automatically. That supersedes jobs 1bfc4e76 and d6c0df4f. On the rebased tree a pane reopened from Recently closed still came back blank in 3 of 8 runs: the replay backed off at the shell's first prompt and nothing retried it. It now retries when an inline note closes and every 250 ms for up to 10 s, and 8 of 8 consecutive runs pass. Evidence regenerated in docs/qa_evidence/2026-09-26-hey7-mixed; ctest textjournal, windowstate and transcriptreplay pass.
