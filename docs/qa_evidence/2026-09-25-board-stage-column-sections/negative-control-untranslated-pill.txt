@@ -1,0 +1,6 @@
+QWARN  : BoardModelTests::everyCardRowPaintsItsOwnStagePill() This plugin does not support propagateSizeHints()
+FAIL!  : BoardModelTests::everyCardRowPaintsItsOwnStagePill() 'colours.size() > 2' returned FALSE. (sections AAA1)
+   Loc: [../tests/boardmodel_test.cpp(1650)]
+PASS   : BoardModelTests::cleanupTestCase()
+Totals: 2 passed, 1 failed, 0 skipped, 0 blacklisted, 305ms
+********* Finished testing of BoardModelTests *********

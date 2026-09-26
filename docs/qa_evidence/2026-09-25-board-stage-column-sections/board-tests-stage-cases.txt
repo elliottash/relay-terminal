@@ -1,0 +1,6 @@
+PASS   : BoardModelTests::initTestCase()
+PASS   : BoardModelTests::theRowListIsHeadersThenCards()
+PASS   : BoardModelTests::aFlatListIsEveryShownCardInOneOrder()
+PASS   : BoardModelTests::cleanupTestCase()
+Totals: 4 passed, 0 failed, 0 skipped, 0 blacklisted, 10ms
+********* Finished testing of BoardModelTests *********

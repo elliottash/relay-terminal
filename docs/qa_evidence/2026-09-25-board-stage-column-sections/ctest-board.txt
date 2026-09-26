@@ -1,0 +1,9 @@
+tree 12bd04bdcb2b (tip fcba9685 + #YN4D hunks), built in a land.py verify slot
+    Start 94: board
+1/2 Test #94: board ............................   Passed    8.34 sec
+    Start 99: boardpane
+2/2 Test #99: boardpane ........................   Passed    1.11 sec
+
+100% tests passed, 0 tests failed out of 2
+
+Total Test time (real) =   9.45 sec
