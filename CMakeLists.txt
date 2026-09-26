@@ -682,7 +682,6 @@ target_compile_options(relay-remotepane PRIVATE ${RELAY_WARNINGS})
 # into the app (RELAY_HAVE_ENGINE, --engine=relay); the manual harness and the benchmark
 # are extra targets behind RELAY_BUILD_ENGINE.
 option(RELAY_BUILD_ENGINE "Also build the engine harness (relay-vterm-spike) and benchmark" OFF)
-option(RELAY_BUILD_ENGINE_SPIKE "Deprecated alias for RELAY_BUILD_ENGINE" OFF)
 add_subdirectory(engine)
 
 if(RELAY_BUILD_APP)

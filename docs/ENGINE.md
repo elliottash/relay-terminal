@@ -18,8 +18,8 @@ Performance: [ENGINE-PERF.md](ENGINE-PERF.md). Evidence:
 ## Build
 
 `engine/` is always built and linked into `relay` (which defines `RELAY_HAVE_ENGINE`), and
-`relay-engine-tests` runs in the app's `ctest`. `-DRELAY_BUILD_ENGINE=ON` (default **OFF**; the old
-`RELAY_BUILD_ENGINE_SPIKE` still works as an alias) adds the manual harness and the benchmark.
+`relay-engine-tests` runs in the app's `ctest`. `-DRELAY_BUILD_ENGINE=ON` (default **OFF**) adds
+the manual harness and the benchmark.
 
 ```sh
 # Optional, recommended core: libghostty-vt (needs git, network, Zig 0.16.x; the .debs ship it)

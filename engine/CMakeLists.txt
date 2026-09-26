@@ -123,7 +123,7 @@ if(RELAY_ENGINE_WITH_GHOSTTY)
     target_compile_definitions(relay-terminal-engine PUBLIC RELAY_HAVE_GHOSTTY)
 endif()
 
-if(RELAY_BUILD_ENGINE OR RELAY_BUILD_ENGINE_SPIKE)
+if(RELAY_BUILD_ENGINE)
     add_executable(relay-engine-bench bench/EngineBench.cpp)
     target_link_libraries(relay-engine-bench PRIVATE relay-terminal-engine)
 
