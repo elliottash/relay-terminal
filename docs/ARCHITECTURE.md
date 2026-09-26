@@ -1427,7 +1427,7 @@ native mode.
 | Program exits (`ready`) | Automatic human control ends; the composer returns; masked input and the button are cleared |
 | Ctrl+H from the composer, or the button | Human control: composer hidden, keys go to the terminal. Started from a full-screen or remote program, the prompt box comes back when the program exits |
 | Ctrl+H or Ctrl+Shift+H again (`control.human` is a toggle, #QWAS; Ctrl+Shift+H works from the terminal too) | Composer back. While a program runs, submissions go to the agent |
-| Ctrl+Shift+J (`program.delegate`), the palette | Hands the running program to the agent (section 9.2). With text in the prompt box it sends that request too. Pressed again, or Ctrl+H, takes it back |
+| `program.delegate` (the banner button, the palette; no default key since #XPEB) | Hands the running program to the agent (section 9.2). With text in the prompt box it sends that request too. Pressed again, or Ctrl+H, takes it back |
 | F12 (`terminal.native`) | Toggles native input, unchanged, for people who want the old behaviour |
 | A guest holds the pane's keyboard (`#W5N2`, protocol 10.3) | One driver per pane, and it is the same token: "the agent is driving" and "alice is driving" are one state. The owner's physical keystroke always takes it back, without asking — `Pane::takeBackFromGuest()` sends `control_take` and is called from exactly the two places `endDelegation()` is, `setNative()` and the key filter, which never swallows the key that did it |
 
@@ -1543,7 +1543,7 @@ The agent can type into the program in the **visible** pane. Since card #H2KQ th
 drives: a program that starts while an agent is configured is handed to it automatically and
 quietly (no transcript note, no toast) — the owner's standing decision, replacing the per-turn
 consent of card #C1HH. Taking it back is the "Take over" button beside the Relaying line (or
-`control.human`), and `Ctrl+Shift+J` (`program.delegate`) with text in the prompt box still hands
+`control.human`), and `program.delegate` (the palette) with text in the prompt box still hands
 over *and* sends that text to the agent. The top-right program bubble of #C1HH is retired: what
 it said is on the Relaying line. A hand-over done explicitly (the key, the palette) prints
 `✦ <program> handed to the agent · Ctrl+H takes it back`; an automatic one prints nothing. Every

@@ -118,7 +118,7 @@ that conflict.
 | Alt+A | Subagents: this pane's subagent tabs (stop them all from there or the Actions list) |
 | Ctrl+T, Ctrl+N | New tab, new window |
 | Ctrl+E, Ctrl+Shift+E | New pane to the right (then ← ↑ ↓ places it) |
-| Ctrl+Shift+J | Delegate: the agent drives the program in this pane; ask from the prompt box |
+| Ctrl+Shift+J (or Ctrl+J in the prompt box) | Step through the agent's tool calls and reasoning; Enter unfolds, Esc leaves |
 | Ctrl+Shift+L | Step through files, folders and links in the output (Enter opens, Esc leaves) |
 | Alt+Arrows | Move between panes |
 | Ctrl+W, Ctrl+Shift+W | Close pane (then tab, then window) |

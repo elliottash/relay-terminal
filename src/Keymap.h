@@ -391,8 +391,9 @@ private:
         add("control.human", "terminal", "Take control of the terminal, or give it back to the Relay prompt (a toggle; works from the prompt box)",
             {QStringLiteral("Ctrl+H"), QStringLiteral("Ctrl+Shift+H")});
         add("control.prompt", "terminal", "Back to the Relay prompt (the agent is in control)", {});
-        add("program.delegate", "terminal", "Let the agent drive the program in this pane (with text in the prompt box, ask it now)",
-            {QStringLiteral("Ctrl+Shift+J")});
+        // No default key since #XPEB (owner, 2026-09-26: "we don't need a hot key for let the agent
+        // drive, because the agent drives by default"); the banner button and the palette remain.
+        add("program.delegate", "terminal", "Let the agent drive the program in this pane (with text in the prompt box, ask it now)", {});
         add("terminal.native", "terminal", "Toggle native terminal input (keys go straight to the terminal)", {QStringLiteral("F12")});
         // No default key since #QWAS (it was Ctrl+Shift+R): the stopped pane's banner and the
         // palette are the ways in.
@@ -408,11 +409,12 @@ private:
         add("links.step", "terminal", "Step through files, folders and links in the output (Enter opens, Esc leaves; Ctrl+L from the prompt box)",
             {QStringLiteral("Ctrl+Shift+L"), QStringLiteral("Ctrl+L")});
         // The same walk over the agent's tool-call, reasoning and ✦ turn lines (card #XPEB,
-        // owner 2026-09-25: "lets do ctrl J"). From the prompt box only, like plain Ctrl+L: in
-        // the terminal Ctrl+J is a line feed and belongs to the shell. No Ctrl+Shift twin
-        // (Ctrl+Shift+J is taken) and no preset binds Ctrl+J, so all four keep it.
-        add("folds.step", "agent", "Step through tool calls and reasoning in the output (Enter unfolds, Esc leaves; from the prompt box)",
-            {QStringLiteral("Ctrl+J")});
+        // owner 2026-09-25: "lets do ctrl J"). Plain Ctrl+J from the prompt box only, like plain
+        // Ctrl+L: in the terminal Ctrl+J is a line feed and belongs to the shell. Ctrl+Shift+J is
+        // its twin from anywhere (#QWAS pairing; owner 2026-09-26 freed it from program.delegate).
+        // No preset binds either, so all four keep them.
+        add("folds.step", "agent", "Step through tool calls and reasoning in the output (Enter unfolds, Esc leaves; Ctrl+J from the prompt box)",
+            {QStringLiteral("Ctrl+Shift+J"), QStringLiteral("Ctrl+J")});
         add("agent.clearQueue", "agent", "Clear queued agent prompts", {});
         // Ctrl+Q empties the prompt box, and Ctrl+Z in the box brings the text back (#CPRQ). Plain
         // Ctrl+Q acts only from the prompt box: under a program it is the program's (XON in a

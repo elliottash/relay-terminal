@@ -153,6 +153,10 @@ private slots:
         for (const char *key : {"Ctrl+A", "Ctrl+S", "Ctrl+Z", "Ctrl+X", "Ctrl+C", "Ctrl+D", "Ctrl+G", "Ctrl+P", "F1"})
             QVERIFY2(keymap.actionForKey(QString::fromLatin1(key)).isEmpty(), key);
         QCOMPARE(keymap.actionForKey(QStringLiteral("Ctrl+Shift+G")), QStringLiteral("globals.open"));
+        // #XPEB: the fold walk owns both J keys; delegating has no key (the agent drives by default).
+        QCOMPARE(keymap.actionForKey(QStringLiteral("Ctrl+J")), QStringLiteral("folds.step"));
+        QCOMPARE(keymap.actionForKey(QStringLiteral("Ctrl+Shift+J")), QStringLiteral("folds.step"));
+        QVERIFY(keymap.keysFor(QStringLiteral("program.delegate")).isEmpty());
         QVERIFY(keymap.conflicts().isEmpty());
     }
 
