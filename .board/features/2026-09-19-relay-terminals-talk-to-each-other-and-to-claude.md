@@ -379,6 +379,14 @@ Run 2026-09-24 on the exact landed trees (land.py build gate):
 
 Not done: the Done-means live two-pane run with evidence under `docs/qa_evidence/`. It needs two model-backed agent panes in a Relay rebuilt from main, so it is left for Try it below.
 
+
+### Live two-pane probe (2026-09-26)
+Ran the built `build/relay` under Xvfb with isolated XDG paths and a loopback scripted model. `python3 -m unittest tests.test_panes` also passed 17 tests (0.057 s). The synthetic recipient prompt was `CARD-WORK-BUSY`; this was an agent turn, but not a claimed Board card.
+
+The sender in p1 called `pane_send` to p2 during the recipient's busy turn. Its tool result said `outcome: delivered` and `busy: true`. At p2's next step boundary, the Relay frame contained `BUSY-PING reply to p1`; p2 called `pane_send` with `BUSY-REPLY received`, and p1 displayed that reply. This confirms a live busy-path round trip.
+
+After p2 displayed its completed-turn checkmark, the drive waited 20 seconds and sent `IDLE-PING` from p1. The tool result still said `outcome: delivered` and `busy: true`, so the idle wake path was not exercised. No `IDLE-REPLY` appeared in either pane. The earlier p2 reply itself had produced a `woke` result for idle p1. That establishes wake delivery in the reverse direction, but does not satisfy this card's idle recipient reply requirement. The drive used the previously built binary and did not build current source. Screenshots and model-request trace are in `/tmp/mjg6_live/` for this session.
+
 ## Try it
 Rebuild first (`scripts/relay-build`) and restart Relay: the running binary predates this work.
 
