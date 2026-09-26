@@ -35,7 +35,9 @@ Commits `8ea6fee1`, `9e2b0bcb`, `feeb9251`, and `a58514e1` make card-code links,
 
 ## Tests
 ### Check
-Pass: isolated `relay-board-tests` build and `ctest -R '^board$'` on the selected tree.
+Pass: isolated `relay-board-tests` build on committed revision `a58514e1` and `ctest -R '^board$'` (1/1).
 Pass: `PYTHONPATH=backend python3 -m unittest tests.test_board.DirectCardReadTests tests.test_board_protocol.WriteTests.test_a_card_detail_read_round_trips_through_the_protocol` (3 tests).
 Pass: `PYTHONPATH=backend python3 -m unittest tests.test_board_protocol.KeylessWorkerTests.test_direct_card_read_precedes_helper_configuration` (card response precedes the helper `configured` event).
-Pass: landing gate built the exact tree for both commits.
+Pass: local `scripts/relay-build --fast --target relay` after the restored-card fix.
+Backend lookup timing on this board: direct `card_by_id` median 0.4 ms; full `cards()` median 82.2 ms (three samples; not an end-to-end UI measurement).
+The isolated full Relay target still hits unrelated `src/Pane.h` compile errors in the shared tree; the local full build completed.
