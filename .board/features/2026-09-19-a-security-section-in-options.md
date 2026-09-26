@@ -1,15 +1,18 @@
 ---
 id: 3KB7
 type: work
-status: planned
+status: executing
 labels: [feature]
 component: [gui, worker]
 milestone: beta
 workstream: agent
 assignee: agent
+implemented_by: openai/gpt-6-sol via codex
+session: 91b2ca54-3939-4ab8-819e-fd2e3d26efbe
 rank: zzzzzzm
 created: '2026-09-19'
 acceptance: Options has a Security section that gathers every setting governing what the agent may reach, adds the ones Relay has no control for today, and states in one place what is allowed by default and what is never allowed
+verify: {artifact: system, primary: script, also: [probe], human: optional, criteria: Security shows the cross-pane and unattended controls together; the documented defaults match the controls., sign_off: none, effort: medium, stakes: rework, blast: capability}
 source: 'conversation, 2026-09-19: "add a security options menu with various secruity options like that, not just relay - relay, but more of the approvals options on warp. look at warp options for advice on that."'
 links: {plans: [], commits: [ecf74b8b, 2068bc90, df732939, 6f8aa86f8b78, 2378fe77, cb8e6624, abb6d402da71], evidence: [docs/qa_evidence/2026-09-19-security-section/], related: [R5TC, V2HM, C1HH, D8J3, S5SH, SSRQ, JN7X, K2FV, 9M96], github: null}
 ---
@@ -173,3 +176,9 @@ together (if moved); a read of the new VALIDATION.md section against the rows it
 - [ ] Rewrite `docs/VALIDATION.md:329-337` "Security boundaries" as the written statement of this section, Ask before included <!-- t:j1 -->
 - [ ] Comment tidy in the Security block (`src/RelayWindowSettings.cpp:667-673` stale ROADMAP line; isolation/unattended comments stranded above the MCP rows) <!-- t:s6 -->
 - [ ] Question 1's answer: move the `agent/cross_pane` row onto Security, or record why it stays on Agent <!-- t:t8 s=blocked -->
+
+## Done means
+- Options › Security contains the existing cross-pane messaging control beside the unattended-turn control, with each setting stored in one place.
+- A focused test proves a woken turn loses terminal handoff and program-control tools when `security/unattended_full_tools` is off and retains them when on.
+- `docs/VALIDATION.md` states the current opt-in Ask before posture and the real security boundaries; stale no-ask comments in the Security UI are corrected.
+- Targeted settings and security checks pass, and a live Options capture shows the controls.

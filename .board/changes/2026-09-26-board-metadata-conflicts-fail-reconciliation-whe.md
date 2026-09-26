@@ -1,13 +1,14 @@
 ---
 id: GKMW
 type: work
-status: planned
+status: executing
+assignee: agent
 labels: [bug, land, board, guest]
 parent: 3MH4
 rank: zzzzzzzzzzzzzzzzzzzzzzzzzzzzzw
 created: '2026-09-26'
 source: This conversation, 2026-09-26; queue jobs 3c9fd1e8ffbb43e5 and 7879feb36cc50b96
-links: {plans: [], commits: [], evidence: [], related: [AMQQ, 80X1, P9ZA, BP15], github: null}
+links: {plans: [], commits: [499434c2104d89b5ea5a5a9a9b34600f2405d8e9], evidence: [], related: [AMQQ, 80X1, P9ZA, BP15], github: null}
 ---
 # Board metadata conflicts fail reconciliation when the guest has no session token
 
@@ -28,3 +29,9 @@ In queue mode, stale Board metadata jobs can enter reconciliation, which launche
 3. Run focused queue, integration, reconciliation, and guest-launch tests. Verify the resulting status, notification and Board write are durable. Preserve conservative refusal for genuine binary or over-limit code conflicts.
 
 No owner product decision is needed; this repairs an internal publication path. Related baseline gate failure is tracked separately by #BP15.
+
+## Execution Summary
+- Queue commit `499434c2104d89b5ea5a5a9a9b34600f2405d8e9` submitted as job `7ca7a6a6559a5e07`; publication pending. Metadata collisions now return an author handoff before any guest is launched.
+
+## Tests
+- `python3 -m unittest tests.test_integration_service.FlowTests tests.test_integration_service.ReconcileTests` — 14 passed.
