@@ -9378,3 +9378,34 @@ from the plugin manifest in the `completions` field of `workspace_console`. `rel
 same handshake without a kernel: the answer resolves `stata`, `stata-mp` or `stata-se` and runs
 the manifest's `stata -q` program in the pty. A missing Stata binary produces an error and a
 shell fallback.
+
+## 37. Isolated development workspace and publication status (#80X1)
+
+Before starting a development shell, worker or guest, the launcher calls
+`python -m relay_core.workspace_context prepare --project ROOT --session TOKEN [--card ID]`
+with the installed backend on `PYTHONPATH`. The command prints one JSON `tree_status` object:
+`project_root`, `board_root`, `repo_id`, `workspace_id`, `execution_cwd`, `branch`,
+`base_sha`, `state`, `recoverable`, `reason`. `state` is `legacy`, `planning`, or
+`active` on success; a queue failure prints `state: refused` and exits 2. The launcher
+must refuse the development start on that failure. Repeating a session reuses its
+active lease. A worker `configure` can receive the same object in `tree_status` and
+validates the lease without allocating again. When absent, the worker prepares its
+own workspace before starting a provider. It never relocates an already running turn;
+a new configure requires the turn to have stopped.
+
+`execution_cwd` is the process cwd and file-tool root. The canonical project and Board
+remain at `project_root` and `board_root`, outside the sparse source worktree. Native
+command jobs and guest processes receive `RELAY_PROJECT_ROOT`, `RELAY_BOARD_ROOT`, and
+`RELAY_WORKSPACE_ID` as child environment entries. These values are per launch, not
+changes to the worker's global environment. A development subagent gets a separate
+leased worktree. Queue agents commit normally in that worktree and submit immutable
+commits with `relay-land submit HEAD --request-id ID`; the old shared checkout
+`land.py` workflow is suppressed there. Legacy projects keep their existing behavior.
+
+`python -m relay_core.workspace_context queue-status --project ROOT` prints
+`queue_status`: `repo_id`, `jobs` with `id`, `card`, `workspace_id`, `status`,
+`reason`, `age_seconds`, `candidate_sha`, `published_sha`, and an optional
+`main_release` record. A `main_moved` event carries `repo_id`, `previous_sha`,
+`sha`; it is informational and never rebases an active workspace. The GUI may poll
+`queue-status` for live rows and uses the publisher's movement event to refresh the
+runnable-main view.

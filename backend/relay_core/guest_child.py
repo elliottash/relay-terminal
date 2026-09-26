@@ -9,8 +9,10 @@ class GuestChildProvider:
     serves_side_calls = False
     record_guest_tools = True
 
-    def __init__(self, config, workspace, *, permissions, effort, skills, instructions):
+    def __init__(self, config, workspace, *, permissions, effort, skills, instructions,
+                 workspace_identity=None):
         self.config, self.workspace = config, workspace
+        self.workspace_identity = workspace_identity or {}
         self.permissions, self.effort = permissions, effort
         self.skills, self.instructions = skills, instructions
         self.agent = None
@@ -38,7 +40,8 @@ class GuestChildProvider:
         if self.effort:
             options["effort"] = self.effort
         provider = guests.start_provider(
-            guests.config_preset(self.config), {"guest": options}, self.workspace,
+            guests.config_preset(self.config), {"guest": options,
+                                                 "tree_status": self.workspace_identity}, self.workspace,
             config=self.config, skill_index=self.skills, instruction_suffix=self.instructions,
             delegation=False)
         self.live = provider

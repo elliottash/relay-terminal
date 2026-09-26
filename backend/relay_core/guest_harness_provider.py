@@ -866,7 +866,14 @@ def start_provider(preset_id: str, request: dict, workspace: str,
     from .guest_board_bridge import Bridge
     from .guest_instructions import build_instructions
     from .board_tools import find_board_root
-    bridge = Bridge(available=delegation and find_board_root(workspace) is not None,
+    from . import workspace_context
+    identity = (request.get("tree_status") or workspace_context.prepare(
+        workspace, os.environ.get("RELAY_SESSION_TOKEN") or "")
+        if os.path.isdir(workspace) else {})
+    if identity.get("state") == "active" and identity["execution_cwd"] != workspace:
+        raise ValueError("guest workspace does not match its leased execution cwd")
+    bridge = Bridge(available=delegation and
+                    find_board_root(identity.get("project_root") or workspace) is not None,
                     delegation=delegation)
 
     def attempt(resume: str):
@@ -876,6 +883,8 @@ def start_provider(preset_id: str, request: dict, workspace: str,
         try:
             harness = (make_harness(guest_id, memory=options["memory"], account=account) if account
                        else make_harness(guest_id, memory=options["memory"]))
+            if hasattr(harness, "_env_overrides"):
+                harness._env_overrides.update(workspace_context.environment(identity))
         except HarnessError as exc:
             raise ValueError(str(exc) or f"{guest.spec(guest_id).name} could not be started.") from None
         try:
@@ -886,6 +895,9 @@ def start_provider(preset_id: str, request: dict, workspace: str,
                                                memory=options["memory"]))
             if instruction_suffix:
                 instructions += "\n\n" + instruction_suffix
+            queue_note = workspace_context.submission_instructions(identity)
+            if queue_note:
+                instructions += "\n\n" + queue_note
             started = harness.start(cwd=workspace, model=options["model"] or None,
                                     resume=resume or None, fork=options["fork"],
                                     permissions=options["permissions"], effort=options["effort"],

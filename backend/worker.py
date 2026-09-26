@@ -291,6 +291,7 @@ def main():
                 emit({"event": "route", "id": request.get("id"),
                       **workspaces.annotate(decision.to_dict(), request)})
             elif kind == "configure":
+                from relay_core import workspace_context
                 if turns.busy:
                     raise ValueError("Stop the active agent turn before changing provider or workspace.")
                 # One resolved absolute workspace for the whole of `configure`. `board_workspace`
@@ -303,6 +304,20 @@ def main():
                 board_workspace = (str(Path(asked).expanduser().resolve())
                                    if isinstance(asked, str) and asked.strip() else None)
                 workspace = board_workspace or str(Path(os.getcwd()).resolve())
+                identity = (workspace_context.validate_prepared(
+                    request["tree_status"], request.get("project_root") or workspace,
+                    request.get("pane_token") or os.environ.get("RELAY_SESSION_TOKEN") or "")
+                    if request.get("tree_status") is not None else
+                    workspace_context.prepare(request.get("project_root") or workspace,
+                        request.get("pane_token") or os.environ.get("RELAY_SESSION_TOKEN") or "",
+                        planning_only=bool(request.get("planning_only"))))
+                if identity["state"] == "active":
+                    workspace = identity["execution_cwd"]
+                    board_workspace = identity["project_root"]
+                    request = {**request, "board": {**(request.get("board") or {}),
+                                                     "dir": identity["board_root"],
+                                                     "project": identity["project_root"]},
+                               "tree_status": identity}
                 # The board is files, not a model: set it up before the provider is resolved,
                 # so a missing key still lets the pane open and browse the cards (only board_ask
                 # needs the agent). Before 2026-09-17 a keyless window sat on "Loading…" forever.
@@ -452,6 +467,10 @@ def main():
                                                    preset_id=resolver.main_preset_id, key_lookup=keystore.lookup,
                                                    aliases=agents_request.get("aliases"), roles=resolver,
                                                    main_agent=agent)
+                agent.executor.workspace_identity = identity
+                agent.workspace_identity = identity
+                agent.refresh_system_prompt()
+                subagent_factory.workspace_identity = identity
                 if "max_auto_turns" in agents_request:
                     subagents.set_options(agents_request["max_auto_turns"])
                 turns.set_agent(agent)

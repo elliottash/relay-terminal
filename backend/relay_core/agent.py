@@ -1290,6 +1290,7 @@ class Agent:
             ("instructions", pins["instructions"]),
             ("memory", pins["memory"]),
             ("workspace", "Chosen workspace: " + str(self.executor.workspace.root)),
+            ("workspace_queue", self.workspace_queue_note()),
             # Below the workspace line because `tests` is one of the groups: which groups exist
             # changes when a project is attached, and that belongs with the Switchboard sections
             # rather than above everything they share.
@@ -1299,6 +1300,10 @@ class Agent:
         ]
         # One blank line between sections, wherever each one's own text puts its newlines.
         return [(name, text.strip("\n")) for name, text in sections if text.strip("\n")]
+
+    def workspace_queue_note(self) -> str:
+        from .workspace_context import submission_instructions
+        return submission_instructions(getattr(self, "workspace_identity", {}) or {})
 
     def _volatile_now(self) -> dict[str, str]:
         """The `VOLATILE_SECTIONS` as they read right now, both skill renderings included.

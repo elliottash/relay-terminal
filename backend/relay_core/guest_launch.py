@@ -402,7 +402,8 @@ def home_environment(guest_id: str, extra=(), home: str | None = None) -> dict[s
 def command_line(guest_id: str, runtime_dir: str, cwd: str | None = None, port: int = 0,
                  extra=(), home: str | None = None, python: str | None = None,
                  model: str | None = None, effort: str | None = None,
-                 memory: str | None = None) -> dict:
+                 memory: str | None = None, tree_status: dict | None = None,
+                 session: str | None = None) -> dict:
     """Everything the pane needs to start `guest_id` in its shell, in one payload:
 
         {"guest", "argv", "env", "command", "settings", "legacy", "session_id"}
@@ -424,13 +425,26 @@ def command_line(guest_id: str, runtime_dir: str, cwd: str | None = None, port: 
     `--append-system-prompt-file`, codex by a pointer in its developer instructions. `memory` in
     the payload is the mode used and `memory_file` the block's path ("" for `own`).
     """
+    from . import workspace_context
+    if cwd:
+        session = session or os.environ.get("RELAY_SESSION_TOKEN") or ""
+        identity = (workspace_context.validate_prepared(tree_status,
+                    tree_status.get("project_root") or cwd, session)
+                    if tree_status is not None else workspace_context.prepare(cwd, session))
+        cwd = identity["execution_cwd"]
+    else:
+        identity = {}
     spec = guest.spec(guest_id)   # ValueError for anything the registry does not know
     mode = memory_mode(memory)
     legacy = clean_legacy(cwd, home)
     env: dict[str, str] = home_environment(spec.id, extra, home)
+    env.update(workspace_context.environment(identity))
     settings = ""
     session_id = ""
     block = tui_memory_instructions(spec.id, cwd, mode, python)
+    queue_note = workspace_context.submission_instructions(identity)
+    if queue_note:
+        block = (block + "\n\n" if block else "") + queue_note
     memory_file = ""
     if spec.id == "claude":
         settings = write_claude_settings(runtime_dir, cwd, home, own_memory=own_memory(mode))
@@ -452,6 +466,7 @@ def command_line(guest_id: str, runtime_dir: str, cwd: str | None = None, port: 
             session_id = extra[-1]      # codex has no flag to choose a new thread's id
     words = [f"{key}={shlex.quote(value)}" for key, value in env.items()] + [shlex.quote(word) for word in argv]
     return {"guest": spec.id, "argv": argv, "env": env, "command": " ".join(words),
+            "execution_cwd": cwd or "", "tree_status": identity,
             "settings": settings, "legacy": legacy, "session_id": session_id,
             "memory": mode, "memory_file": memory_file}
 
@@ -485,6 +500,8 @@ def main(argv=None) -> int:
     parser.add_argument("guest", help="claude or codex")
     parser.add_argument("--runtime-dir", required=True, help="the pane's runtime directory")
     parser.add_argument("--cwd", default="", help="the directory the guest starts in")
+    parser.add_argument("--tree-status", help="JSON from workspace_context prepare")
+    parser.add_argument("--session", help="the pane token that owns the tree lease")
     parser.add_argument("--port", type=int, default=0, help="the IDE bridge's port, when it is up")
     parser.add_argument("--home", default=None, help="the home directory (tests, alternate homes)")
     parser.add_argument("--python", default=None, help="the interpreter codex's notify entry names")
@@ -502,7 +519,9 @@ def main(argv=None) -> int:
     try:
         result = command_line(args.guest, args.runtime_dir, args.cwd or None, args.port, extra,
                               home=args.home, python=args.python, model=args.model or None,
-                              effort=args.effort or None, memory=args.memory or None)
+                              effort=args.effort or None, memory=args.memory or None,
+                              tree_status=json.loads(args.tree_status) if args.tree_status else None,
+                              session=args.session)
     except (LaunchError, ValueError, OSError) as error:
         print(json.dumps({"ok": False, "error": str(error)}))
         return 1

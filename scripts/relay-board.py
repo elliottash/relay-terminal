@@ -36,6 +36,10 @@ def default_board_dir() -> Path:
     `switchboard/` beside a real `board/` does not shadow the board.
     """
     here = Path.cwd()
+    from relay_core import trees
+    registered = trees.resolve_project(here)
+    if registered is not None and registered["mode"] == "queue" and registered["board_root"]:
+        return Path(registered["board_root"])
     names = board_mod.BOARD_FOLDERS
     roots = [here, *here.parents]
     try:

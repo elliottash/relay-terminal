@@ -516,7 +516,10 @@ def session_root(session: str) -> Path:
 
 def keep_root(project: str | Path) -> Path:
     """Class `keep`: work that must outlive the task, in the project, git-ignored via /.relay/."""
-    return Path(project).resolve() / ".relay" / "work"
+    from . import trees
+    registered = trees.resolve_project(project) if Path(project).is_dir() else None
+    canonical = registered["project_root"] if registered and registered["mode"] == "queue" else project
+    return Path(canonical).resolve() / ".relay" / "work"
 
 
 # The machine's temp dir as inherited at import time. Agent sessions repoint os.environ TMPDIR at

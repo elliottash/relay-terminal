@@ -605,6 +605,7 @@ class ToolExecutor:
         # with scripts/land.py, so the auto-begin below runs once per path.
         self.authorship_card = ""
         self._land_begun: set[str] = set()
+        self.workspace_identity: dict = {}
 
     def _approval(self, name: str, args: dict, *, exists: bool = False, outside_workspace: bool = False,
                   subject: str = "", already: tuple[str, ...] = ()) -> tuple[str, ...]:
@@ -675,6 +676,8 @@ class ToolExecutor:
     def tools(self) -> list[dict]:
         catalog = self.keybindings
         tools = TOOLS + [catalog.tool_spec()] if catalog is not None else list(TOOLS)
+        if self.workspace_identity.get("state") == "active":
+            tools = [tool for tool in tools if tool["function"]["name"] != "land_try"]
         if self.remote_session is not None:
             # run_command and the file tools all reach the host the user is logged into.
             tools = [with_host(tool) if tool["function"]["name"] in HOST_TOOLS else tool
@@ -699,6 +702,8 @@ class ToolExecutor:
         if not isinstance(arguments, dict):
             raise ValueError("Tool arguments must be an object.")
         args = dict(arguments)
+        if name == "land_try" and self.workspace_identity.get("state") == "active":
+            raise ValueError("Use project tests and relay-land submit from this private workspace.")
         if name in ("load_skill", "read_skill_file"):
             if self.skills is None or set(args) - {"name", "path"} or (name == "load_skill" and "path" in args):
                 raise ValueError("Unknown tool or unexpected argument.")
@@ -1302,6 +1307,8 @@ class ToolExecutor:
         pane (RELAY_SESSION_TOKEN), the contact names it and the board card it is working. Best
         effort by contract: every failure — nonzero exit, timeout, a land.py without --auto
         yet, no python — is logged and the write proceeds."""
+        if self.workspace_identity.get("state") == "active":
+            return  # private queue branches use ordinary git commits and relay-land submit
         token = os.environ.get("RELAY_SESSION_TOKEN") or ""
         if not token:
             return
@@ -1369,6 +1376,8 @@ class ToolExecutor:
         the record scripts/land.py's commit side reads to credit another session's hunks. Only
         when a token is set and the path is in a land.py repo; failures are logged, never
         raised — the write is already on disk."""
+        if self.workspace_identity.get("state") == "active":
+            return
         token = os.environ.get("RELAY_SESSION_TOKEN") or ""
         if not token:
             return
@@ -1414,7 +1423,11 @@ class ToolExecutor:
         """Start `command` as a job and wait for it. `argv`/`host`: the same job, run as ssh over
         the user's connection (card #S5SH); everything else — env, waiting, output — is shared.
         `memory_max` (card #WBDX, local only): the job runs in its own scope with that bound."""
-        job = self.jobs.start(command, cwd, command_env(), argv=argv, host=host, memory_max=memory_max)
+        env = command_env()
+        if host is None:
+            from .workspace_context import environment
+            env.update(environment(self.workspace_identity))
+        job = self.jobs.start(command, cwd, env, argv=argv, host=host, memory_max=memory_max)
         # A background job still gets a moment: a server that fails at once says so in this result.
         return self._await(job, BACKGROUND_GLANCE if background else timeout)
 

@@ -172,6 +172,7 @@ class SubagentFactory:
                  main_agent=None):
         self.config = config
         self.workspace = workspace
+        self.workspace_identity: dict = {}
         self.skills = skills
         match = match_preset(config.base_url, config.model)
         self.preset_id = preset_id if preset_id in PRESETS else (match.id if match else None)
@@ -350,6 +351,15 @@ class SubagentFactory:
 
     def __call__(self, definition: AgentDefinition, model: str | None, effort: str | None,
                  emit: Callable[[dict], None], agent_id: str):
+        identity = self.workspace_identity
+        child_workspace = self.workspace
+        if identity.get("state") == "active":
+            from .workspace_context import prepare
+            child_identity = prepare(identity["project_root"],
+                                     f"{identity['workspace_id']}:child:{agent_id}")
+            child_workspace = child_identity["execution_cwd"]
+        else:
+            child_identity = identity
         warnings: list[str] = []
         config, preset_id, tier = self.choose(model, warnings, definition)
         self.tiers[agent_id] = tier
@@ -367,7 +377,8 @@ class SubagentFactory:
         from .guest_child import GuestChildProvider
         if provider is None and guests.config_guest_id(config):
             config = dataclasses.replace(config, extra=dict(config.extra))
-            provider = self.guest_provider(config, definition, effort, agent_id)
+            provider = self.guest_provider(config, definition, effort, agent_id,
+                                           child_workspace, child_identity)
         steps = min(definition.max_steps, MAX_STEPS)
         # `roles` and `preset_id` are the parent's chain, handed on so a subagent whose provider
         # keeps failing continues on the next keyed preset of its own tier exactly as the pane does
@@ -380,13 +391,14 @@ class SubagentFactory:
         on_role = spec in ("inherit", "subagent") or (not spec and self.subagent_role_set())
         if on_role and spec not in self.user_aliases and self.roles is not None:
             ranked = (getattr(self.roles, "roles", {}).get("subagent") or {}).get("candidates") or []
-        agent = Agent(config, self.workspace, emit, provider=provider, max_steps=steps,
+        agent = Agent(config, child_workspace, emit, provider=provider, max_steps=steps,
                       max_tool_calls=max(24, 4 * steps), skills=skills, track_requests=False,
                       preset_id=preset_id, roles=self.roles, ranked_failover=ranked,
                       **self.failover_options())
         if isinstance(provider, GuestChildProvider):
             provider.agent = agent
-        agent.executor = RestrictedExecutor(self.workspace, emit, agent.cancel_event, skills, definition.tools)
+        agent.executor = RestrictedExecutor(child_workspace, emit, agent.cancel_event, skills, definition.tools)
+        agent.executor.workspace_identity = child_identity
         # A subagent's actions draw their approval asks in the pane it belongs to (card #K2FV), so
         # it inherits the pane's checklist at spawn; the manager walks the live ones on a change.
         # The pane's agent is read as `failover_options` reads it, getattr by getattr: the pane's
@@ -410,7 +422,8 @@ class SubagentFactory:
         agent.refresh_system_prompt()
         return agent, config.model, warnings
 
-    def guest_provider(self, config, definition, effort, agent_id):
+    def guest_provider(self, config, definition, effort, agent_id,
+                       workspace=None, identity=None):
         from . import guest_harness_provider as guests
         from .guest_child import GuestChildProvider
         parent = guests.agent_provider(self.main_agent) if self.main_agent is not None else None
@@ -418,9 +431,10 @@ class SubagentFactory:
         if definition.read_only or not ({'write_file', 'edit_file'} & set(definition.tools)):
             permissions = 'deny'
         skills = self.skills if 'load_skill' in definition.tools else None
-        return GuestChildProvider(config, self.workspace, permissions=permissions,
+        return GuestChildProvider(config, workspace or self.workspace, permissions=permissions,
                                   effort=effort, skills=skills,
-                                  instructions=subagent_prompt(definition, agent_id))
+                                  instructions=subagent_prompt(definition, agent_id),
+                                  workspace_identity=identity or {})
 
 
 @dataclass

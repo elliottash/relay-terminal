@@ -1336,6 +1336,13 @@ def find_board_root(workspace: str | os.PathLike | None,
         return root if (root / B.BOARD_CONFIG).is_file() else None
     if workspace is None or not str(workspace).strip():
         return None
+    # Registered development worktrees deliberately omit the Board. Resolve it
+    # through the canonical registry before walking filesystem ancestors.
+    from . import trees
+    registered = trees.resolve_project(workspace) if Path(workspace).is_dir() else None
+    if registered is not None and registered["mode"] == "queue" and registered["board_root"]:
+        root = Path(registered["board_root"])
+        return root if (root / B.BOARD_CONFIG).is_file() else None
     try:
         here = Path(workspace).expanduser().resolve()
     except OSError:                                     # pragma: no cover - unreadable path
