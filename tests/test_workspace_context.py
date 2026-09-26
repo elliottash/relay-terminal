@@ -1,5 +1,7 @@
 """Queue workspace adapters use real Git leases and leave legacy mode alone."""
 import os
+import contextlib
+import io
 import json
 import subprocess
 import sys
@@ -144,6 +146,19 @@ class WorkspaceContextTests(unittest.TestCase):
             self.assertEqual(configured[0]["tree_status"]["state"], "legacy")
             self.assertEqual(configured[0]["tree_status"]["project_root"], "")
             self.assertEqual(configured[0]["tree_status"]["execution_cwd"], str(self.root))
+        self.assertEqual(trees.TreeManager(self.root, state_root=self.state).list(), [])
+
+    def test_paused_guest_launch_returns_json_without_traceback(self):
+        trees.configure_repo(self.root, state_root=self.state, mode="paused")
+        output = io.StringIO()
+        with patch.dict(os.environ, {"RELAY_STATE_HOME": str(self.state.parent)}), contextlib.redirect_stdout(output):
+            code = guest_launch.main(["claude", "--runtime-dir", str(Path(self.temp.name) / "runtime"),
+                                      "--cwd", str(self.root), "--session", "author",
+                                      "--home", self.temp.name])
+        self.assertEqual(code, 1)
+        result = json.loads(output.getvalue())
+        self.assertFalse(result["ok"])
+        self.assertIn("paused", result["error"])
         self.assertEqual(trees.TreeManager(self.root, state_root=self.state).list(), [])
 
 

@@ -9399,7 +9399,7 @@ started on the stdlib server moves to Jupyter when the console's build succeeds 
 restart record, origin `system`). A failed build leaves the stdlib fallback, and `note` says why.
 `RELAY_PYTHON_PROVISION=off` disables the build.
 
-## 37. Isolated development workspace and publication status (#80X1)
+## 38. Isolated development workspace and publication status (#80X1)
 
 Before starting a development shell, worker or guest, the launcher calls
 `python -m relay_core.workspace_context prepare --project ROOT --session TOKEN [--card ID]`
@@ -9427,6 +9427,11 @@ ends a lease at a controlled close and prints `{workspace_id, state, execution_c
 files and branch are kept, `state` is `retained` when the branch holds unlanded commits and
 `released` otherwise. The same session's next `prepare` reacquires that tree (a subagent's
 session is `<parent workspace>:child:<agent id>`, so a restored child resumes on its own tree).
+The GUI releases its allocation after shutting down the pane's worker and terminal, including
+panes that never configured an agent. Queue-pane layouts preserve `workspace_session`, the
+lease's session token, so reopening reacquires the same tree and its unfinished work. A new
+pane or split receives its own token. A shell hosted by tmux receives this pane's
+`RELAY_START_DIR` explicitly rather than inheriting the tmux server's first pane directory.
 Removal is explicit (`relay-tree remove`). Every subcommand prints one JSON line; any failure
 is `{state: "refused", recoverable, reason}` with exit 2, never a traceback.
 

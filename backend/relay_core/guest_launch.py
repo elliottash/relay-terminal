@@ -492,6 +492,7 @@ def suggest_main(argv) -> int:
 
 
 def main(argv=None) -> int:
+    from .workspace_context import WorkspacePreparationError
     arguments = list(sys.argv[1:] if argv is None else argv)
     if arguments[:1] == ["suggest-memory"]:
         return suggest_main(arguments[1:])
@@ -522,7 +523,7 @@ def main(argv=None) -> int:
                               effort=args.effort or None, memory=args.memory or None,
                               tree_status=json.loads(args.tree_status) if args.tree_status else None,
                               session=args.session)
-    except (LaunchError, ValueError, OSError) as error:
+    except (LaunchError, ValueError, OSError, WorkspacePreparationError) as error:
         print(json.dumps({"ok": False, "error": str(error)}))
         return 1
     print(json.dumps({**result, "ok": True}))
