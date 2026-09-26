@@ -1,15 +1,16 @@
 ---
 id: 00G1
 type: work
-status: executing
+status: planned
 labels: [feature, models, ui, design]
 assignee: agent
 implemented_by: openai/gpt-6-sol via codex
+blocked_by: [WBFM, 4SHY, D49C]
 rank: zzzzzzzzzzzzzzzzy
 created: '2026-09-23'
-source: Owner in a Relay guest session (Claude Code), 2026-09-23
-links: {plans: [], commits: [af112403cc9f14debea973f1396a276db41d0ccd, e9f709ef, 5e265e54, 9f3ce6e0, 8bf46bde, 3718b34e, 89e46943, 02331664735940255aa39d6bd7994e21e0c5596f], evidence: [docs/qa_evidence/2026-09-23-00G1-labels/, docs/qa_evidence/2026-09-23-00G1-redesign/, docs/qa_evidence/2026-09-23-00G1-copy/], related: [RND7, Y2B9, N4PW, AVR8, BXMS, 4BPE], github: null}
 verify: {artifact: visual, primary: probe, also: [script, ai-visual], human: optional, criteria: Open all five tabs in a narrow pane and confirm the controls are legible and edits persist., sign_off: none, effort: medium}
+source: Owner in a Relay guest session (Claude Code), 2026-09-23
+links: {plans: [], commits: [af112403cc9f14debea973f1396a276db41d0ccd, e9f709ef, 5e265e54, 9f3ce6e0, 8bf46bde, 3718b34e, 89e46943, 02331664735940255aa39d6bd7994e21e0c5596f, 6f2cd70bc7a12bfce58f242f3a8b73d2a1475616], evidence: [docs/qa_evidence/2026-09-23-00G1-labels/, docs/qa_evidence/2026-09-23-00G1-redesign/, docs/qa_evidence/2026-09-23-00G1-copy/], related: [RND7, Y2B9, N4PW, AVR8, BXMS, 4BPE, HJ1T, WBFM, 4SHY, D49C, SYTR], github: null}
 ---
 # Redesign the five Models tabs and clarify their labels
 
@@ -36,31 +37,46 @@ The Models pane still has exactly five tabs: Providers, Available, Priorities, E
 - The five visible tab headers describe their tasks in plain language. In particular, Available becomes **Enabled**, Priorities becomes **Pick order**, and Jobs becomes **Agent jobs** (or shorter wording with the same meaning if narrow-pane testing requires it). Stable internal tab IDs and saved selection continue to work.
 
 ## Plan
-**Goal:** retain the five existing tabs and make their controls clear and responsive. Use patterns from familiar model lists and sortable lists within each tab, while retaining Relay's existing curation and routing storage.
+**Freshened 2026-09-26 (stale-card review, HEAD `6514be0c`).** The five-tab redesign landed on 2026-09-23 and 2026-09-24. The reopened lag and flip-back report now has a fix that another session verified. Three newer cards, all held by the live pane `cae84571`, own the remaining Models-pane fixes. This card no longer plans redesign work. It owns only the umbrella acceptance: one separate session checks the result against `## Done means`. The original plan and the 2026-09-23 execution split are in the thread and in git history (this file at `6514be0c`).
 
-**Findings:** `ModelsPane` hosts Providers, Available, Priorities, Effort, and Jobs. `ModelPicker` shares a `QTreeWidget` across Available, Priorities, and Effort; `JobsTab` has a separate table and modal ranked-list editor. The synchronous cross-pane update after edits was addressed separately by #HJ1T. Rank editing and ties are currently hidden behind a rank-cell click.
+**Findings**
+- Five tabs with stable IDs: `src/ModelsPane.cpp:165-171`. The visible labels are Sources | Enabled | Pick order | Effort | **Job rules**, shortened to Order / Rules at narrow width (`src/ModelsPane.cpp:458-462`). `## Done means` line 8 says **Agent jobs**. After the owner said "agent jobs is NOT pane specific. it should be for setting rules", #WBFM Track B (`ff7c872d`) renamed it.
+- Lag and flip-back, reopened 2026-09-24: `d6f769f6` (#HJ1T) coalesces the cross-pane fan-out behind a 200 ms timer (`src/RelayWindow.h:2693-2703`). `6f2cd70b` (this card, salvaged through #3BM5) keeps a worker's role report from redrawing a control that is being clicked (`ModelsPane::setRoleSummaries`, `src/ModelsPane.h:137`; test `workerRoleReportDoesNotRedrawAnActiveModelControl`, `tests/modelspane_test.cpp:481`). On 2026-09-25, #HJ1T's verifier used rev `54018502` and `docs/qa_evidence/2026-09-25-verify-HJ1T/`. It clicked 4 times in 622 ms under Xvfb; each box changed at once and stayed changed, and neither symptom reproduced. No per-click latency figure has been recorded.
+- "this pane" wording: `02331664` fixed the header and helper copy. Two leftovers remain. The Jobs "live (this pane)" column (`src/JobsTab.cpp:368-375, 796`) is being removed by #WBFM's follow-up; it is uncommitted in `src/JobsTab.*` under `cae84571`. The "· current" suffix on Enabled, Pick order and Effort (`src/ModelPicker.cpp:885, 954`) belongs to #4SHY and #D49C.
+- Tests at HEAD: `modelpicker` and `jobstab` pass. `modelspane` and `settings` each fail one case: they still expect `"Helper Agent (Alt+Q)"` (`tests/modelspane_test.cpp:782`, `tests/settingspane_test.cpp:1675`) after #E8V1 renamed the button to "Agent (Alt+Q)". #SYTR (inbox) tracks that failure. This card did not cause it.
 
-**Steps:**
-1. Profile an Available toggle and inspect the redraw path after #HJ1T. Keep the clicked control responsive and update only affected rows where possible; preserve immediate persistence and batched cross-pane notification.
-2. **Providers:** simplify scan order and labels for providers, accounts, and offered models; preserve its own tab and existing actions.
-3. **Available:** show a searchable, provider-grouped model list with an obvious on/off control and clear disabled state. Keep availability separate from effort.
-4. **Priorities:** show each class as a readable ordered list with visible add, move, remove, and tie controls. Label groups of tied models as randomized and make fallbacks and the Alt+M box cutoff explicit. Preserve keyboard access and existing rank storage.
-5. **Effort:** show supported reasoning levels and the current selection on each model row, with a direct selector; keep Effort as its own tab.
-6. **Jobs:** show each job's inherited or custom routing plainly. Edit custom ranked lists inline with the same visible ordering and tie controls used in Priorities, while keeping Jobs as its own tab.
-7. Keep all five tab IDs and saved layouts compatible. Add focused tests for availability, ranking/ties, effort, job inheritance/customization, keyboard access, and narrow-pane fit; capture real UI screenshots on an isolated profile.
+**Owned by other cards (not repeated here)**
+- #WBFM (executing, `cae84571`) owns pick-order section headers and rank numbers, Effort spacing, Jobs as global rules with #WK7C, and the Sources removals. That work landed in `2db96643`…`ff7c872d`; the Jobs "live (this pane)" removal is still in progress.
+- #4SHY (executing, `cae84571`) makes Enter and Space toggle the boxes on Enabled and Pick order. It also removes "· current" from the hosted tabs and says why Pick-order rows are muted.
+- #D49C (executing, `cae84571`) removes the single "current" model and adds rank-1 draws on restore, mode switch, labels and `/swap`.
+- #SYTR (inbox) fixes the stale helper-button test expectation.
+- #9ACN and #15ZE (planned) are test faults filed in this card's first commit. #HJ1T's verifier reports both now pass, but each card still needs its own close.
 
-**Design choices to validate while implementing:** Use explicit tie/untie actions alongside drag and keyboard moves, so randomization is discoverable without typing duplicate rank numbers. Represent the Alt+M cutoff with a labelled control that states which models are included. Check these controls in the actual narrow UI before settling the interaction.
+**Steps:** see `## Tasks`. After the owner answers, `planned` → a separate session verifies → a QA lane.
 
-**Risks:** Shared widgets serve multiple tabs and the Alt+M picker; changes must not alter the picker unexpectedly. Several sessions use these files, so claim files before editing and land only this card's hunks.
+**Risks:** Verifying before `cae84571` lands its three cards would record their open bugs against this card. `## Done means` line 8 names "Agent jobs"; until the owner answers Q1, a strict verifier would fail "Job rules".
 
-**Verify:** targeted model picker, Models pane, and Jobs tests; a measured rapid-toggle interaction; manual completion of each Done-means task in a narrow and normal pane; screenshots in `docs/qa_evidence/<date>-00G1/`.
-**Visible tab headers:** Start with Sources | Enabled | Pick order | Effort | Agent jobs. Keep the existing `providers`, `available`, `priorities`, `effort`, and `jobs` IDs in tab data and layout state. Check the five labels together at the supported narrow width; shorten only the visible words if needed, and use tooltips to preserve the full meaning. Update tab-label assertions and screenshots accordingly.
+**Verify:** `ctest -R '^(modelpicker|modelspane|jobstab|settings)$'` green. Walk each `## Done means` line live under Xvfb with an isolated profile, at 420 px and at normal width. Include one measured click-to-repaint time on Enabled and a check that the other panes receive the final state. Save screenshots of all five tabs to `docs/qa_evidence/<date>-verify-00G1/`. The owner's hands-on check of the lag is optional (`human: optional`).
+**2026-09-26 scope update.** Keep Job rules as the fifth tab. The owner reports that click lag and checkbox flip-back are now okay. This umbrella awaits #WBFM, #4SHY and #D49C, then one independent verification pass; new redesign requests get separate cards.
 
-**2026-09-23 execution split:** Dispatch Sources (`RelayWindow` provider section and related settings), Enabled (`ModelPicker` availability paths), and Agent jobs (`JobsTab`) in parallel. Pick order and Effort also live in `ModelPicker`, so dispatch them in sequence after Enabled to avoid simultaneous edits to that widget. Each subagent owns only its assigned files, uses `land.py`, runs focused checks without a full suite, and reports a commit. The parent integrates layout and behavior, then builds once at low parallelism after the machine has memory, runs targeted tests, and captures five live tab views.
+## Tasks
+- [x] Five plain-language tab headers, stable tab IDs, all five fit at 420 px — `af112403` <!-- t:g1 -->
+- [x] Sources: accounts first, then local servers, then profiles — `e9f709ef`, `5e265e54` <!-- t:g2 -->
+- [x] Enabled: searchable provider groups, immediate On/Off — `9f3ce6e0` <!-- t:g3 -->
+- [x] Pick order: visible add/move/tie/remove, fallback and Alt+M cutoff help, narrow fit — `9f3ce6e0`, `3718b34e` (headers/rank polish: #WBFM) <!-- t:g4 -->
+- [x] Effort: supported levels and direct per-row selection — `89e46943` (spacing: #WBFM) <!-- t:g5 -->
+- [x] Jobs: inherited vs custom, inline ranked editing — `8bf46bde` (global rules and "Job rules" label: #WBFM `ff7c872d`) <!-- t:g6 -->
+- [x] Copy: shared settings, no "opened from" pane — `02331664` <!-- t:g7 -->
+- [x] Lag / flip-back: coalesced fan-out `d6f769f6` (#HJ1T, verified 2026-09-25) and no redraw under an active click `6f2cd70b` <!-- t:g8 -->
+- [ ] Owner answers Q1–Q3 on the thread (2026-09-26) <!-- t:g9 -->
+- [ ] #WBFM Jobs "live (this pane)" removal, #4SHY and #D49C land (session `cae84571`) <!-- t:gb -->
+- [ ] #SYTR updates the stale "Helper Agent (Alt+Q)" expectations so `modelspane` and `settings` are green <!-- t:gc -->
+- [ ] Separate verifying session: every `## Done means` line at 420 px and normal width, a measured click-to-repaint time, screenshots → `docs/qa_evidence/<date>-verify-00G1/`, then `## QA checklist` and `## Verdict` <!-- t:gd -->
 
 ## Decisions
 - Owner, 2026-09-23: "no i want the 5 tabs still". Preserve five distinct pages and their responsibilities: Providers, Available, Priorities, Effort, and Jobs.
 - Owner, 2026-09-23: "but change the tab headers to make them more intuitive, especially available and priorities; jobs too". Rename their visible headers. Proposed labels: **Sources, Enabled, Pick order, Effort, Agent jobs**. Keep stable internal IDs so saved tab selection still opens the same page.
+- 2026-09-26 — Owner: “yes to all. 00g1 1 yes 3 its ok now”. Keep **Job rules** as the fifth tab. The earlier lag and checkbox flip-back are no longer observed. Close this umbrella after #WBFM, #4SHY and #D49C land and a separate verification pass.
 
 ## Execution Summary
 2026-09-23, first slice: commit `af112403` changed the five visible tab headers to Sources, Enabled, Pick order, Effort, and Agent jobs; at 420 px, Order and Roles replace the two longer labels. The internal tab IDs remain unchanged. A 2 px reduction on each side lets all five tabs fit. The broader per-tab control redesign remains open on this card.

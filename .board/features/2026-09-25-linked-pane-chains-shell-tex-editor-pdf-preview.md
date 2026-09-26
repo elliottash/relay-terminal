@@ -6,7 +6,7 @@ labels: [feature, panes, artifacts, preview]
 rank: zzzzzzzzzzzzzzzzzzzzzzzw
 created: '2026-09-25'
 source: 'Owner in a Relay pane, 2026-09-25; slice of #P2W8 (D6)'
-links: {plans: [], commits: [488ff0c853f7], evidence: [], related: [P2W8, E85D, WYGY, F8R7], github: null}
+links: {plans: [], commits: [488ff0c853f7, def2cf0b4130], evidence: [docs/qa_evidence/2026-09-25-tex-chains/], related: [P2W8, E85D, WYGY, F8R7, SJ00], github: null}
 ---
 # Linked pane chains: shell → TeX editor → PDF preview as one group that opens, restores and closes together
 
@@ -14,27 +14,19 @@ links: {plans: [], commits: [488ff0c853f7], evidence: [], related: [P2W8, E85D, 
 also note and build the case of multiple linked panes -- eg shell -> TEX -> PDF.
 
 ## Plan
-Slice 8 of #P2W8 (decision D6, D4). **Wave 2: waits for the hold on #E85D to lift** (`src/ArtifactWorkspace.{h,cpp}`, `src/RelayWindowWorkspace.cpp` are untracked in the tree) and for #WYGY's role bindings.
+**Goal.** Deliver the linked shell → TeX editor → PDF preview chain as one restorable group.
 
-**Goal.** A chain of linked panes, shell → TeX editor → PDF preview, that is one group: each member can open the next, the group has a direction and a head, it restores after a restart with its sizes, moving one member keeps the link, closing the head asks about the rest, and the headers show the chain.
+**Current state (2026-09-26).** The chain model, open-beside offer, member chips, close/move/restore behavior, documentation and live drive landed in `def2cf0b`. Evidence is in `docs/qa_evidence/2026-09-25-tex-chains/` (offer, three-member chain, build generations, restart and close flow). The older plan's untracked-file hold is obsolete. A defect found during review registered the PDF with the source adapter; #SJ00 fixes it in submitted commit `9fe22760`, pending publication. Forward/inverse SyncTeX remains #WYGY's responsibility.
 
-**Findings.** `ArtifactWorkspace` already models a persisted group id, plugin kind, root, layout, source files, output generations and member→role links for Editor/Console/Preview/Variables, with `1:1:1` and `2:1` presets and navigation from source links to the linked editor (`src/ArtifactWorkspace.h:37-65`, `:104-142`, `src/RelayWindowWorkspace.cpp:20-59`, `:201-253`, `:318-445`). Its Console role is a full terminal `Pane` (D4). What it lacks is the chain: order among members, "open the next" from a member, more than one member per role, and the header chrome.
+**Next steps.** After #SJ00 publishes, run the existing chain drive on the published build, inspect the PDF status on a build without Qt PDF, and move this card to needs-verification with fresh evidence. A separate session verifies the chain's Done means.
 
-**Steps.**
-1. Model: `ArtifactWorkspace` gains an ordered member list with an `upstream` per member (shell → editor → preview), `head()`; serialization bumps the group's version with a reader for the old shape.
-2. Open-the-next: from a shell pane, `relay open main.tex` or a click on `main.tex` in its output offers "Open beside, linked" (joins the group as editor); from the editor, Build (WYGY) opens or refreshes the preview as the group's next member; from a preview, inverse SyncTeX goes to the linked editor (WYGY t:j2).
-3. Chrome: a chain chip in every member's header ("⛓ shell › main.tex › main.pdf", the current member bold); click = focus that member; the presets from #E85D applied to the whole chain.
-4. Lifecycle: closing the head asks "Close the linked panes too?"; moving a member across tabs moves the group; restore rebuilds the chain in order with the saved sizes; a member whose file is gone restores as a placeholder with "Reopen".
-5. Docs: `docs/ARCHITECTURE.md` workspace section; a `relay.tex` walkthrough in `docs/TASK-PLUGINS.md`.
-
-**Files.** `src/ArtifactWorkspace.{h,cpp}`, `src/RelayWindowWorkspace.cpp`, `src/PaneChrome.h` (chip), `src/Pane.h` (the shell's open-beside offer), tests `tests/artifactworkspace_test.cpp`.
-
-**Verify.** Live under Xvfb with TeX Live: shell → `relay open main.tex` → Build → PDF; edit a line, Build, the PDF refreshes with the generation shown; restart Relay, the three panes come back linked and sized; close the shell, the dialog offers to close the rest. Evidence under `docs/qa_evidence/<date>-linked-chain/`.
+**Verify.** `QT_QPA_PLATFORM=offscreen ctest --test-dir build -R '^(artifactworkspace|filepanes)$' --output-on-failure` passed in the #SJ00 workspace (2/2). The live drive is `docs/qa_evidence/2026-09-25-tex-chains/drive.sh`.
 
 ## Tasks
 
-- [ ] Ordered members with upstream and head; serialization <!-- t:9s blocked_by=#E85D -->
-- [ ] Open-the-next from shell, editor and preview <!-- t:vq blocked_by=9s,#WYGY -->
-- [ ] Chain chip and presets across the chain <!-- t:qr blocked_by=9s -->
-- [ ] Close/move/restore lifecycle <!-- t:fy blocked_by=9s -->
-- [ ] Docs and live evidence <!-- t:mk blocked_by=vq,qr,fy -->
+- [x] Ordered members with upstream and head; serialization (`def2cf0b`) <!-- t:9s blocked_by=#E85D -->
+- [x] Open-the-next from shell/editor; inverse SyncTeX remains #WYGY (`def2cf0b`) <!-- t:vq blocked_by=9s,#WYGY -->
+- [x] Chain chip and presets across the chain (`def2cf0b`) <!-- t:qr blocked_by=9s -->
+- [x] Close/move/restore lifecycle (`def2cf0b`) <!-- t:fy blocked_by=9s -->
+- [x] Docs and live evidence (`docs/qa_evidence/2026-09-25-tex-chains/`) <!-- t:mk blocked_by=vq,qr,fy -->
+- [ ] Rerun the chain drive after #SJ00 PDF adapter fix publishes; hand to separate verification <!-- t:vy blocked_by=#SJ00 -->

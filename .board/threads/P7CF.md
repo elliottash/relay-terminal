@@ -89,3 +89,9 @@ One choice is yours before Run: whether the `ai-visual` relaxation should be unc
 
 <!-- relay:entry 20260925T165736Z-2x author=owner kind=event pane=switchboard -->
 - ✦ owner moved this card · Planning → Planned · the plan is on the card
+
+<!-- relay:entry 20260926T050221Z-2c author=agent kind=event mention=SWQN model=gpt-6-sol pane=dc713c52 turn=54948a7060344df2abef877a514ad9bf/77d64610668645e0819475f4bc9fcb8b -->
+mentioned in #SWQN · 2026-09-26 · agent
+
+<!-- relay:entry 20260926T050307Z-bj author=agent kind=decision model=gpt-6-sol pane=dc713c52 turn=54948a7060344df2abef877a514ad9bf/77d64610668645e0819475f4bc9fcb8b -->
+Owner: "yes to all." For #YZ8G question 4, include planted defects and clean controls in #P7CF’s stratified AI-verifier pilot. This is a scope note for the existing owner/session; no implementation is taken over here.

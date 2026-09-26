@@ -1,13 +1,13 @@
 ---
 id: YZ8G
 type: work
-status: executing
+status: planned
 labels: [feature, switchboard, qa]
 assignee: claude-code
 priority: 1
 rank: zzzzzzzzzzzi
 created: '2026-09-19'
-links: {plans: [], commits: [], evidence: [], related: [HKAP], github: null}
+links: {plans: [], commits: [], evidence: [], related: [HKAP, PR4Q, WC3E, JNYN, 74Y5, BX7B, P7CF, SJTR, 1QKM, GW74, C3Q2, 1AA6], github: null}
 ---
 # systematic QA skilling needed
 
@@ -33,62 +33,46 @@ relay should help users with human QA. deep research and scoping needed on this.
 - **2026-09-20 — first worked example: #7BM4.** `docs/qa_evidence/2026-09-20-switchboard-tooling-hub/`: `scenario/stage.py` stages a project in which the card's three problems are happening, `scenario/scenario.json` is the scenario as data (situation, what one did before, steps with an actor of `both` or `human`, an expectation each, one question for the person), `scenario/ai-pass.sh` + `ai-pass.md` are the AI's pass with a screenshot per step, and `HUMAN-QA.md` is the brief generated from the same data.
 - **2026-09-20 — first concrete piece: a demo button after Verify.** "a first example of this woudl be a button after "verify", available once you are in needs verification or later. the agent would then run your app in a way that illusrates the feature or fix"
 - **2026-09-20 — the QA pane is linked back to the card, like Execute and Verify.** "something else -- we can do the same linking of the QA-support agent pane and the switchbaod card we did with execute and verify: #HKAP" — the demo hand-off writes the pane's `pane_token` into its thread entry, so the entry is a link that reveals that pane (`WindowManager::focusPane`, inert once closed). The mechanism already ships (#HKAP, 56b921f6 + 31468891); this card reuses it rather than adding a second one.
+- 2026-09-26 — Owner: “yes to all. 7z8g 3 put this on another card for later”. Close this scoping umbrella after #PR4Q, #WC3E and #JNYN. Track observed-use evidence separately; put Compare results and Results list on a later card; add planted defects and clean controls to #P7CF’s pilot.
 
 ## Plan
-**Revised 2026-09-21 after Codex's review; the previous plan (five shape words, six phases) is in
-the thread and in `docs/QA-ACROSS-FIELDS-RESEARCH.md` §3–4 with §5 saying what changed.**
+**Freshened 2026-09-26 (stale-card review, HEAD `6514be0c`).** The research and scoping the Issue asked for are done: `docs/QA-ACROSS-FIELDS-RESEARCH.md` and `docs/research/qa-across-fields/`. The slice adopted on 2026-09-21 (steps 1–3) has landed as child cards. Newer cards now carry the wider direction. Three things are left on this card: closing the three child cards, the owner's "build 1–3, then use it" pause, and deciding where steps 4–7 go. It builds nothing itself. The 2026-09-21 plan text, including its three owner questions (answered "i agree with all, go ahead with it"), is in git history (this file at `6514be0c`) and in the thread.
 
-**Goal** — From a request to the current deliverable, its supporting evidence and the one decision
-that is still a person's, in as few steps as the work allows. No card is classified; an agent
-proposes the next useful action. Nothing closes on quiet logs. Research: `docs/QA-ACROSS-FIELDS-RESEARCH.md`.
-
-**The design in five lines** (Codex's, adopted)
+**The design in five lines** (adopted 2026-09-21, unchanged)
 1. The card states the intended outcome and how failure would be recognised — before the work.
 2. The agent prepares the changed artefact and the applicable evidence.
 3. Relay shows what passed, what failed, what evidence is missing, and what remains unanswered.
 4. When judgement is needed, Relay opens the relevant thing and asks one specific question.
 5. Acceptance records the evidence and the decision for that revision.
 
-**Actions on a card, proposed by an agent, never mandatory**: Run checks · Compare results · Try
-it · Review. For an app the thing opened is a staged interaction; for a backend a request and
-response or a failure reproduction; for an analyst changed rows and reconciled totals; for a
-researcher a figure, its reproduction and the claim it supports.
+**Where each step stands**
+1. **Gate** is #PR4Q. It landed (`60b3fa43`, `2d1901e6`, `630db31e`, `c3a88caa`), was verified with no findings (`fcb7fad7`), and sits in `needs-qa-llm`.
+2. **Expectations before the work, and a verification record** is #WC3E. It landed (`0ef3ee13`, `486852e0`), was verified with no findings (`eb49e562`), and sits in `needs-qa-llm`. The rule is now in force: `.board/POLICY.md` rules 5 and 11 and `## Done means` before code. `verified()` (`backend/relay_core/board.py:759`, #1AA6 `c40c6695`) gates `done` on the `verify` block.
+3. **Try it** is #JNYN. It landed (`03701acf`, `bca9a82e`, `1f3a7af0`, `132d3523`, …) and sits in `needs-verification`, idle since 2026-09-22. Its `## Verdict` passes the two repaired defects, but "broader staging verdict PENDING a2": the combined current-build staging run died in the 2026-09-22 API overload and was never re-run. #74Y5 ("built to be driven", `ece752ef`, `e0442a22`) is `done`.
+4. **Compare results** is not built and has no card. The nearest piece is #BX7B's Review pane, which shows a card's result and evidence (landed, `needs-verification`).
+5. **Observed use** is not built and has no card. #P7CF (backlog closure, `planned`) takes a different route: a manifest plus a stratified pilot sample.
+6. **Results list** is not built and has no card. #1QKM (`discussing`) is the product home for knowledge-work deliverables.
+7. **AI-verifier evaluation on planted defects** is not built as specified. #P7CF's pilot measures real defect and missing-evidence rates. #C3Q2's `ai_may_gate_after` (`backend/relay_core/qa_policy.py`) and #GW74 (earned authority, `discussing`) decide how much authority an AI verifier gets.
 
-**Steps**
-1. **Fix the gate and the duplicated records** (#7BM4's own follow-up). Statuses: passed, failed,
-   missing evidence, not applicable. Accept an attached result (CI, a collaborator's run) tied to a
-   revision and environment. A retired test is "replace retired check", not "gone". An override is
-   scoped to a check and a revision and expires. Required checks come from the agreed outcome, so a
-   card with no `## Tests` is not thereby ungated. The latest status replaces the pile of dated
-   `### Check` blocks; history behind a link. A run updates the status without another Check.
-2. **Expectations before implementation, and a verification record.** The planning turn writes
-   what "done" means and how failure would show, in the card. A separate verification session
-   (not the implementer) records the revision it checked, the evidence, and what is unresolved,
-   with a positive statement that it happened. Agents move cards within that; a card with an open
-   judgement waits for the person. No chip. No closing from usage.
-3. **Try it**, on any card: one action that stages the situation (a pinned build, a disposable
-   fixture), completes the mechanical pass, and hands the person one short task and one question
-   — without the answer in the brief. If staging fails, that is reported instead of a request.
-4. **Compare results**: changed output beside its baseline — screenshots, rows, tables, files —
-   with uncertain and unexpected results allowed; a person's yes or no where they differ.
-5. **Observed use**: a card in QA shows "used N times over D days; no captured faults" from local
-   logs, as information only.
-6. **Results**: a compact list beside the board, when outputs exist, of selected deliverables with
-   their producing command, code and inputs, checks and review; opens each in its own application.
-   Separate from the Test suites pane; not a fifth toolbar button.
-7. **Evaluate the AI verifier** on a pilot of planted defects and clean controls before it is
-   trusted beyond advice; report missed defects, false alarms, unjustified passes and the
-   reviewer's effort.
+**Cards that grew out of this one:** #BX7B (Review pane and the human-QA designation: the owner's "a card has a designation of whether human QA is needed", now `verify.human`), #1AA6 and #C3Q2 (`verified()` and the QA policy floor), #P7CF, #SJTR (a QA attack system, `discussing`), #SW1D (Hygiene / Performance, `needs-qa-llm`) and #GW74.
 
-Build 1–3, then use it. 4–7 by need.
+**Codex's policy contradictions** are resolved in `.board/POLICY.md`. Rule 10 lists `Human QA`, `Profile` and `Try it`. The implementer writes `## Done means` and no `## QA checklist`; the verifying session writes the record. Agents move cards within their authority, and a card with an open judgement waits for the person.
 
-**Contradictions to resolve in the policy text** (Codex): agents may move cards versus the
-verifier may not (resolved above: within authority, judgement waits); the policy's "supply a
-checklist" versus "the implementer does not write it" (the verifier writes the record; the
-implementer writes expectations); the policy's fixed headings omit `Human QA` and `Profile`.
+**Close when (proposed):** #PR4Q, #WC3E and #JNYN have left the QA lanes with a verdict, and the owner has filed or dropped each of steps 4–7 (questions on the thread, 2026-09-26).
 
-**Questions for the owner**
-1. Adopt this revised plan in place of the five-shape, six-phase one? Recommendation: yes.
-2. Steps 1–3 first, then use it? Recommendation: yes; #7BM4's gate fix is step 1 and is small.
-3. Results as a separate list beside the board, not a rename of the Test suites pane?
-   Recommendation: yes, as Codex argues: a figure needs no test and a test makes no deliverable.
+**Risks:** #JNYN's `assignee: codex-verify-jnyn-a1` is a dead verifier session; a new verifier must take it over explicitly. Under `verification: ask`, #PR4Q and #WC3E wait for the owner to close them, and #P7CF's `authorized_by` close is not built yet.
+**2026-09-26 scope update.** The owner approved closing this scoping umbrella after #PR4Q, #WC3E and #JNYN finish. Observed-use evidence is #SWQN; Compare results and Results list are deferred to #DNYG; planted defects and clean controls belong in #P7CF's pilot.
+
+## Tasks
+- [x] Research and scoping; plan adopted 2026-09-21 — `docs/QA-ACROSS-FIELDS-RESEARCH.md`, `9b219db2` <!-- t:y1 -->
+- [x] Step 1, the gate (#PR4Q): landed and verified — `60b3fa43`…`c3a88caa`, `fcb7fad7` <!-- t:y2 -->
+- [x] Step 2, expectations and the verification record (#WC3E): landed and verified — `0ef3ee13`, `486852e0`, `eb49e562` <!-- t:y3 -->
+- [x] Step 3, Try it (#JNYN): landed — `03701acf`, `bca9a82e`, `1f3a7af0`, `132d3523` <!-- t:y4 -->
+- [x] Built to be driven (#74Y5): done — `ece752ef`, `e0442a22` <!-- t:y5 -->
+- [x] Human-QA designation gates "verified" — #1AA6 `c40c6695`, Review pane #BX7B <!-- t:y6 -->
+- [x] Policy contradictions resolved in `.board/POLICY.md` <!-- t:y7 -->
+- [ ] #JNYN: a fresh independent verifier completes the combined current-build staging run (its Done means 1, 2 and 5 are pending) <!-- t:y8 -->
+- [ ] #PR4Q and #WC3E: owner closes them from `needs-qa-llm` <!-- t:y9 -->
+- [x] Observed use and owner trial of Try it / Review tracked on #SWQN <!-- t:yb card=SWQN -->
+- [x] Owner answered scope questions; Compare results and Results list transferred to #DNYG, planted-defect pilot to #P7CF <!-- t:yc -->
+- [ ] Close this card <!-- t:yd -->
