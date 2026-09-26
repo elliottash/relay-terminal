@@ -2,6 +2,7 @@
 #include "RelayWindow.h"
 #include "WindowManagerImpl.h"
 #include "SettingsTransferDialog.h"
+#include "McpSettings.h"
 #include "SettingsExport.h"
 #include "Keymap.h"
 #include "SettingsCache.h"
@@ -760,6 +761,10 @@ QList<relay::SettingsSection> RelayWindow::settingsSections() {
         // not logged into), which the background runner cannot. The owner's default is the full
         // set (2026-09-19: "i think unattended turns get the full set -- make that an option that
         // is on by default"); off, a woken turn is confined the way a prompt from a phone is.
+        // MCP servers (card #9M96, the rows reserved for card #SSRQ): what the agent may reach
+        // beyond Relay's own tools, and how far each server is trusted. src/McpSettings.cpp.
+        security.rows << relay::mcp::settingsRows(m_active ? m_active->workspace() : m_manager->workspace(), this,
+                                                  [this](const QString &text) { statusBar()->showMessage(text, 8000); });
         security.rows << headingRow(QStringLiteral("Unattended turns"));
         security.rows << toggleRow(QStringLiteral("security/unattended_full_tools"),
                                    QStringLiteral("Unattended turns get the full tool set"),

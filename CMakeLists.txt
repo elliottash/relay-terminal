@@ -715,7 +715,9 @@ if(RELAY_BUILD_APP)
         src/TestSuitesModel.cpp src/TestSuitesModel.h src/TestSuitesPane.cpp src/TestSuitesPane.h
         # The Profile result pane (#7BM4 phase 5), likewise.
         src/ProfilePane.cpp src/ProfilePane.h
-        src/RemoteShare.cpp src/RemoteShare.h)
+        src/RemoteShare.cpp src/RemoteShare.h
+        # Options › Security › MCP servers (#9M96), over the relay_core.mcp_config CLI.
+        src/McpSettings.cpp src/McpSettings.h)
     find_package(${RELAY_QT} REQUIRED COMPONENTS Network)
     target_link_libraries(relay PRIVATE relay-panedir)   # cross-pane messages (#R5TC)
     target_link_libraries(relay PRIVATE relay-closedlist relay-localmodels relay-projects relay-escapees relay-appcommands)
@@ -898,6 +900,13 @@ if(BUILD_TESTING)
     target_compile_definitions(relay-settings-tests PRIVATE RELAY_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
     add_test(NAME settings COMMAND relay-settings-tests)
     set_tests_properties(settings PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+    # Options › Security › MCP servers (#9M96): the rows from a `list --json` document, which
+    # button runs which CLI call, and the Add form keeping env values out of argv.
+    add_executable(relay-mcpsettings-tests tests/mcpsettings_test.cpp src/McpSettings.cpp)
+    target_include_directories(relay-mcpsettings-tests PRIVATE src)
+    target_link_libraries(relay-mcpsettings-tests PRIVATE relay-settings relay-sourcedir ${RELAY_QT}::Widgets ${RELAY_QT}::Test)
+    add_test(NAME mcpsettings COMMAND relay-mcpsettings-tests)
+    set_tests_properties(mcpsettings PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
     # src/Keymap.h on its own (#MAGP, #QWAS): setBinding, actionForKey and the Ctrl / Ctrl+Shift
     # pairing rule across the four presets. The header is otherwise only in relay's one unit.
     add_executable(relay-keymap-tests tests/keymap_test.cpp)
