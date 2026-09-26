@@ -36,6 +36,7 @@
 #include <QKeyEvent>
 #include <QMouseEvent>
 #include <QLabel>
+#include <QLineEdit>
 #include <QListWidget>
 #include <QLayout>
 #include <QPlainTextEdit>
@@ -2073,6 +2074,227 @@ void remoteShutdownIsGraceful()
     CHECK(elapsedMs < 2000);   // inside the 2 s cap the owner picked on #265N
     relay::remotesettings::setAlwaysOn(false);
 }
+
+// ----- the card drawer (#6BY7) -------------------------------------------------------------------
+//
+// The claims chip no longer jumps to the Board: it toggles a read-only drawer of the card this
+// pane is working, docked under the header. It is fed by the tab's board helper —
+// `board_card_get` out through onBoardRequest, the answer back through handleBoardHelperEvent —
+// and its one action is the Board's own Done, sent as the Board sends it, refusals rendered
+// inline. The pane's conversation never writes the card's thread (#CTRN).
+
+static void setupDrawerPane(Pane &console, StubContext &context, QStringList &opened,
+                            QList<QJsonObject> &boardRequests, QList<QJsonObject> &sent)
+{
+    console.onOpenCard = [&opened](const QString &id) { opened << id; };
+    console.onBoardRequest = [&boardRequests](const QJsonObject &request) { boardRequests << request; };
+    console.onWorkerLine = [&sent](const QJsonObject &message) { sent << message; };
+    console.deliverWorkerEvent({{"event", "ready"}});
+    console.deliverWorkerEvent({{"event", "configured"}, {"model", "test"}});
+    console.deliverWorkerEvent(QJsonObject{{"event", "board"}, {"cards_total", 1},
+        {"cards", QJsonArray{QJsonObject{{"id", "6BY7"},
+                                         {"title", "Card drawer in a terminal pane"},
+                                         {"status", "executing"}, {"type", "work"}}}}});
+    // The prompt mentions the card, so its queue entry carries it (protocol 17.6) and the chip
+    // names it — the same path a live pane's chip lights on.
+    console.draftInComposer(QStringLiteral("Run #6BY7 from this pane"));
+    console.interruptAgentWithPrompt();
+    Q_UNUSED(context);
+}
+
+static QJsonObject cardAnswer(const QString &status)
+{
+    const QString body = QStringLiteral(
+        "# Card drawer in a terminal pane\n\n## Issue\nShow the card inline.\n\n"
+        "## Plan\nWrite the drawer.\n\n## Tasks\n- [x] CardDrawer widget\n- [ ] Ship it\n");
+    return QJsonObject{{"event", "board_card"}, {"id", "drawer-card-6BY7"},
+                       {"card_id", "6BY7"}, {"status", status},
+                       {"title", "Card drawer in a terminal pane"},
+                       {"body", body}, {"body_truncated", false}};
+}
+
+void theChipTogglesTheCardDrawer()
+{
+    StubContext context;
+    context.workspace = home->path();
+    Pane console(context.workspace, context.workspace, false, relay::defaultEngineCore(), &context);
+    QStringList opened;
+    QList<QJsonObject> boardRequests, sent;
+    setupDrawerPane(console, context, opened, boardRequests, sent);
+    auto *chip = console.findChild<QToolButton *>(QStringLiteral("paneCardChip"));
+    CHECK(chip != nullptr);
+    if (!chip) return;
+    CHECK(!chip->isHidden());
+    CHECK(opened.isEmpty());
+
+    // One click opens the drawer and asks the helper for the card — the Board is not opened.
+    chip->click();
+    auto *drawer = console.findChild<QFrame *>(QStringLiteral("cardDrawer"));
+    CHECK(drawer != nullptr);
+    if (!drawer) return;
+    CHECK(!drawer->isHidden());
+    CHECK(opened.isEmpty());
+    CHECK_EQ(boardRequests.size(), 1);
+    if (boardRequests.size() == 1) {
+        CHECK_EQ(boardRequests.first().value("kind").toString(), QStringLiteral("board_card_get"));
+        CHECK_EQ(boardRequests.first().value("id").toString(), QStringLiteral("drawer-card-6BY7"));
+        CHECK_EQ(boardRequests.first().value("card").toString(), QStringLiteral("6BY7"));
+    }
+
+    // The drawer's Board button keeps the chip's old behaviour exactly.
+    auto *openBoard = console.findChild<QPushButton *>(QStringLiteral("cardDrawerOpen"));
+    CHECK(openBoard != nullptr);
+    if (openBoard) openBoard->click();
+    CHECK_EQ(opened, QStringList{QStringLiteral("6BY7")});
+
+    // A second click hides; a third reopens (and asks again, the card may have moved on).
+    chip->click();
+    CHECK(drawer->isHidden());
+    boardRequests.clear();
+    chip->click();
+    CHECK(!drawer->isHidden());
+    CHECK_EQ(boardRequests.size(), 1);
+
+    // The ✕ hides it too, and never touches the Board.
+    auto *close = console.findChild<QToolButton *>(QStringLiteral("cardDrawerClose"));
+    CHECK(close != nullptr);
+    if (close) close->click();
+    CHECK(drawer->isHidden());
+    CHECK_EQ(opened, QStringList{QStringLiteral("6BY7")});
+    }
+
+void theCardDrawerRendersTheHelperAnswerAndRefreshesOnChange()
+{
+    StubContext context;
+    context.workspace = home->path();
+    Pane console(context.workspace, context.workspace, false, relay::defaultEngineCore(), &context);
+    QStringList opened;
+    QList<QJsonObject> boardRequests, sent;
+    setupDrawerPane(console, context, opened, boardRequests, sent);
+    auto *chip = console.findChild<QToolButton *>(QStringLiteral("paneCardChip"));
+    CHECK(chip != nullptr);
+    if (!chip) { console.deleteLater(); return; }
+    chip->click();
+    auto *drawer = console.findChild<QFrame *>(QStringLiteral("cardDrawer"));
+    CHECK(drawer != nullptr);
+    if (!drawer) return;
+
+    console.handleBoardHelperEvent(cardAnswer(QStringLiteral("executing")));
+    auto *stage = drawer->findChild<QLabel *>(QStringLiteral("cardDrawerStage"));
+    auto *title = drawer->findChild<QLabel *>(QStringLiteral("cardDrawerTitle"));
+    auto *browser = drawer->findChild<QTextBrowser *>(QStringLiteral("cardDrawerBody"));
+    CHECK(stage && title && browser);
+    if (stage) CHECK_EQ(stage->text(), relay::board::statusTitle(QStringLiteral("executing")));
+    if (title) CHECK_EQ(title->text(), QStringLiteral("Card drawer in a terminal pane"));
+    if (browser) {
+        CHECK(browser->isReadOnly());
+        CHECK(browser->openExternalLinks() == false);
+        const QString shown = browser->toPlainText();
+        CHECK(shown.contains(QStringLiteral("Show the card inline.")));   // the body, title heading off
+        CHECK(!shown.contains(QStringLiteral("Card drawer in a terminal pane")));
+        CHECK(shown.contains(QStringLiteral("Plan")));
+        CHECK(shown.contains(QStringLiteral("Tasks")));
+        CHECK(shown.contains(QStringLiteral("✓ CardDrawer widget")));   // - [x] rendered as a tick
+        CHECK(shown.contains(QStringLiteral("☐ Ship it")));
+    }
+    // No editable surface exists in the drawer.
+    for (auto *edit : drawer->findChildren<QTextEdit *>()) CHECK(edit->isReadOnly());
+    CHECK(drawer->findChildren<QLineEdit *>().isEmpty());
+
+    // Another surface's answer (its request id, our card) passes through untouched.
+    boardRequests.clear();
+    console.handleBoardHelperEvent(QJsonObject{{"event", "board_card"}, {"id", "review-card-9"},
+        {"card_id", "6BY7"}, {"status", "done"}, {"title", "Somewhere else"},
+        {"body", QStringLiteral("# Somewhere else\n")}, {"body_truncated", false}});
+    if (title) CHECK_EQ(title->text(), QStringLiteral("Card drawer in a terminal pane"));
+    CHECK(boardRequests.isEmpty());
+
+    // A board change naming the card refetches it through the helper, the stream the Board reads.
+    console.handleBoardHelperEvent(QJsonObject{{"event", "board_changed"},
+        {"upserts", QJsonArray{QJsonObject{{"id", "6BY7"}}}}});
+    CHECK_EQ(boardRequests.size(), 1);
+    if (boardRequests.size() == 1)
+        CHECK_EQ(boardRequests.first().value("id").toString(), QStringLiteral("drawer-card-6BY7"));
+    // One that names other cards does not.
+    boardRequests.clear();
+    console.handleBoardHelperEvent(QJsonObject{{"event", "board_changed"},
+        {"upserts", QJsonArray{QJsonObject{{"id", "P2W8"}}}}});
+    CHECK(boardRequests.isEmpty());
+    }
+
+void theCardDrawerDoneSendsBoardMoveAndShowsRefusals()
+{
+    StubContext context;
+    context.workspace = home->path();
+    Pane console(context.workspace, context.workspace, false, relay::defaultEngineCore(), &context);
+    QStringList opened;
+    QList<QJsonObject> boardRequests, sent;
+    setupDrawerPane(console, context, opened, boardRequests, sent);
+    auto *chip = console.findChild<QToolButton *>(QStringLiteral("paneCardChip"));
+    CHECK(chip != nullptr);
+    if (!chip) return;
+    chip->click();
+    auto *drawer = console.findChild<QFrame *>(QStringLiteral("cardDrawer"));
+    CHECK(drawer != nullptr);
+    if (!drawer) return;
+    console.handleBoardHelperEvent(cardAnswer(QStringLiteral("executing")));
+
+    // Done is the Board's move, over the helper, gated worker-side.
+    auto *done = console.findChild<QPushButton *>(QStringLiteral("cardDrawerDone"));
+    CHECK(done != nullptr);
+    if (done) CHECK(!done->isHidden());
+    boardRequests.clear();
+    if (done) done->click();
+    CHECK_EQ(boardRequests.size(), 1);
+    if (boardRequests.size() == 1) {
+        const QJsonObject move = boardRequests.first();
+        CHECK_EQ(move.value("kind").toString(), QStringLiteral("board_move"));
+        CHECK_EQ(move.value("id").toString(), QStringLiteral("drawer-card-6BY7"));
+        CHECK_EQ(move.value("card").toString(), QStringLiteral("6BY7"));
+        CHECK_EQ(move.value("status").toString(), QStringLiteral("done"));
+        CHECK_EQ(move.value("section").toString(), QString());
+        CHECK(move.value("reason").toString().contains(QStringLiteral("card drawer")));
+    }
+
+    // A gated move answers an error under the drawer's request id; it renders inline.
+    auto *notice = console.findChild<QLabel *>(QStringLiteral("cardDrawerNotice"));
+    CHECK(notice != nullptr);
+    console.handleBoardHelperEvent(QJsonObject{{"event", "error"}, {"id", "drawer-card-6BY7"},
+        {"text", QStringLiteral("card #6BY7 has an open Human QA question")}});
+    if (notice) {
+        CHECK(!notice->isHidden());
+        CHECK(notice->text().contains(QStringLiteral("Human QA")));
+    }
+    // Someone else's error never reaches the drawer's notice line: the refusal still stands.
+    console.handleBoardHelperEvent(QJsonObject{{"event", "error"}, {"id", "review-card-9"},
+        {"text", QStringLiteral("not this surface's problem")}});
+    if (notice) CHECK(notice->text().contains(QStringLiteral("Human QA")));
+
+    // A card already done has no Done to press — there is nothing left to ask of the worker.
+    console.handleBoardHelperEvent(cardAnswer(QStringLiteral("done")));
+    if (done) CHECK(done->isHidden());
+    }
+
+void aPromptOnAWorkedCardWritesNothingToTheBoard()
+{
+    StubContext context;
+    context.workspace = home->path();
+    Pane console(context.workspace, context.workspace, false, relay::defaultEngineCore(), &context);
+    QStringList opened;
+    QList<QJsonObject> boardRequests, sent;
+    setupDrawerPane(console, context, opened, boardRequests, sent);
+    CHECK(console.findChild<QToolButton *>(QStringLiteral("paneCardChip")) != nullptr);
+
+    // The pane's conversation — user or agent — is never written to the card's thread (#CTRN):
+    // every message the pane sent names no board write, and the helper saw no request at all.
+    console.draftInComposer(QStringLiteral("A status update from the pane"));
+    console.interruptAgentWithPrompt();
+    CHECK(boardRequests.isEmpty());
+    for (const QJsonObject &message : sent) {
+        CHECK(!message.value("kind").toString().startsWith(QStringLiteral("board_")));
+        CHECK(!message.value("type").toString().startsWith(QStringLiteral("board_")));
+    }
+    }
 }  // namespace cases
 
 #include "pane_waits.h"
@@ -2275,6 +2497,10 @@ int main(int argc, char **argv)
     cases::h2kqCases();
     cases::h2kqQueueLabelCases();
     cases::z234zCases();
+    cases::theChipTogglesTheCardDrawer();
+    cases::theCardDrawerRendersTheHelperAnswerAndRefreshesOnChange();
+    cases::theCardDrawerDoneSendsBoardMoveAndShowsRefusals();
+    cases::aPromptOnAWorkedCardWritesNothingToTheBoard();
 
     if (failures == 0)
     std::fprintf(stdout, "consolemode: 21 cases, all passed\n");

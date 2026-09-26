@@ -60,7 +60,9 @@ void Pane::buildUi() {
         m_cardChip->hide();
         connect(m_cardChip, &QToolButton::clicked, this, [this] {
             const QStringList ids = cardChipCards();
-            if (ids.size() == 1) { if (onOpenCard) onOpenCard(ids.first()); return; }
+            // One card: the chip toggles the pane's card drawer (#6BY7); several: the menu
+            // picks which one to show. The Board stays one button away, inside the drawer.
+            if (ids.size() == 1) { toggleCardDrawer(ids.first()); return; }
             openClaimsMenu();
         });
         m_cwdLabel = new QLabel; m_cwdLabel->setTextFormat(Qt::PlainText);

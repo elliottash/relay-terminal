@@ -699,7 +699,7 @@ if(RELAY_BUILD_APP)
         src/SettingsTransferDialog.cpp src/SettingsTransferDialog.h
         # The artifact workspace's window side (#E85D): presets, membership, the status strip.
         src/RelayWindowWorkspace.cpp
-        src/AppPaths.h src/CopyOnSelect.h src/Keymap.h src/Isolation.h src/GuestBridge.h src/Pane.h src/ApprovalsPane.h
+        src/AppPaths.h src/CopyOnSelect.h src/Keymap.h src/Isolation.h src/GuestBridge.h src/Pane.h src/CardDrawer.h src/ApprovalsPane.h
         # The seam a console makes its surface calls through (#AGNT).
         src/AgentHost.h
         src/TranscriptReplay.h
@@ -1105,7 +1105,7 @@ if(BUILD_TESTING)
         target_sources(${console_target} PRIVATE
             src/Pane.cpp src/PaneEvents.cpp src/PaneSession.cpp src/PaneUi.cpp src/PaneRuntime.cpp
             src/AppPaths.h src/CopyOnSelect.h src/Keymap.h src/Isolation.h src/GuestBridge.h
-            src/Pane.h src/ApprovalsPane.h src/AgentHost.h src/TranscriptReplay.h src/RelayMark.h
+            src/Pane.h src/CardDrawer.h src/ApprovalsPane.h src/AgentHost.h src/TranscriptReplay.h src/RelayMark.h
             src/Theme.cpp src/Theme.h src/AgentUi.cpp src/AgentUi.h
             src/TurnTranscript.cpp src/TurnTranscript.h src/SkillsDialog.cpp src/SkillsDialog.h
             src/EngineBackend.cpp src/EngineBackend.h src/BackendFactory.cpp

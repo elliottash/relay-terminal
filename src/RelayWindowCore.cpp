@@ -973,6 +973,23 @@ Pane *RelayWindow::createPane(const QJsonObject &spec) {
         pane->onUpdateApp = [guard]() { if (auto *w = windowOf(guard)) w->updateApp(); };
         pane->onRestartApp = [guard]() { if (auto *w = windowOf(guard)) w->restartApp(); };
         pane->onOpenCard = [guard](const QString &id) { if (auto *w = windowOf(guard)) { w->setActiveLeaf(guard); w->openBoardCard(id); } };
+        // The pane's card drawer rides this tab's board helper (#6BY7): its requests go to the
+        // tab's worker and the answers come back through the same listener every helper-reading
+        // surface in the tab uses. The listener is registered with the first request — the pane
+        // is docked by then — and again if the pane asks on a tab it has not asked on before.
+        pane->onBoardRequest = [guard, wired = QPointer<QWidget>()](const QJsonObject &request) mutable {
+            auto *w = windowOf(guard);
+            if (!w || !guard) return;
+            QWidget *page = w->pageOf(guard);
+            if (!page) return;
+            if (wired != page) {
+                wired = page;
+                w->listenToHelper(page, guard, [guard](const QJsonObject &event) {
+                    if (guard) guard->handleBoardHelperEvent(event);
+                });
+            }
+            w->sendToHelper(page, request);
+        };
         // The agent drives the app (#FEJQ, §30): the catalog this pane's worker is configured with,
         // and one `app_command` out of it, executed in the window the pane is in.
         pane->onAppCatalog = [guard]() -> QJsonObject {
@@ -1144,6 +1161,21 @@ void RelayWindow::wireAgentConsole(Pane *console) {
             if (auto *w = windowOf(guard)) w->openPath(path, line, hostLeafOf(guard), false, true);
         };
         console->onOpenCard = [guard](const QString &id) { if (auto *w = windowOf(guard)) w->openBoardCard(id); };
+        // Same helper channel for the console's card drawer as a terminal pane's (#6BY7):
+        // requests to the tab's board worker, answers through the tab's listener fan.
+        console->onBoardRequest = [guard, wired = QPointer<QWidget>()](const QJsonObject &request) mutable {
+            auto *w = windowOf(guard);
+            if (!w || !guard) return;
+            QWidget *page = w->pageOf(guard);
+            if (!page) return;
+            if (wired != page) {
+                wired = page;
+                w->listenToHelper(page, guard, [guard](const QJsonObject &event) {
+                    if (guard) guard->handleBoardHelperEvent(event);
+                });
+            }
+            w->sendToHelper(page, request);
+        };
         console->onOpenOption = [guard](const QString &section, const QString &row) {
             auto *w = windowOf(guard);
             if (!w) return;

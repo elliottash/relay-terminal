@@ -8,6 +8,7 @@
 
 #include "AppPaths.h"
 #include "AppCommands.h"   // appcommands::answerFor: one `app_command` answered down this pane's pipe (#FEJQ, §30.3)
+#include "CardDrawer.h"
 #include "CopyOnSelect.h"
 #include "CurrentTextComboBox.h"
 #include "ModelCatalog.h"
@@ -915,6 +916,10 @@ public:
     std::function<void()> onUpdateApp;   // /update: install the latest release, restart into it
     std::function<void()> onRestartApp;  // /restart: save, exit, then reopen the saved workspace
     std::function<void(const QString &)> onOpenCard;   // Switchboard: one card, from the work chip
+    // The card drawer rides the tab's board helper (#6BY7): every request the drawer asks for —
+    // `board_card_get`, its `board_move` — goes out through here, and the answers come back
+    // through handleBoardHelperEvent. The pane never reads a card file for the drawer.
+    std::function<void(const QJsonObject &)> onBoardRequest;
     // The agent drives the app (card #FEJQ, protocol §30). Two hooks, both the window's:
     //  * the `app` block that rides on every `configure` and on an `app_catalog` refresh — the
     //    options and actions catalogs, this tab's id and the Options › Agent toggle (§30.2);
@@ -10455,8 +10460,8 @@ private:
         QStringList named;
         for (const QString &cardId : ids) named << claimMenuLabel(cardId);
         m_cardChip->setToolTip(named.join(QLatin1Char('\n'))
-                               + (ids.size() == 1 ? QStringLiteral("\n\nClick to open this card in the Board")
-                                                  : QStringLiteral("\n\nClick to list them and open one in the Board")));
+                               + (ids.size() == 1 ? QStringLiteral("\n\nClick to show this card in the drawer")
+                                                  : QStringLiteral("\n\nClick to list them and show one in the drawer")));
         m_cardChip->show();
         updateHeader();
     }
@@ -10475,9 +10480,9 @@ private:
         return text;
     }
 
-    // The chip's list (#0FBB): one row per card, latest first, and choosing one opens it in the
-    // Board. A QMenu is the accessible choice: arrows move, Enter chooses, Escape closes and
-    // focus goes back to the chip.
+    // The chip's list (#0FBB): one row per card, latest first, and choosing one shows it in the
+    // pane's card drawer (#6BY7). A QMenu is the accessible choice: arrows move, Enter chooses,
+    // Escape closes and focus goes back to the chip.
     void openClaimsMenu() {
         if (!m_cardChip) return;
         const QStringList ids = cardChipCards();
@@ -10486,10 +10491,58 @@ private:
         menu->setAttribute(Qt::WA_DeleteOnClose);
         for (const QString &id : ids) {
             QAction *action = menu->addAction(claimMenuLabel(id));
-            connect(action, &QAction::triggered, this, [this, id] { if (onOpenCard) onOpenCard(id); });
+            connect(action, &QAction::triggered, this, [this, id] { toggleCardDrawer(id); });
         }
         menu->popup(m_cardChip->mapToGlobal(QPoint(0, m_cardChip->height())));
         menu->setActiveAction(menu->actions().first());
+    }
+
+    // The card drawer (#6BY7): the chip toggles a read-only view of the card, docked under the
+    // header. It is fed only by the tab's board helper — `board_card_get` goes out through
+    // onBoardRequest, the answer comes back through handleBoardHelperEvent — so a card file
+    // changing on disk reaches the drawer the way it reaches the Board. Toggle-off keeps the
+    // content; the chip reopens it. A different card switches the drawer to it.
+    void toggleCardDrawer(const QString &id) {
+        const QString cardId = id.toUpper();
+        // isHidden(), not isVisible(): a pane in a background tab is never "visible", and the
+        // chip must still toggle its drawer off there.
+        if (m_cardDrawer && m_drawerCard == cardId && !m_cardDrawer->isHidden()) {
+            m_cardDrawer->hide();
+            return;
+        }
+        if (!m_cardDrawer) {
+            m_cardDrawer = new CardDrawer(this);
+            m_cardDrawer->onDone = [this](const QString &card) {
+                if (onBoardRequest) onBoardRequest(QJsonObject{
+                    {"kind", QStringLiteral("board_move")},
+                    {"id", QStringLiteral("drawer-card-") + card},
+                    {"card", card},
+                    {"status", QStringLiteral("done")},
+                    {"section", QString()},
+                    {"reason", QStringLiteral("marked done from the pane's card drawer")}});
+            };
+            // The chip's old behaviour stays reachable from the drawer itself.
+            m_cardDrawer->onOpenBoard = [this](const QString &card) { if (onOpenCard) onOpenCard(card); };
+            m_cardDrawer->onClose = [this] { toggleCardDrawer(m_drawerCard); };
+            m_cardDrawer->hide();
+            // Index 1: under the header, above the terminal host. The drawer takes at most half
+            // the pane so the terminal and composer stay usable (#SDXE class of bug).
+            if (auto *box = qobject_cast<QVBoxLayout *>(layout())) box->insertWidget(1, m_cardDrawer);
+        }
+        m_drawerCard = cardId;
+        m_cardDrawer->setMaximumHeight(qMax(200, height() / 2));
+        m_cardDrawer->setCard(QJsonObject{{"card_id", cardId}});   // header row first; the body arrives
+        m_cardDrawer->showNotice(QStringLiteral("Loading #%1…").arg(cardId));
+        m_cardDrawer->show();
+        requestDrawerCard();
+    }
+
+    void requestDrawerCard() {
+        if (m_drawerCard.isEmpty() || !onBoardRequest || !m_cardDrawer) return;
+        onBoardRequest(QJsonObject{
+            {"kind", QStringLiteral("board_card_get")},
+            {"id", QStringLiteral("drawer-card-") + m_drawerCard},
+            {"card", m_drawerCard}});
     }
 
     // The cards the agent turn starting now carries (#C7PF): the first is the chip's #id, the
@@ -10511,6 +10564,40 @@ private:
 
 
 public:
+    // The tab's board helper fans its events to every listening pane in the tab; this is the
+    // pane's listener for the card drawer (#6BY7). It answers only requests it made itself —
+    // ids prefixed drawer-card- — exactly the discipline ReviewPane keeps, so another
+    // surface's `board_card` answer passes through untouched. The pane's own worker events
+    // never arrive here.
+    void handleBoardHelperEvent(const QJsonObject &event) {
+        if (!m_cardDrawer) return;
+        const QString kind = event.value(QStringLiteral("event")).toString();
+        const QString rid = event.value(QStringLiteral("id")).toString();
+        const bool ours = rid.startsWith(QStringLiteral("drawer-card-"));
+        if (kind == QStringLiteral("board_card")) {
+            const QString cardId = event.value(QStringLiteral("card_id")).toString();
+            if (!ours || cardId.toUpper() != m_drawerCard) return;   // another surface's answer
+            m_cardDrawer->setCard(event);
+        } else if (kind == QStringLiteral("board_changed")) {
+            // A change naming the open card refetches it: the drawer reads what the worker
+            // says, the way the Board does, and never the card file itself.
+            bool names = false;
+            const auto rowNames = [&names, this](const QJsonArray &rows) {
+                for (const QJsonValue &value : rows)
+                    if (value.isObject() ? value.toObject().value(QStringLiteral("id")).toString() == m_drawerCard
+                                         : value.toString() == m_drawerCard) { names = true; return; }
+            };
+            rowNames(event.value(QStringLiteral("upserts")).toArray());
+            if (!names) rowNames(event.value(QStringLiteral("removed")).toArray());
+            if (names) requestDrawerCard();
+        } else if ((kind == QStringLiteral("error") || kind == QStringLiteral("board_error")) && ours) {
+            // A gated Done, a vanished card: the worker's refusal renders inline, as the Board
+            // would show it, rather than in a dialog.
+            const QString text = event.value(QStringLiteral("text")).toString();
+            if (!text.isEmpty()) m_cardDrawer->showNotice(text);
+        }
+    }
+
     bool requestsOpen() const { return m_requestsPanel && m_requestsPanel->isVisible(); }
     // The short list people actually need, in the prompt box. Ctrl+? has the complete one.
     void toggleHelpPopup() {
@@ -17966,6 +18053,8 @@ private:
     // this turn — and only this turn — takes the chip down.
     QString m_turnCard, m_turnCardAsk, m_turnCardItem;
     QStringList m_turnCards;
+    CardDrawer *m_cardDrawer = nullptr;   // the chip's read-only card view, under the header (#6BY7)
+    QString m_drawerCard;                 // the card the drawer is showing ("" when it never opened)
     QStringList m_claimedCards;   // the cards this pane's agent has claimed, newest first (#0FBB)
     void runBoardTask() {
         if (m_boardTask.isEmpty()) return;

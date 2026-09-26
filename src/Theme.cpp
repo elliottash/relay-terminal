@@ -364,6 +364,17 @@ QToolButton#paneCardChip { color: @muted; font-size: 9pt; font-weight: 600; back
 QToolButton#paneCardChip:hover { color: @text; }
 QToolButton#paneCardChip:focus { border-color: @accentBorder; }
 QToolButton#paneCardChip::menu-indicator { image: none; width: 0; }
+/* The card drawer the chip toggles (#6BY7): a quiet panel docked under the header, read-only,
+   with the Board's Done as its one action — the same voice as the header, grey, no accent. */
+QFrame#cardDrawer { background: @surface; border: 1px solid @border; border-radius: 6px; }
+QLabel#cardDrawerStage { color: @muted; font-size: 9pt; background: @raised; border: 1px solid @border; border-radius: 4px; padding: 0 4px; }
+QLabel#cardDrawerId { color: @muted; font-size: 9pt; font-weight: 600; }
+QLabel#cardDrawerTitle { color: @text; font-size: 9pt; }
+QPushButton#cardDrawerDone { color: @text; }
+QLabel#cardDrawerNotice { color: @muted; font-size: 9pt; }
+QTextBrowser#cardDrawerBody { background: @surface; color: @text; border: none; }
+QToolButton#cardDrawerClose { color: @muted; background: transparent; border: 1px solid transparent; border-radius: 4px; padding: 0 3px; }
+QToolButton#cardDrawerClose:hover { color: @text; }
 QLabel#paneAuto { color: @muted; font-size: 9pt; border: 1px solid @border; border-radius: 4px; padding: 0 4px; }
 QLineEdit#paneTitleEdit { background: @surface; color: @text; border: 1px solid @accentBorder; border-radius: 4px; padding: 1px 6px; }
 

@@ -1,0 +1,22 @@
+$ cd ~/.local/state/relay/land/verify-slots/relay-terminal-1006c7a3-0/build
+$ python3 scripts/land.py try 8531c4b7 --tests consolemode --only-hunk ... (see README)
+
+--- ctest run of the tree this try built (consolemode) ---
+Start testing: Sep 25 21:24 EDT
+----------------------------------------------------------
+55/119 Testing: consolemode
+55/119 Test: consolemode
+Command: "/home/elliott/.local/state/relay/land/verify-slots/relay-terminal-1006c7a3-0/build/relay-consolemode-tests"
+Directory: /home/elliott/.local/state/relay/land/verify-slots/relay-terminal-1006c7a3-0/build
+"consolemode" start time: Sep 25 21:24 EDT
+Output:
+----------------------------------------------------------
+FAIL ../src/tests/consolemode_test.cpp:2010  text.contains(QStringLiteral("▸ ran pytest\n\nThe tests pass."))
+FAIL ../src/tests/consolemode_test.cpp:2013  text.contains(QStringLiteral("▸ ran ctest\n✦ 2 tool calls · 2 s"))
+GDBus.Error:org.freedesktop.Notifications.Error.ExcessNotificationGeneration: Created too many similar notifications in quick succession
+...
+10:FAIL ../src/tests/consolemode_test.cpp:2010  text.contains(QStringLiteral("▸ ran pytest\n\nThe tests pass."))
+11:FAIL ../src/tests/consolemode_test.cpp:2013  text.contains(QStringLiteral("▸ ran ctest\n✦ 2 tool calls · 2 s"))
+21:FAIL ../src/tests/consolemode_test.cpp:726  edited != path
+22:FAIL ../src/tests/consolemode_test.cpp:727  line != 2
+23:FAIL ../src/tests/consolemode_test.cpp:739  context.seen != QStringList({home->path()})
