@@ -10,7 +10,7 @@ rank: zzzzzzzzzzzzzzzzzzzzzzzr
 created: '2026-09-25'
 verify: {artifact: system, primary: probe, also: [script, ai-visual], human: optional, criteria: 'Open both available console types and confirm shared Python state, routing, interrupt, restart, and visible pane labeling.', sign_off: none, effort: high, stakes: rework, blast: capability}
 source: 'Owner in a Relay pane, 2026-09-25; slice of #P2W8 (U2)'
-links: {plans: [], commits: [104e49df7e01, 67abbcb49095, 488ff0c853f7, cf38b781604d, 3d4233e07d88, f8359d9557be, 7f469118498e], evidence: [docs/qa_evidence/2026-09-26-python-console/], related: [P2W8, 33G0, S976, C0Q8], github: null}
+links: {plans: [], commits: [104e49df7e01, 67abbcb49095, 488ff0c853f7, cf38b781604d, 3d4233e07d88, f8359d9557be, 7f469118498e, e405d4d71250, ba0b8e1fc781, f629ec4c3cf7, dd484d8a6521, 79d1eedcc0ac], evidence: [docs/qa_evidence/2026-09-26-python-console/], related: [P2W8, 33G0, S976, C0Q8], github: null}
 ---
 # Python console pane: IPython in the pty on Relay's kernel, shared with the agent's py_* tools; Stata after it
 
