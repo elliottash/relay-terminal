@@ -20,3 +20,6 @@ Trace the card-code navigation and worker order, then make direct card reads ren
 
 <!-- relay:entry 20260926T033251Z-wn author=agent kind=event model=gpt-6-sol pane=11024903 turn=8a72f719af574b349714271b21f7bd71/6779547f44884e0ea98810a3670e7f39 -->
 - ✦ agent moved this card · Running → Done, wrote `## Execution Summary`, `## Tests` · Card-code navigation now reads and renders the card before constructing or configuring the helper; commits 8ea6fee1 and 9e2b0bcb, with focused Qt and worker tests passing. · verified_by openai/gpt-6-sol via codex:ashe-ethz-ch
+
+<!-- relay:entry 20260926T033441Z-nt author=agent kind=event model=gpt-6-sol pane=11024903 turn=8a72f719af574b349714271b21f7bd71/6779547f44884e0ea98810a3670e7f39 -->
+- ✦ agent updated this card · replaced `## Execution Summary`
