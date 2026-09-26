@@ -18,3 +18,10 @@ Published 412c772dc77c onto main (target was c8489f9208db). <!-- landq:c00795c7d
 
 <!-- relay:entry 20260926T150755Z-fy author=agent kind=progress model=claude-opus-5-5 pane=d773a199 turn=a4ceb8d1b45d4eb6b9ed8856eb2c734c/4670010bbbf548cdb3778c1b0e8115d7 -->
 Second route found and fixed (commit da1f948c, landing job 711237606aecfebe). If a shell takes more than 5 s to send its first event under restart load, the integration watchdog put the pane in native mode without `m_autoHuman`. Nothing then left native mode at the first `ready`, so the pane had no prompt box and its restored text never printed. The watchdog now sets `m_autoHuman = true`, as `takeControl()` does before a first prompt. The `restorereplay` test gained `aSlowShellStillReplaysAfterTheWatchdog` (first `ready` delayed 6 s): it fails without the change and passes with it (3/3 on repeat).
+
+<!-- relay:entry 20260926T151515Z-4p author=landq kind=note -->
+Landing job 48a7415455fc7ee7 (e957f1f01b37 for card #MDQ8) was cancelled.
+Nothing was published. <!-- landq:48a7415455fc7ee7:cancelled -->
+
+<!-- relay:entry 20260926T151516Z-vw author=agent kind=note model=claude-opus-5-5 pane=21c53ef4 turn=97d268b4846648f49e6aba30a5ebe433/337dca43c3394b20b9e6c48f7f9cfdfb -->
+Landing job 48a74154 (e957f1f0) was cancelled at the owner's request to merge queued work: job 71123760 (da1f948c) from the same workspace contains e957f1f0, so it lands both commits in one gate. Nothing to resubmit.
