@@ -1617,8 +1617,8 @@ only thing that decides what a given device sees, and `src/PaneState.{h,cpp}` bu
 {"t":"pane_state","v":1,"pane":"p1","seq":42,
  "turn":{"phase":"idle|thinking|tool|waiting","clock":"thinking · 12 s · step 1/256 · Esc stops","busy":true},
  "thinking":{"visible":true,"header":"Thinking… · fake · 12 s","tail":"…the last 2000 characters"},
- "queue":{"paused":false,"pause_reason":"","running":{"label":"✦ please plan this out"},
-          "rows":[{"id":"steer:steer-3","kind":"steer|agent|command","label":"↪ next tool call  ✦ …",
+ "queue":{"paused":false,"pause_reason":"","running":{"label":"✦ please plan this out","full":"…"},
+          "rows":[{"id":"steer:steer-3","kind":"steer|agent|command","label":"↪ next tool call  ✦ …","full":"…",
                    "state":"waiting|withdrawing|queued|editing|paused",
                    "actions":["remove","edit","to_queue","send_now","steer","up","down"]}],
           "hint":"↑ select a row · Ctrl+↑↓ move · Shift+Del remove"},
@@ -1635,6 +1635,13 @@ only thing that decides what a given device sees, and `src/PaneState.{h,cpp}` bu
 
 - `seq` rises; a client ignores anything older than what it has drawn. `running` is null when
   nothing runs. Any field may be missing, and a client renders what it was given.
+- **`full` is a queue line's whole text** (card #JDN4), on `running` and on any row: the same
+  words as `label`, untruncated and with their line breaks, capped at 16,000 characters. It is
+  present only when it says more than `label` does — past the label's 400 characters, or with a
+  line break — so the 10 Hz message carries it for the lines that need it. A client folds each line
+  to `label` and offers an expand control that shows `full` in place; the hub cleans it like a
+  label (control characters out, keys redacted) and every level sees it, because it is the text the
+  label already shows.
 - **`allowance` is the Relay Free chip** ([RELAY-FREE.md](RELAY-FREE.md)), published only while the
   pane is on the hosted preset and a quota figure has arrived: the whole object is absent
   otherwise, and a state that stops carrying it hides the chip (the pane moved to a provider with

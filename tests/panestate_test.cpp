@@ -164,6 +164,43 @@ private slots:
     }
 
     // ----- caps ----------------------------------------------------------------------------------
+    void a_long_row_carries_its_whole_text_in_full() {
+        // Card #JDN4: the label stops at 400 characters; `full` is what an expanded row shows,
+        // so it must end with the message's real last words.
+        Tokens choices(QLatin1Char('m')), sessions(QLatin1Char('s'));
+        Inputs in = busyPane();
+        QString longText;
+        while (longText.size() < 2000) longText += QStringLiteral("word %1 ").arg(longText.size());
+        longText += QStringLiteral("THE REAL END");
+        Row row = entry(9, QStringLiteral("agent"), longText.simplified());
+        row.full = longText;
+        in.rows << row;
+        in.running = QStringLiteral("✦ first line second line");
+        in.runningFull = QStringLiteral("✦ first line\nsecond line");
+        const QJsonObject queue = build(1, in, choices, sessions).value("queue").toObject();
+        const QJsonArray rows = queue.value("rows").toArray();
+        for (int i = 0; i < 3; ++i) QVERIFY2(!rows[i].toObject().contains("full"), "a short row carries no full");
+        const QJsonObject last = rows[3].toObject();
+        QCOMPARE(last.value("label").toString().size(), kLabelMax);
+        QVERIFY(last.value("label").toString().endsWith(QChar(0x2026)));
+        QVERIFY(last.value("full").toString().startsWith(QStringLiteral("✦ word 0 ")));
+        QVERIFY(last.value("full").toString().endsWith(QStringLiteral("THE REAL END")));
+        const QJsonObject running = queue.value("running").toObject();
+        QCOMPARE(running.value("label").toString(), QStringLiteral("✦ first line second line"));
+        QCOMPARE(running.value("full").toString(), QStringLiteral("✦ first line\nsecond line"));
+    }
+    void full_is_capped() {
+        Tokens choices(QLatin1Char('m')), sessions(QLatin1Char('s'));
+        Inputs in;
+        in.pane = QStringLiteral("tok");
+        in.rows << entry(1, QStringLiteral("command"), QString(50000, QLatin1Char('z')));
+        in.running = QString(50000, QLatin1Char('r'));
+        const QJsonObject queue = build(1, in, choices, sessions).value("queue").toObject();
+        QCOMPARE(queue.value("rows").toArray()[0].toObject().value("full").toString().size(), kFullMax);
+        QCOMPARE(queue.value("running").toObject().value("full").toString().size(), kFullMax);
+        QCOMPARE(queue.value("running").toObject().value("label").toString().size(), kLabelMax);
+    }
+
     void labels_tails_and_lists_are_capped() {
         Tokens choices(QLatin1Char('m')), sessions(QLatin1Char('s'));
         Inputs in;

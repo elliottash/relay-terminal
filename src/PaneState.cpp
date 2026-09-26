@@ -29,10 +29,11 @@ bool isEntryRow(const Row &row) {
     return true;
 }
 
-QString rowLabel(const Row &row) {
+QString rowLabel(const Row &row, bool whole) {
+    const QString text = !whole ? row.text.simplified() : (row.full.isEmpty() ? row.text : row.full).trimmed();
     if (row.kind == QLatin1String("model")) {
         QString label = isEntryRow(row) ? QString() : QStringLiteral("↪ next tool call  ");
-        label += QStringLiteral("↻ ") + row.text.simplified();
+        label += QStringLiteral("↻ ") + text;
         if (row.state == QLatin1String("withdrawing")) label += QStringLiteral("  withdrawing…");
         if (row.state == QLatin1String("interrupting")) label += QStringLiteral("  switching now…");
         return label;
@@ -41,7 +42,7 @@ QString rowLabel(const Row &row) {
     const bool agent = steer || row.kind == QLatin1String("agent");
     QString label = steer ? QStringLiteral("↪ next tool call  ") : QString();
     label += agent ? QStringLiteral("✦ ") : QStringLiteral("$ ");
-    label += row.text.simplified();
+    label += text;
     if (steer && row.state == QLatin1String("withdrawing")) label += QStringLiteral("  withdrawing…");
     return label;
 }
@@ -131,19 +132,30 @@ QJsonObject build(qint64 seq, const Inputs &in, Tokens &choiceTokens, Tokens &se
         if (rows.size() < kRowsMax) {
             QJsonArray actions;
             for (const QString &action : rowActions(row, in.busy, entry ? entryIndex : -1, entryCount)) actions.append(action);
-            rows.append(QJsonObject{{QStringLiteral("id"), row.id},
-                                    {QStringLiteral("kind"), row.kind},
-                                    {QStringLiteral("label"), clip(rowLabel(row), kLabelMax, false)},
-                                    {QStringLiteral("state"), row.state},
-                                    {QStringLiteral("actions"), actions}});
+            QJsonObject out{{QStringLiteral("id"), row.id},
+                            {QStringLiteral("kind"), row.kind},
+                            {QStringLiteral("label"), clip(rowLabel(row), kLabelMax, false)},
+                            {QStringLiteral("state"), row.state},
+                            {QStringLiteral("actions"), actions}};
+            // The row's whole text, for a view's expand control (card #JDN4): only when it says
+            // more than the label — past 400 characters, or with line breaks — so a 10 Hz message
+            // carries it for the rows that need it, and never more than kFullMax of it.
+            const QString full = clip(rowLabel(row, true), kFullMax, false);
+            if (full != out.value(QStringLiteral("label")).toString()) out.insert(QStringLiteral("full"), full);
+            rows.append(out);
         }
         if (entry) ++entryIndex;
     }
+    QJsonValue running(QJsonValue::Null);
+    if (!in.running.trimmed().isEmpty()) {
+        QJsonObject line{{QStringLiteral("label"), clip(in.running)}};
+        const QString full = clip((in.runningFull.isEmpty() ? in.running : in.runningFull).trimmed(), kFullMax, false);
+        if (full != line.value(QStringLiteral("label")).toString()) line.insert(QStringLiteral("full"), full);
+        running = line;
+    }
     QJsonObject queue{{QStringLiteral("paused"), in.queuePaused},
                       {QStringLiteral("pause_reason"), in.queuePaused ? clip(in.pauseReason) : QString()},
-                      {QStringLiteral("running"), in.running.trimmed().isEmpty()
-                                                      ? QJsonValue(QJsonValue::Null)
-                                                      : QJsonValue(QJsonObject{{QStringLiteral("label"), clip(in.running)}})},
+                      {QStringLiteral("running"), running},
                       {QStringLiteral("rows"), rows},
                       {QStringLiteral("hint"), rows.isEmpty() ? QString() : clip(in.queueHint)}};
 

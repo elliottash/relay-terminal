@@ -142,6 +142,23 @@ class CleanTests(unittest.TestCase):
         self.assertEqual(len(cleaned["sessions"]["rows"]), pane_state.SESSIONS_MAX)
         self.assertEqual(len(cleaned["model"]["choices"]), pane_state.CHOICES_MAX)
 
+    def test_a_rows_whole_text_survives_with_its_line_breaks(self):
+        """Card #JDN4: `full` is what an expanded row shows. Kept past the label's 400 characters
+        and with its line breaks, redacted like a label, capped, and dropped when it adds nothing."""
+        message = state()
+        whole = "✦ " + "word " * 500 + "\nsk-ant-api03-0123456789abcdefABCDEF\nTHE REAL END"
+        message["queue"]["rows"][1]["full"] = whole
+        message["queue"]["rows"][0]["full"] = message["queue"]["rows"][0]["label"]
+        message["queue"]["running"]["full"] = "z" * 50_000
+        cleaned = pane_state.clean(message)
+        rows = cleaned["queue"]["rows"]
+        self.assertNotIn("full", rows[0], "a full equal to the label is not sent twice")
+        self.assertTrue(rows[1]["full"].endswith("\nTHE REAL END"))
+        self.assertIn("[redacted]", rows[1]["full"])
+        self.assertNotIn("sk-ant", rows[1]["full"])
+        self.assertEqual(len(cleaned["queue"]["running"]["full"]), pane_state.FULL_MAX)
+        self.assertNotIn("full", rows[2])
+
     def test_enumerations_are_checked(self):
         message = state()
         message["turn"]["phase"] = "rm -rf"

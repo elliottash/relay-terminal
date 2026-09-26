@@ -36,6 +36,7 @@ namespace relay::panestate {
 
 constexpr int kVersion = 1;
 constexpr int kLabelMax = 400;      // any one label, in characters
+constexpr int kFullMax = 16000;     // a queue row's untruncated text, `full` (card #JDN4)
 constexpr int kTailMax = 2000;      // the reasoning tail
 constexpr int kRowsMax = 64;        // queue rows
 constexpr int kSessionsMax = 50;    // session-manager rows
@@ -50,6 +51,7 @@ struct Row {
     QString text;           // what the strip shows for it (QueueEntry::label(), a steer's text)
     QString state;          // "waiting", "withdrawing", "queued", "editing", "paused" or "interrupting"
     bool written = false;   // Relay wrote it (a fix request, a terminal result): no edit, no steer
+    QString full;           // `text` untruncated, line breaks kept; empty: `text` is all (#JDN4)
 };
 
 // A model the pane may switch to. `key` is the desktop's own handle for it ("preset:<id>",
@@ -78,6 +80,7 @@ struct Inputs {
     // queue
     bool queuePaused = false;
     QString pauseReason, running, queueHint;
+    QString runningFull;             // the running line untruncated, line breaks kept (card #JDN4)
     QList<Row> rows;                 // in delivery order, without the running line
     // model
     QString modelLabel;
@@ -125,7 +128,8 @@ QString clip(const QString &text, int max = kLabelMax, bool simplify = true);
 bool isEntryRow(const Row &row);
 // The row as the strip draws it: "↪ next tool call  ✦ check the readme", "✦ …", "$ …", with
 // "  withdrawing…" after a steer that is being withdrawn; "↻ /model fable" for a model switch.
-QString rowLabel(const Row &row);
+// `whole` draws it from `full` with its line breaks, for the expanded row (card #JDN4).
+QString rowLabel(const Row &row, bool whole = false);
 // What may be done to this row right now. `entryIndex`/`entryCount` place a queued row among the
 // queued rows (steers are not counted); `busy` is whether an agent turn is running.
 QStringList rowActions(const Row &row, bool busy, int entryIndex, int entryCount);

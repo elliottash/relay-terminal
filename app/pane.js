@@ -168,6 +168,11 @@ export function mountPane(container, options = {}) {
   let lastSeq = -Infinity;
   let selectedRow = '';       // row id highlighted by the keyboard
   let thinkingExpanded = false;
+  // Card #JDN4: the queue lines opened to their whole text. Kept here, by the desktop's row id,
+  // because a `pane_state` lands ten times a second and must not fold a line someone just opened.
+  const expandedRows = new Set();
+  let runningExpanded = false;
+  let runningShown = '';      // the running line's text, so a new turn starts folded
   let thinkingHidden = false; // × on the bubble: hidden until the next turn's reasoning
   let pendingTail = null;     // reasoning that arrived while text in the bubble was selected
   let staged = null;          // the three-step Enter: {text, stage, at, rowId, steerId, known}
@@ -262,7 +267,9 @@ export function mountPane(container, options = {}) {
   const running = el('div', 'rp-queue-running');
   const runningLead = el('span', 'rp-running-lead', '▸ running');
   const runningLabel = el('span', 'rp-running-label');
-  running.append(runningLead, runningLabel);
+  const runningMore = expandButton();
+  runningMore.hidden = true;
+  running.append(runningLead, runningLabel, runningMore);
   const rows = el('ul', 'rp-rows');
   rows.setAttribute('role', 'listbox');
   rows.setAttribute('aria-label', 'Queued prompts');
@@ -449,6 +456,25 @@ export function mountPane(container, options = {}) {
     }
   }
 
+  // The expand control on a queue line (card #JDN4): ▾ shows the whole message, ▴ folds it back.
+  function expandButton() {
+    const node = button('rp-row-more', '▾', 'Show whole message');
+    node.setAttribute('aria-expanded', 'false');
+    return node;
+  }
+
+  function setMore(node, open) {
+    node.textContent = open ? '▴' : '▾';
+    node.setAttribute('aria-expanded', open ? 'true' : 'false');
+    node.setAttribute('aria-label', open ? 'Show less' : 'Show whole message');
+  }
+
+  // A folded line gets the control only when there is more to see: a `full` the desktop sent, or
+  // a label wider than the strip. An open line always keeps it, so it can be folded again.
+  function markMore(node, label, open, hasFull) {
+    node.hidden = !(open || hasFull || label.scrollWidth > label.clientWidth + 1);
+  }
+
   function labelInto(node, row) {
     // The label is the desktop's ("↪ next tool call  ✦ check the readme", "$ make", "✦ …"). Its
     // glyph is coloured the way the Qt delegate colours it; the words are left as they came.
@@ -471,9 +497,11 @@ export function mountPane(container, options = {}) {
     // turn runs: a finger down on a row when one lands had its `pointerup` on a different node,
     // so no `click` fired and the tap did nothing, and a keyboard's focus was thrown back to the
     // body ten times a second (#PKT5).
+    for (const id of [...expandedRows]) if (!findRow(id)) expandedRows.delete(id);
     const signature = JSON.stringify([selectedRow, list.map((row) =>
-      [str(row.id), str(row.kind), str(row.state), str(row.label), actionsOf(row)])]);
-    if (rows.dataset.signature === signature) return;
+      [str(row.id), str(row.kind), str(row.state), str(row.label), str(row.full), actionsOf(row),
+       expandedRows.has(str(row.id))])]);
+    if (rows.dataset.signature === signature) { markRowsMore(); return; }
     rows.dataset.signature = signature;
     rows.textContent = '';
     let activeId = '';
@@ -490,9 +518,24 @@ export function mountPane(container, options = {}) {
       item.setAttribute('aria-selected', selected ? 'true' : 'false');
       if (selected) activeId = item.id;
       const label = el('span', 'rp-row-label');
-      labelInto(label, row);
-      item.title = str(row.label);
+      const open = expandedRows.has(str(row.id));
+      labelInto(label, open && str(row.full) ? { label: str(row.full) } : row);
+      label.classList.toggle('rp-expanded', open);
+      item.classList.toggle('rp-open', open);
+      if (!open) item.title = str(row.label);
       item.appendChild(label);
+      const more = expandButton();
+      setMore(more, open);
+      more.dataset.full = str(row.full) ? '1' : '';
+      // Its own tap: opening a line neither selects the row nor opens its action sheet.
+      more.addEventListener('pointerdown', (event) => event.stopPropagation());
+      more.addEventListener('click', (event) => {
+        event.stopPropagation();
+        if (expandedRows.has(str(row.id))) expandedRows.delete(str(row.id));
+        else expandedRows.add(str(row.id));
+        renderRows();
+      });
+      item.appendChild(more);
       if (actions.includes('remove')) {
         const x = button('rp-row-x', '×', `${ACTION_WORDS.remove(row)}: ${str(row.label)}`);
         x.addEventListener('click', (event) => {
@@ -513,6 +556,15 @@ export function mountPane(container, options = {}) {
       current.scrollIntoView({ block: 'nearest' });
     }
     scrolledRow = selectedRow;
+    markRowsMore();
+  }
+
+  function markRowsMore() {
+    for (const item of rows.querySelectorAll('.rp-row')) {
+      const more = item.querySelector('.rp-row-more');
+      const label = item.querySelector('.rp-row-label');
+      if (more && label) markMore(more, label, item.classList.contains('rp-open'), more.dataset.full === '1');
+    }
   }
 
   function wireRowPointer(item, row) {
@@ -1107,8 +1159,16 @@ export function mountPane(container, options = {}) {
     show(queueHint, str(q.hint));
     show(queueReason, q.paused === true ? str(q.pause_reason) : '');
     const label = runningRow ? str(runningRow.label) : '';
+    const full = runningRow ? str(runningRow.full) : '';
+    if (label !== runningShown) { runningShown = label; runningExpanded = false; }
     running.hidden = !label;
-    runningLabel.textContent = label;
+    running.classList.toggle('rp-open', runningExpanded);
+    runningLabel.classList.toggle('rp-expanded', runningExpanded);
+    const text = runningExpanded && full ? full : label;
+    if (runningLabel.textContent !== text) runningLabel.textContent = text;
+    running.title = runningExpanded ? '' : label;
+    setMore(runningMore, runningExpanded);
+    if (label) markMore(runningMore, runningLabel, runningExpanded, !!full);
     rows.hidden = list.length === 0;
     renderRows();
   }
@@ -1365,6 +1425,7 @@ export function mountPane(container, options = {}) {
     }
   });
 
+  on(runningMore, 'click', () => { runningExpanded = !runningExpanded; if (state) renderQueue(); });
   on(thinkingToggle, 'click', () => { thinkingExpanded = !thinkingExpanded; if (state) renderThinking(); });
   on(thinkingClose, 'click', () => { thinkingHidden = true; thinking.hidden = true; box.focus(); });
   on(thinkingTail, 'click', () => {

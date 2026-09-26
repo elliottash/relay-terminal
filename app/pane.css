@@ -170,12 +170,20 @@
 .relay-pane[data-input="touch"] .rp-queue-hint { display: none; }
 .rp-queue-reason { color: var(--rt-muted); font-size: var(--rt-secondary-size); }
 .rp-queue-running {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  color: var(--qss-queueRunning-color);
+}
+.rp-queue-running[hidden] { display: none; }
+.rp-running-lead { flex: none; margin-right: 0.6em; white-space: pre; }
+.rp-running-label {
+  flex: 1 1 auto;
+  min-width: 0;
   overflow: hidden;
   white-space: pre;
   text-overflow: ellipsis;
-  color: var(--qss-queueRunning-color);
 }
-.rp-running-lead { margin-right: 0.6em; }
 .rp-rows {
   list-style: none;
   margin: 0;
@@ -232,6 +240,35 @@
   border-radius: 4px;
   color: var(--qss-queueButton-color);
   cursor: pointer;
+}
+/* Card #JDN4: ▾ opens a queue line to its whole message, wrapped, in place; ▴ folds it. An open
+   line has its own ceiling, so one pasted log cannot push every other row out of the list. */
+.rp-row-more {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: max(24px, var(--rp-tap));
+  height: max(20px, var(--rp-tap));
+  padding: 0;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  color: var(--qss-queueButton-color);
+  cursor: pointer;
+}
+.rp-row-more[hidden] { display: none; }
+.rp-row-more:hover { color: var(--qss-queueButton-hover-color); border-color: var(--qss-queueButton-hover-border-color); }
+.rp-row.rp-open, .rp-queue-running.rp-open { align-items: flex-start; }
+.rp-row-label.rp-expanded, .rp-running-label.rp-expanded {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  text-overflow: clip;
+  max-height: calc(12em * var(--rp-line));
+  overflow-y: auto;
+  padding: 4px 0;
+  -webkit-user-select: text;
+  user-select: text;
 }
 .rp-row-x:hover { color: var(--qss-queueButton-hover-color); border-color: var(--qss-queueButton-hover-border-color); }
 

@@ -30,6 +30,7 @@ from . import wire
 
 VERSION = 1
 LABEL_MAX = 400
+FULL_MAX = 16_000             # a queue row's untruncated text, `full` (card #JDN4)
 TAIL_MAX = 2000
 ROWS_MAX = 64
 SESSIONS_MAX = 50
@@ -92,6 +93,14 @@ def _text(value, limit: int = LABEL_MAX, *, keep_newlines: bool = False, tail: b
     return value
 
 
+def _full_into(out: dict, source: dict) -> None:
+    # A queue line's whole text, for a view's expand control (card #JDN4): line breaks kept, the
+    # same redaction as a label, and only when it says more than the label does.
+    full = _text(source.get("full"), FULL_MAX, keep_newlines=True)
+    if full.strip() and full != out["label"]:
+        out["full"] = full
+
+
 def _model_text(value) -> str:
     value = _text(value)
     value = _URL.sub("", value)
@@ -150,11 +159,18 @@ def clean(message) -> dict | None:
         for action in _list(row.get("actions")):
             if action in ACTIONS and action not in actions:
                 actions.append(action)
-        rows.append({"id": row_id, "kind": row["kind"], "label": _text(row.get("label")),
-                     "state": _enum(row.get("state"), STATES, "queued"), "actions": actions})
+        out_row = {"id": row_id, "kind": row["kind"], "label": _text(row.get("label")),
+                   "state": _enum(row.get("state"), STATES, "queued"), "actions": actions}
+        _full_into(out_row, row)
+        rows.append(out_row)
 
     running = queue.get("running")
-    running = {"label": _text(running.get("label"))} if isinstance(running, dict) else None
+    if isinstance(running, dict):
+        out_running = {"label": _text(running.get("label"))}
+        _full_into(out_running, running)
+        running = out_running
+    else:
+        running = None
 
     choices = []
     for choice in _list(model.get("choices")):
