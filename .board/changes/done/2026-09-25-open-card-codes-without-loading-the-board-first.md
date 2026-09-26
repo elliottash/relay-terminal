@@ -11,7 +11,7 @@ rank: zzzzzzzzzzzzzzzzzzzzzzzzzzzzzw
 created: '2026-09-25'
 verify: {artifact: code, primary: script, also: [ai-text], human: none, sign_off: none, effort: medium, stakes: rework, blast: capability}
 source: Relay pane, 2026-09-25
-links: {plans: [], commits: [8ea6fee15002], evidence: [], related: [], github: null}
+links: {plans: [], commits: [8ea6fee15002, 9e2b0bcb24ca], evidence: [], related: [], github: null}
 ---
 # Open card codes without loading the board first
 
@@ -31,10 +31,11 @@ The card document is displayed before its helper console is created.
 Returning to the list still loads the full board, and missing card codes report a failure.
 
 ## Execution Summary
-Commit `8ea6fee1500270890197dd741f41cfc1daca6302` opens a clicked card code through `board_card_get` before requesting Board rows. The card document appears before its helper console is constructed. The full Board loads when the reader returns to the list. Card lookup uses the generated index with a front-matter fallback.
+Commits `8ea6fee1500270890197dd741f41cfc1daca6302` and `9e2b0bcb24ca6f9637dcebdf0e4a0932f074b4f8` make a clicked card code request only that card. The worker prepares the file-backed Board first, returns the card, and configures its helper agent after the card page appears. Returning to the list loads the full Board. Card lookup uses the generated index with a front-matter fallback.
 
 ## Tests
 ### Check
-Pass: `python3 scripts/land.py try cardfast --target relay-board-tests --tests '^board$'` built the exact selected tree and passed the Board test.
+Pass: isolated `relay-board-tests` build and `ctest -R '^board$'` on the selected tree.
 Pass: `PYTHONPATH=backend python3 -m unittest tests.test_board.DirectCardReadTests tests.test_board_protocol.WriteTests.test_a_card_detail_read_round_trips_through_the_protocol` (3 tests).
-Pass: `python3 scripts/land.py commit cardfast ... --verify-target relay-board-tests` built the exact landed tree.
+Pass: `PYTHONPATH=backend python3 -m unittest tests.test_board_protocol.KeylessWorkerTests.test_direct_card_read_precedes_helper_configuration` (card response precedes the helper `configured` event).
+Pass: landing gate built the exact tree for both commits.
