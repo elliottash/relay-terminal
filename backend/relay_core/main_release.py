@@ -1,0 +1,507 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+"""Atomic runnable-main releases (docs/TREES-AND-LANDING.md §A3, invariants 6-7).
+
+A *tip channel* keeps an installed, runnable copy of the project's target branch:
+
+    state_root/integration/<repo-id>/tip/run/<sha>/    installed release, immutable once complete
+    state_root/integration/<repo-id>/tip/run/current   atomic symlink to a complete release
+    cache_root/integration/<repo-id>/tip/source        persistent disposable source worktree
+    cache_root/integration/<repo-id>/tip/build         coalesced build directory
+
+``update(sha, config)`` coalesces: it records the requested SHA, takes the channel lock, and
+builds whatever the newest request is by the time it holds the lock — a burst of submissions
+produces one build, not N.  Publication is all-or-nothing: build and install run into a staging
+directory under ``run/``, the release is checked for completeness and smoke-gated, only then
+renamed into place and made ``current`` with an atomic symlink swap.  A crash anywhere before the
+swap leaves the previous release running; a directory without ``release.json`` is incomplete and
+is pruned, never served.
+
+The installed release must stand alone after the disposable source/build is reused (contract):
+the completeness check refuses symlinks that escape the install root, and the project config's
+``main.install`` commands are responsible for copying *all* runtime assets — for this repository
+``cmake --install {build} --prefix {dest}`` (AppPaths prefers ``<exe>/../share/relay`` over the
+compiled-in ``RELAY_SOURCE_DIR``).  The source worktree under ``cache_root`` is *persistent*
+across builds (coalesced, reusable, disposable), so a binary that still reaches back to its
+configure-time source path finds a stable location rather than a deleted temp dir; projects must
+still not depend on that — reuse can wipe it.
+
+`repo_id`: B1 passes the canonical A1 registry id.  Without it, the A1 registry is consulted when
+importable; otherwise a derived id is used **only** when the caller passes
+``allow_derived_repo_id=True`` — production must never silently land releases under a hash-based
+identity that the registry does not know.
+
+Linux/POSIX first (contract): other hosts get a clear refusal at construction.
+
+Tradeoffs, stated once: build/install/smoke commands run sequentially with per-command timeouts
+(simple, matches the gate); the smoke gate defaults to "executable exists, has the exec bit, and
+no symlink escapes the root" unless the project configures `main.smoke` commands — an unconfigured
+smoke gate proves install completeness, not runtime health; actual build time and installed bytes
+are recorded (no promised cache hits); pruning keeps ``max(keep, 2)`` completed releases plus the
+current one, so disk use is bounded but a rollback target survives.
+"""
+from __future__ import annotations
+
+import fcntl
+import json
+import os
+import shutil
+import signal
+import subprocess
+import time
+from pathlib import Path
+from typing import Mapping, Sequence
+
+from . import projectconf
+
+GIT_TIMEOUT = 120.0
+SMOKE_TIMEOUT = 120.0
+CMD_OUTPUT_TAIL_BYTES = 256 * 1024  # bounded capture: only the tail of a command's output
+
+
+class MainReleaseError(RuntimeError):
+    """A release that could not be built, completed, verified or published.  The previous
+    release (if any) is still current whenever this is raised."""
+
+
+def _default_root(env_primary: str, env_fallback: str, leaf: str) -> Path:
+    base = os.environ.get(env_primary) or os.environ.get(env_fallback) \
+        or str(Path.home() / leaf)
+    return Path(base) / "relay"
+
+
+def _state_root() -> Path:
+    return _default_root("RELAY_STATE_HOME", "XDG_STATE_HOME", ".local/state")
+
+
+def _cache_root() -> Path:
+    return _default_root("RELAY_CACHE_HOME", "XDG_CACHE_HOME", ".cache")
+
+
+def _atomic_write(path: Path, text: str) -> None:
+    import uuid
+    tmp = path.with_name(f".{path.name}.{os.getpid()}.{uuid.uuid4().hex[:12]}.tmp")
+    fd = os.open(str(tmp), os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o644)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as fh:
+            fh.write(text)
+            fh.flush()
+            os.fsync(fh.fileno())
+        os.replace(tmp, path)
+        dirfd = os.open(str(path.parent), os.O_DIRECTORY)
+        try:
+            os.fsync(dirfd)
+        finally:
+            os.close(dirfd)
+    finally:
+        try:
+            os.unlink(tmp)
+        except FileNotFoundError:
+            pass
+
+
+def _fsync_dir(path: Path) -> None:
+    fd = os.open(str(path), os.O_DIRECTORY)
+    try:
+        os.fsync(fd)
+    finally:
+        os.close(fd)
+
+
+def _tree_bytes(path: Path) -> int:
+    total = 0
+    for dirpath, dirnames, filenames in os.walk(path):
+        for name in filenames:
+            p = os.path.join(dirpath, name)
+            if not os.path.islink(p):
+                try:
+                    total += os.lstat(p).st_size
+                except OSError:
+                    pass
+    return total
+
+
+def _substitute(argv: Sequence[str], mapping: Mapping[str, str]) -> list[str]:
+    """Contract substitution: a `{placeholder}` is replaced as a whole argv entry or as a
+    literal substring; never shell-quoted guesswork."""
+    out = []
+    for arg in argv:
+        for name, value in mapping.items():
+            arg = arg.replace("{" + name + "}", value)
+        out.append(arg)
+    return out
+
+
+def _scrubbed_env() -> dict[str, str]:
+    return {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
+
+
+class MainRelease:
+    def __init__(self, repo, *, state_root=None, cache_root=None, repo_id: str | None = None,
+                 allow_derived_repo_id: bool = False, git_timeout: float = GIT_TIMEOUT):
+        if os.name != "posix":
+            raise MainReleaseError("main releases are POSIX/Linux first; this host gets a clear "
+                                   "refusal instead of a non-atomic fallback")
+        self.repo = Path(repo)
+        self.state_root = Path(state_root) if state_root else _state_root()
+        self.cache_root = Path(cache_root) if cache_root else _cache_root()
+        self.git_timeout = float(git_timeout)
+        self.common_dir = self._resolve_common_dir()
+        self.repo_id = repo_id or self._registry_repo_id(allow_derived_repo_id)
+        base = self.state_root / "integration" / self.repo_id / "tip"
+        self.tip_dir = base
+        self.run_dir = base / "run"
+        cache = self.cache_root / "integration" / self.repo_id / "tip"
+        self.source_dir = cache / "source"
+        self.build_dir = cache / "build"
+
+    # ------------------------------------------------------------------ identity / git
+    def _git(self, *args, cwd=None, check=True) -> subprocess.CompletedProcess:
+        proc = subprocess.run(
+            ["git", "-C", str(cwd or self.repo), *args],
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            timeout=self.git_timeout, env=_scrubbed_env())
+        if check and proc.returncode != 0:
+            raise MainReleaseError(f"git {' '.join(args)} failed: "
+                                   f"{proc.stderr.decode('utf-8', errors='replace').strip()}")
+        return proc
+
+    def _resolve_common_dir(self) -> Path:
+        proc = subprocess.run(
+            ["git", "-C", str(self.repo), "rev-parse", "--path-format=absolute",
+             "--git-common-dir"],
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=self.git_timeout,
+            env=_scrubbed_env())
+        if proc.returncode != 0:
+            raise MainReleaseError(f"{self.repo}: not a git repository: "
+                                   f"{proc.stderr.decode('utf-8', errors='replace').strip()}")
+        return Path(proc.stdout.decode().strip()).resolve()
+
+    def _registry_repo_id(self, allow_derived: bool) -> str:
+        """Canonical identity comes from A1's registry (keyed by the resolved git common dir).
+        A hash-derived id is a test/standalone escape hatch that must be opted into loudly."""
+        try:
+            from . import trees  # A1; may not exist yet
+        except ImportError:
+            trees = None
+        if trees is not None:
+            try:
+                rec = trees.resolve_project(self.repo, state_root=self.state_root)
+                if rec and rec.get("id"):
+                    return rec["id"]
+            except Exception:
+                pass  # fall through to the explicit paths below
+        if not allow_derived:
+            raise MainReleaseError(
+                "no repo_id given and the A1 registry has no canonical id for "
+                f"{self.repo}; pass repo_id= from relay_core.trees.register_repo() "
+                "(derived hashes are for tests only: allow_derived_repo_id=True)")
+        import hashlib
+        return "derived-" + hashlib.sha256(str(self.common_dir).encode()).hexdigest()[:16]
+
+    # ------------------------------------------------------------------ commands
+    def _run(self, argv: Sequence[str], *, cwd: Path, timeout: float, what: str) -> str:
+        """Run one build/install/smoke command.  Output spills to a file — a noisy build must
+        not OOM the service; only a bounded tail is kept for errors/smoke records."""
+        import tempfile
+        with tempfile.TemporaryFile(prefix="relay-main-") as sink:
+            proc = subprocess.Popen(list(argv), cwd=str(cwd), env=_scrubbed_env(),
+                                    stdout=sink, stderr=subprocess.STDOUT,
+                                    start_new_session=True)
+            try:
+                proc.wait(timeout=timeout)
+            except subprocess.TimeoutExpired:
+                try:
+                    os.killpg(proc.pid, signal.SIGKILL)
+                except (ProcessLookupError, PermissionError):
+                    pass
+                proc.wait()
+                raise MainReleaseError(f"{what} timed out after {timeout}s: {' '.join(argv)}")
+            size = sink.seek(0, os.SEEK_END)
+            sink.seek(max(0, size - CMD_OUTPUT_TAIL_BYTES))
+            text = sink.read().decode("utf-8", errors="replace")
+        if proc.returncode != 0:
+            raise MainReleaseError(f"{what} exited {proc.returncode}: {' '.join(argv)}\n"
+                                   f"{text[-4000:]}")
+        return text
+
+    # ------------------------------------------------------------------ update
+    def update(self, sha: str, config: Mapping) -> dict:
+        """Build and publish `sha` as the tip release; coalesces with concurrent requests.
+
+        Returns a record with `sha`, `path`, `changed`, `duration_seconds`, `bytes` and the
+        channel `status`.  Raises MainReleaseError on any failure; `current` is untouched then.
+        """
+        cfg = projectconf.normalize_config(config, origin="<main_release config>")
+        main = cfg["main"]
+        if not main["executable"]:
+            raise MainReleaseError("main.executable is not configured; the project has no "
+                                   "runnable-main release contract")
+        if not main["install"]:
+            raise MainReleaseError("main.install is empty; nothing would populate {dest}, so "
+                                   "no complete release can be promised")
+        full = self._git("rev-parse", "--verify", f"{sha}^{{commit}}").stdout.decode().strip()
+
+        self.run_dir.mkdir(parents=True, exist_ok=True)
+        self.build_dir.mkdir(parents=True, exist_ok=True)
+        self.source_dir.parent.mkdir(parents=True, exist_ok=True)
+        _atomic_write(self.tip_dir / "requested.json",
+                      json.dumps({"sha": full, "requested_at": time.time()}))
+
+        lock_path = self.tip_dir / "main.lock"
+        lock_fd = os.open(str(lock_path), os.O_CREAT | os.O_RDWR, 0o600)
+        try:
+            fcntl.flock(lock_fd, fcntl.LOCK_EX)  # one publisher per channel; later writers coalesce
+            try:
+                requested = self._requested_sha() or full
+            except MainReleaseError:
+                requested = full
+            return self._publish(requested, cfg)
+        finally:
+            os.close(lock_fd)
+
+    def _requested_sha(self) -> str | None:
+        try:
+            data = json.loads((self.tip_dir / "requested.json").read_text())
+            sha = data.get("sha")
+            if sha:
+                return self._git("rev-parse", "--verify", f"{sha}^{{commit}}"
+                                 ).stdout.decode().strip()
+        except (OSError, ValueError, KeyError, subprocess.SubprocessError, MainReleaseError):
+            pass
+        return None
+
+    def _current_sha(self) -> str | None:
+        link = self.run_dir / "current"
+        try:
+            target = os.readlink(link)
+        except OSError:
+            return None
+        sha = os.path.basename(target.rstrip("/"))
+        if self._release_record(sha) is None:
+            return None  # points at an incomplete release: treat as no current
+        return sha
+
+    def _release_record(self, sha: str) -> dict | None:
+        try:
+            rec = json.loads((self.run_dir / sha / "release.json").read_text())
+        except (OSError, ValueError):
+            return None
+        if rec.get("sha") != sha:
+            return None
+        return rec
+
+    def _sync_source(self, sha: str) -> None:
+        """Point the persistent cache worktree at `sha`.  The worktree is disposable and ours;
+        --force discards leftover tracked-file edits from interrupted builds (ignored build
+        outputs survive, which is what makes rebuilds incremental)."""
+        if not (self.source_dir / ".git").exists():
+            if self.source_dir.exists():
+                shutil.rmtree(self.source_dir)
+            self._git("worktree", "add", "--detach", str(self.source_dir), sha)
+        else:
+            self._git("checkout", "--detach", "--force", sha, cwd=self.source_dir)
+
+    def _check_complete(self, dest: Path, executable: str) -> None:
+        exe = dest / executable
+        if not exe.is_file():
+            raise MainReleaseError(f"installed release is missing its executable {executable}")
+        if not os.access(str(exe), os.X_OK):
+            raise MainReleaseError(f"installed executable {executable} is not executable")
+        root = os.path.realpath(str(dest))
+        for dirpath, dirnames, filenames in os.walk(dest):
+            for name in list(dirnames) + filenames:
+                p = os.path.join(dirpath, name)
+                if os.path.islink(p):
+                    raw = os.readlink(p)
+                    if os.path.isabs(raw):
+                        # even a link into {dest} itself breaks once the staged tree is
+                        # renamed into run/<sha>: installs must use relative links
+                        raise MainReleaseError(
+                            f"installed release uses an absolute symlink {p} -> {raw}; "
+                            "symlinks inside a release must be relative so they survive "
+                            "the staging rename")
+                    target = os.path.realpath(p)
+                    if not (target == root or target.startswith(root + os.sep)):
+                        raise MainReleaseError(
+                            f"installed release is not self-contained: {p} links outside "
+                            f"{dest} (-> {raw}); install commands must copy every runtime "
+                            "asset into {dest}")
+
+    def _publish(self, sha: str, cfg: Mapping) -> dict:
+        main = cfg["main"]
+        current = self._current_sha()
+        if current == sha:
+            status = self.status()
+            return {"sha": sha, "path": str(self.run_dir / sha), "changed": False,
+                    "duration_seconds": 0.0,
+                    "bytes": (status.get("current") or {}).get("bytes"),
+                    "status": status}
+
+        existing = self._release_record(sha)
+        if existing is not None:
+            # A complete retained release (e.g. a rollback target): immutable, so reuse it —
+            # flip `current`, never rebuild over it.
+            self._flip_current(sha)
+            _atomic_write(self.tip_dir / "status.json", json.dumps({
+                "current": sha, "requested_sha": sha, "last_error": None,
+                "last_build": {"duration_seconds": 0.0, "bytes": existing.get("bytes"),
+                               "reused": True},
+                "updated_at": time.time()}, indent=2))
+            return {"sha": sha, "path": str(self.run_dir / sha), "changed": True,
+                    "reused": True, "duration_seconds": 0.0,
+                    "bytes": existing.get("bytes"), "status": self.status()}
+
+        started = time.monotonic()
+        staging = self.run_dir / f".stage-{sha[:12]}-{os.getpid()}"
+        self._prune_staging()
+        try:
+            self._sync_source(sha)
+            mapping = {"source": str(self.source_dir), "build": str(self.build_dir),
+                       "dest": str(staging)}
+            for argv in main["build"]:
+                self._run(_substitute(argv, mapping), cwd=self.source_dir,
+                          timeout=main["timeout_seconds"], what="main.build")
+            staging.mkdir(parents=True, exist_ok=True)
+            for argv in main["install"]:
+                self._run(_substitute(argv, mapping), cwd=self.source_dir,
+                          timeout=main["timeout_seconds"], what="main.install")
+
+            self._check_complete(staging, main["executable"])
+            smoke_mapping = {"dest": str(staging),
+                             "executable": str(staging / main["executable"])}
+            smoke_results = []
+            for argv in main["smoke"]:
+                out = self._run(_substitute(argv, smoke_mapping), cwd=staging,
+                                timeout=min(SMOKE_TIMEOUT, main["timeout_seconds"]),
+                                what="main.smoke")
+                smoke_results.append({"argv": _substitute(argv, smoke_mapping), "ok": True,
+                                      "output_tail": out[-2000:]})
+
+            duration = time.monotonic() - started
+            nbytes = _tree_bytes(staging)
+            record = {"sha": sha, "installed_at": time.time(),
+                      "duration_seconds": round(duration, 3), "bytes": nbytes,
+                      "policy_hash": projectconf.policy_hash(cfg),
+                      "executable": main["executable"], "smoke": smoke_results}
+            _atomic_write(staging / "release.json", json.dumps(record, indent=2))
+
+            final = self.run_dir / sha
+            if final.exists():
+                shutil.rmtree(final)  # an incomplete leftover with this name
+            os.rename(staging, final)
+            _fsync_dir(self.run_dir)
+            self._flip_current(sha)
+            self._prune_releases(keep=max(int(main["keep"]), 2))
+            _atomic_write(self.tip_dir / "status.json", json.dumps({
+                "current": sha, "requested_sha": sha, "last_error": None,
+                "last_build": {"duration_seconds": record["duration_seconds"],
+                               "bytes": nbytes},
+                "updated_at": time.time()}, indent=2))
+            return {"sha": sha, "path": str(final), "changed": True,
+                    "duration_seconds": record["duration_seconds"], "bytes": nbytes,
+                    "status": self.status()}
+        except Exception as exc:
+            shutil.rmtree(staging, ignore_errors=True)
+            self._record_error(exc)
+            if isinstance(exc, MainReleaseError):
+                raise
+            raise MainReleaseError(str(exc)) from exc
+
+    def _flip_current(self, sha: str) -> None:
+        """Atomic: a new symlink renamed over `current`.  Readers see the old release or the
+        new one, never a missing or partial one."""
+        tmp = self.run_dir / f".current.{os.getpid()}.tmp"
+        try:
+            os.unlink(tmp)
+        except FileNotFoundError:
+            pass
+        os.symlink(sha, tmp)
+        os.replace(tmp, self.run_dir / "current")
+        _fsync_dir(self.run_dir)
+
+    def _record_error(self, exc: BaseException) -> None:
+        try:
+            prev = {}
+            status_path = self.tip_dir / "status.json"
+            if status_path.exists():
+                prev = json.loads(status_path.read_text())
+            prev.update({"last_error": f"{type(exc).__name__}: {exc}",
+                         "updated_at": time.time()})
+            _atomic_write(status_path, json.dumps(prev, indent=2))
+        except Exception:
+            pass  # error recording must never mask the real failure
+
+    def _prune_staging(self) -> None:
+        for entry in self.run_dir.iterdir():
+            if entry.name.startswith(".stage-") and entry.is_dir() and not entry.is_symlink():
+                shutil.rmtree(entry, ignore_errors=True)
+
+    def _prune_releases(self, *, keep: int) -> None:
+        current = self._current_sha()
+        releases = []
+        for entry in self.run_dir.iterdir():
+            # `current` is a symlink; is_dir() follows it, so exclude symlinks explicitly or
+            # the pointed-at release would be counted twice toward `keep`.
+            if entry.is_symlink() or not entry.is_dir() or entry.name.startswith("."):
+                continue
+            rec = self._release_record(entry.name)
+            if rec is None:
+                if entry.name != current:
+                    shutil.rmtree(entry, ignore_errors=True)  # incomplete: never served
+                continue
+            releases.append((rec.get("installed_at", 0.0), entry.name))
+        releases.sort(reverse=True)
+        kept = 0
+        for _, name in releases:
+            if name == current or kept < keep:
+                kept += 1
+                continue
+            shutil.rmtree(self.run_dir / name, ignore_errors=True)
+
+    # ------------------------------------------------------------------ status
+    def status(self) -> dict:
+        """Channel view: current release, newest requested sha, lag in commits, last error.
+
+        `lag_commits` is computed live (`git rev-list --count current..requested`) so a busy
+        channel shows how far the runnable main trails what was asked for (invariant 7)."""
+        current = self._current_sha()
+        requested = self._requested_sha()
+        lag = None
+        if current and requested and current != requested:
+            proc = self._git("rev-list", "--count", f"{current}..{requested}", check=False)
+            if proc.returncode == 0:
+                try:
+                    lag = int(proc.stdout.decode().strip())
+                except ValueError:
+                    lag = None
+            # not an ancestor relationship we can count (e.g. history rewrite): lag unknown
+        last_error, last_build = None, None
+        try:
+            saved = json.loads((self.tip_dir / "status.json").read_text())
+            last_error = saved.get("last_error")
+            last_build = saved.get("last_build")
+        except (OSError, ValueError):
+            pass
+        releases = []
+        if self.run_dir.is_dir():
+            for entry in sorted(self.run_dir.iterdir()):
+                if entry.is_symlink() or not entry.is_dir() or entry.name.startswith("."):
+                    continue
+                rec = self._release_record(entry.name)
+                releases.append({"sha": entry.name, "path": str(entry),
+                                 "complete": rec is not None, "current": entry.name == current,
+                                 "bytes": (rec or {}).get("bytes"),
+                                 "installed_at": (rec or {}).get("installed_at")})
+        current_rec = self._release_record(current) if current else None
+        return {
+            "channel": "tip",
+            "repo_id": self.repo_id,
+            "current": ({"sha": current, "path": str(self.run_dir / current),
+                         "installed_at": (current_rec or {}).get("installed_at"),
+                         "bytes": (current_rec or {}).get("bytes")} if current else None),
+            "requested_sha": requested,
+            "lag_commits": lag,
+            "error": last_error,
+            "last_build": last_build,
+            "releases": releases,
+        }
