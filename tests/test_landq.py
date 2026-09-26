@@ -646,6 +646,24 @@ class QueueCase(unittest.TestCase):
         self.assertEqual(show(self.repo, tip(self.repo), ".board/card.md"),
                          "# card\nstatus: done")
 
+    def test_board_snapshots_of_one_file_resolve_from_the_canonical_board(self):
+        # Two panes snapshot the same card from the same tip; the first lands while the second
+        # waits, so the second's three-way merge conflicts. The canonical Board already holds
+        # both writes, so it is the resolution — never a reconciler and never a lost entry.
+        q = self.queue()
+        first = plumb_commit(self.repo, self.base, {".board/card.md": "# card\nstatus: done\n"})
+        second = plumb_commit(self.repo, self.base, {".board/card.md": "# card\nstatus: planned\n"})
+        (self.repo / ".board" / "card.md").write_text("# card\nstatus: done\nnote: both\n")
+        q.submit(first, request_id="m1", kind="metadata")
+        q.submit(second, request_id="m2", kind="metadata")
+        self.assertEqual(q.process_one(Recorder())["status"], "landed")
+        reconciled = []
+        done = q.process_one(Recorder(), reconcile=lambda *a, **k: reconciled.append(a))
+        self.assertEqual(done["status"], "landed", done)
+        self.assertEqual(reconciled, [])
+        self.assertEqual(show(self.repo, tip(self.repo), ".board/card.md"),
+                         "# card\nstatus: done\nnote: both")
+
     # ------------------------------------------------------------ cancel
 
     def test_cancel_queued_and_landed(self):

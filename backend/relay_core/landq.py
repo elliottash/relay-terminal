@@ -725,6 +725,29 @@ class Queue:
             i += 2
         return entries
 
+    def _board_resolution(self, tree, paths) -> str:
+        """`tree` with each of `paths` replaced by the canonical Board's working copy of it (the
+        project checkout's `.board/`), or removed when that file is gone."""
+        top = Path(git_out(self.repo, "rev-parse", "--show-toplevel"))
+        index = self.root / ("board-merge-%d-%s" % (os.getpid(), secrets.token_hex(4)))
+        env = {"GIT_INDEX_FILE": str(index)}
+        try:
+            git(self.repo, "read-tree", tree, env=env)
+            for path in paths:
+                full = top / path
+                if full.is_symlink() or not full.is_file():
+                    git(self.repo, "update-index", "--force-remove", "--", path, env=env)
+                    continue
+                blob = git_out(self.repo, "hash-object", "-w", "--", str(full))
+                git(self.repo, "update-index", "--add", "--cacheinfo",
+                    "100644,%s,%s" % (blob, path), env=env)
+            return git_out(self.repo, "write-tree", env=env)
+        finally:
+            try:
+                os.unlink(index)
+            except OSError:
+                pass
+
     def _check_metadata(self, tip, tree):
         """A metadata job may only change canonical Board files. Anything else — a code path,
         a symlink (which could point outside `.board/`), a gitlink, a path that climbs — is a
@@ -863,6 +886,15 @@ class Queue:
         else:
             tree, conflicted, output = self._merge_tree(tip, submitted)
             self._log(job_id, "merge.log", output)
+            if conflicted and job["kind"] == "metadata" and all(
+                    path.startswith(METADATA_ROOT) for path in conflicted):
+                # A Board snapshot conflicts only with an earlier snapshot of the same file
+                # that landed while this one waited. The canonical Board's working copy holds
+                # both, so it is the resolution: no reconciler, no lost entry.
+                tree = self._board_resolution(tree, conflicted)
+                self._log(job_id, "merge.log", "resolved from the canonical Board: %s\n"
+                          % ", ".join(conflicted))
+                conflicted = []
             if conflicted:
                 resolution = self._reconcile(job, tip, tree, conflicted, output, reconcile)
                 if resolution is None:
