@@ -66,9 +66,3 @@ names about a quarter of the folders, so the directory listing is the complete o
 ## Issues
 
 The tracker lives in [`../issues/`](../issues/README.md).
-
-## Superseded
-
-[ENGINE-SPIKE.md](ENGINE-SPIKE.md) is a stub: the spike report was folded into
-[ENGINE.md](ENGINE.md) and its benchmarks into [ENGINE-PERF.md](ENGINE-PERF.md). It is kept
-because [VALIDATION.md](VALIDATION.md) and [ROADMAP.md](ROADMAP.md) still link to it.

@@ -1,6 +1,6 @@
 # Terminal engine options: permissive, cross-platform alternatives to KonsolePart
 
-Date: 2026-09-17. Research only (no code changed). Context: [ENGINE-SPIKE.md](ENGINE-SPIKE.md)
+Date: 2026-09-17. Research only (no code changed). Context: [ENGINE.md § History: the spike](ENGINE.md#history-the-spike-2026-09-17-morning)
 (libvterm + QPainter spike, about 2x slower than Konsole on a 200 MB `cat`) and
 [NEXT-STEPS-RESEARCH.md section A](NEXT-STEPS-RESEARCH.md). Relay is AGPL-3.0-or-later, C++17,
 Qt5 now with Qt6 as the target. The owner prefers permissive licenses (MIT/BSD/Apache/zlib/MPL).

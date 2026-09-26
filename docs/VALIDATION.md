@@ -273,7 +273,7 @@ Claude session. They show the feature worked once; they are not independent QA.
 | Relay's own title bar (move, resize, maximize) and the notification bell | [`qa_evidence/2026-09-17-window-header/`](qa_evidence/2026-09-17-window-header/) |
 | Per-pane systemd scopes, OOM banners, restart | [`qa_evidence/2026-09-17-pane-isolation/`](qa_evidence/2026-09-17-pane-isolation/) |
 | Agent queue strip, remove, interrupt, pause/resume | [`qa_evidence/2026-09-17-queue-interrupt-gui/`](qa_evidence/2026-09-17-queue-interrupt-gui/) |
-| libvterm engine spike (vim, less, htop, tmux, throughput) | [`qa_evidence/2026-09-17-engine-spike/`](qa_evidence/2026-09-17-engine-spike/), report in [ENGINE-SPIKE.md](ENGINE-SPIKE.md) |
+| libvterm engine spike (vim, less, htop, tmux, throughput) | [`qa_evidence/2026-09-17-engine-spike/`](qa_evidence/2026-09-17-engine-spike/), report in [ENGINE.md § History: the spike](ENGINE.md#history-the-spike-2026-09-17-morning) |
 | Terminal-first fallback (superseded behavior) | [`qa_evidence/2026-09-17-terminal-first-fallback/`](qa_evidence/2026-09-17-terminal-first-fallback/) |
 | Image context: paste, pane screenshot, the GLM-5.3-Flash swap and back, the vision-model row | [`qa_evidence/2026-09-17-image-context/`](qa_evidence/2026-09-17-image-context/) |
 | Model-written pane titles, tab labels, `/rename`, `/rename-tab` (loopback stub and, separately, a real model) | [`qa_evidence/2026-09-17-pane-title-summary/`](qa_evidence/2026-09-17-pane-title-summary/) |
@@ -324,7 +324,7 @@ Bugs found only by running the real app:
 | Zsh, Fish, SSH, tmux as the pane shell | Native input only; rich integration is Bash only |
 | User prompt frameworks | Only a pre-existing DEBUG trap (native fallback) is tested |
 | `glm` standard endpoint; other OpenAI-compatible providers | Not live-tested |
-| Inherited `SIG_IGN` outside the engine's own launcher | The spike found this bug class (see [ENGINE-SPIKE.md](ENGINE-SPIKE.md)); `PtyUnix.cpp` resets dispositions and is tested, other launch paths are not |
+| Inherited `SIG_IGN` outside the engine's own launcher | The spike found this bug class (see [ENGINE.md § History: the spike](ENGINE.md#history-the-spike-2026-09-17-morning)); `PtyUnix.cpp` resets dispositions and is tested, other launch paths are not |
 
 ## Security boundaries
 
