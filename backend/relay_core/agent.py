@@ -4614,10 +4614,15 @@ class Agent:
             turn_id = str(record.get("turn_id") or "")
             argv = [sys.executable, str(land), "board-sync", token, "-m",
                     f"board: {pane} {turn_id}".strip(), *paths]
+            # The canonical project repository, explicitly (card #AMQQ): a pane whose cwd is
+            # a sparse development workspace has no Board there, and land.py resolves the
+            # repository from its cwd.
+            repo_cwd = str(engine.repo)
 
             def run_sync() -> None:
                 try:
-                    run = subprocess.run(argv, capture_output=True, text=True, timeout=120)
+                    run = subprocess.run(argv, capture_output=True, text=True, timeout=120,
+                                         cwd=repo_cwd)
                     detail = ((run.stdout or "") + (run.stderr or "")).strip().splitlines()
                     logs.event(_log, "board_sync", session=self.session_id, turn=turn_id,
                                level_name="info" if run.returncode == 0 else "warning",

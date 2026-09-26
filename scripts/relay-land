@@ -9,9 +9,19 @@
   relay-land recover
   relay-land outbox [--all]
 
-All verbs accept --repo, --state-root, --repo-id and --target and print JSON. Exit 0 success,
-1 usage, 2 refused, 3 conflict, 5 gate failure, 7 publisher busy. The logic lives in
-backend/relay_core/landq.py; B1 (card #AMQQ) adds the service verbs (run, activate, try, ...).
+Service verbs (card #AMQQ, backend/relay_core/integration_service.py):
+
+  relay-land run [--once]                  the publisher loop (gates, reconcile, publish, main)
+  relay-land project-init [--write]        register the repo; suggest/write .relay/project.toml
+  relay-land inventory | activate [--dry-run] | pause | rollback
+  relay-land try SHA | --workspace ID      the accepted gate on a candidate, no publication
+  relay-land main-status | main-run [-- ARGS...]
+  relay-land snapshot | events | handoffs | board-submit PATH... --session S
+  relay-land workspace create SESSION | status ID | release ID --owner O | remove ID | list
+
+All verbs accept --repo and --state-root and print JSON. Exit 0 success, 1 usage, 2 refused,
+3 conflict, 5 gate failure, 7 busy (publisher, admission or transition lock). Also runnable as
+`python -m relay_core.integration_service` with the backend on sys.path.
 """
 import sys
 from pathlib import Path

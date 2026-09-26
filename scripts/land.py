@@ -109,8 +109,10 @@ stale hunks), 5 the exact tree does not build, 7 every verify build slot stayed 
 """
 
 import argparse
+import contextlib
 import datetime as _dt
 import difflib
+import fcntl
 import hashlib
 import json
 import os
@@ -191,11 +193,21 @@ WHO_PATHS = 6
 
 HOOK_REFUSAL = "commit through scripts/land.py; the shared index is never committed here"
 
+HOOK_VERSION = 2
+
+# Version 2 (card #AMQQ): refuses only the main checkout's *shared* index (`<common dir>/index`).
+# A linked worktree's own index — a Relay workspace — commits normally, since its commits are
+# submitted to the queue, never pushed onto the target. A project hook preserved beside this one
+# as `pre-commit.project` is chained. Kept byte-identical to relay_core.integration_service.HOOK
+# (tests/test_integration_service.py checks); change both together.
 HOOK = r"""#!/bin/sh
-# Installed by scripts/land.py. A commit from the shared index reverts whatever landed on
-# main while that index sat there, so git refuses it here. Land with:
-#     python3 scripts/land.py begin <session> <paths...>
+# Installed by Relay (scripts/land.py, relay-land). relay-hook-version: HOOK_VERSION_NUMBER
+# A commit from the main checkout's shared index reverts whatever landed on the target while
+# that index sat there, so git refuses it here. A linked worktree's own index is fine: that is
+# a Relay workspace, and its commits are submitted, never pushed onto the target directly.
+#     python3 scripts/land.py begin <session> <paths...>      (legacy mode)
 #     python3 scripts/land.py commit <session> -m "message"
+#     relay-land submit <sha> --request-id <id>               (queue mode)
 # Owner's escape hatch: RELAY_ALLOW_SHARED_COMMIT=1 git commit ...
 if [ "${RELAY_ALLOW_SHARED_COMMIT:-}" = "1" ]; then
     exit 0
@@ -211,21 +223,32 @@ resolve() {
     fi
 }
 
+common=$(git rev-parse --git-common-dir)
+shared=$(resolve "$common/index")
 # Not `--git-path index`: that one honours GIT_INDEX_FILE and would answer with the
 # private index we are trying to tell apart from the shared one.
-shared=$(resolve "$(git rev-parse --absolute-git-dir)/index")
 if [ -z "${GIT_INDEX_FILE:-}" ]; then
-    mine="$shared"
+    mine=$(resolve "$(git rev-parse --absolute-git-dir)/index")
 else
     mine=$(resolve "$GIT_INDEX_FILE")
 fi
 
 if [ "$mine" = "$shared" ]; then
-    echo "REFUSAL_TEXT" >&2
+    if grep -q '"mode": *"queue"' "$common/relay-publication.json" 2>/dev/null; then
+        echo "REFUSAL_TEXT (this project publishes through relay-land: work in a Relay workspace and submit)" >&2
+    else
+        echo "REFUSAL_TEXT" >&2
+    fi
     exit 1
 fi
+
+# A project hook that was here before Relay's still runs, after this check.
+_hooks=$(dirname -- "$0")
+if [ -x "$_hooks/pre-commit.project" ]; then
+    exec "$_hooks/pre-commit.project" "$@"
+fi
 exit 0
-""".replace("REFUSAL_TEXT", HOOK_REFUSAL)
+""".replace("REFUSAL_TEXT", HOOK_REFUSAL).replace("HOOK_VERSION_NUMBER", str(HOOK_VERSION))
 
 
 class _Missing:
@@ -932,26 +955,124 @@ def log_line(root, message):
 # --------------------------------------------------------------------------- hook
 
 def hook_file(repo):
-    git_dir = git_out(repo, "rev-parse", "--git-dir")
-    base = Path(git_dir)
+    """The pre-commit hook every worktree of `repo` runs: `git rev-parse --git-path hooks`
+    honours core.hooksPath and, from the main checkout, is the common hooks directory."""
+    out = git_out(repo, "rev-parse", "--git-path", "hooks")
+    base = Path(out)
     if not base.is_absolute():
         base = Path(repo) / base
-    return base / "hooks" / "pre-commit"
+    return base / "pre-commit"
+
+
+def hook_version(text):
+    match = re.search(r"relay-hook-version: (\d+)", text)
+    return int(match.group(1)) if match else 1
 
 
 def install_hook(repo, log, force=False):
+    """Install the Relay hook, or upgrade an older Relay one in place. A hook that is not
+    Relay's is refused unless `force`, and then preserved as `pre-commit.project` beside it
+    and chained — never discarded (`relay-land activate` does the same at cutover)."""
     target = hook_file(repo)
     target.parent.mkdir(parents=True, exist_ok=True)
-    if target.exists() and not force:
+    if target.exists():
         current = target.read_text(encoding="utf-8", errors="replace")
         if HOOK_REFUSAL in current:
-            return False
-        raise Fail("a different pre-commit hook is already installed at %s; move it aside or "
-                   "pass --force" % target)
+            if hook_version(current) >= HOOK_VERSION and not force:
+                return False
+            log("upgrading the Relay pre-commit hook from version %d to %d"
+                % (hook_version(current), HOOK_VERSION))
+        else:
+            if not force:
+                raise Fail("a different pre-commit hook is already installed at %s; move it "
+                           "aside or pass --force, which keeps it as pre-commit.project and "
+                           "runs it after Relay's check" % target)
+            project = target.parent / "pre-commit.project"
+            if project.exists() and project.read_bytes() != target.read_bytes():
+                raise Fail("cannot preserve the project's pre-commit hook: %s already exists and "
+                           "differs; move one of them aside" % project)
+            os.replace(str(target), str(project))
+            os.chmod(str(project), 0o755)
+            log("preserved the project's pre-commit hook as %s; Relay's chains to it" % project)
     target.write_text(HOOK, encoding="utf-8")
     os.chmod(str(target), 0o755)
     log("installed pre-commit hook at %s" % target)
     return True
+
+
+# ------------------------------------------------------------- publication mode (#AMQQ)
+
+PUBLICATION_MARKER = "relay-publication.json"
+PUBLICATION_LOCK = "relay-publication.lock"
+
+
+def common_dir(repo):
+    out = git_out(repo, "rev-parse", "--git-common-dir")
+    base = Path(out)
+    if not base.is_absolute():
+        base = Path(repo) / base
+    return base.resolve()
+
+
+def publication_marker(repo):
+    """`<common dir>/relay-publication.json`, written by `relay-land activate/pause/rollback`
+    (relay_core.integration_service): the mode this repository publishes in. Absent means
+    `legacy` — this script is the publisher. Anything else means the integration service is,
+    and every ref swap here must refuse."""
+    path = common_dir(repo) / PUBLICATION_MARKER
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        return {"mode": "legacy", "present": False}
+    except (OSError, ValueError):
+        return {"mode": "legacy", "present": True}
+    if not isinstance(data, dict) or data.get("mode") not in ("legacy", "queue", "paused"):
+        return {"mode": "legacy", "present": True}
+    return data
+
+
+def require_legacy_publisher(repo, what, marker=None):
+    marker = marker if marker is not None else publication_marker(repo)
+    mode = marker.get("mode", "legacy")
+    if mode == "legacy":
+        return marker
+    since = marker.get("since") or "?"
+    if what == "board-sync":
+        raise Fail("this repository has published through relay-land since %s (mode %s); "
+                   "board-sync no longer moves refs/heads/%s. In queue mode it submits the "
+                   "Board snapshot to the queue instead; in paused mode nothing publishes "
+                   "until `relay-land activate` or `relay-land rollback`."
+                   % (since, mode, marker.get("target") or DEFAULT_BRANCH), code=2)
+    raise Fail("this repository has published through relay-land since %s (mode %s): "
+               "land.py %s no longer moves refs/heads/%s. Work in a Relay workspace and submit "
+               "its commit (`relay-land submit <sha> --request-id <id>`), or `relay-land "
+               "rollback` to return to legacy publication. Your working tree and claims are "
+               "untouched." % (since, mode, what, marker.get("target") or DEFAULT_BRANCH), code=2)
+
+
+@contextlib.contextmanager
+def legacy_publication(repo, what):
+    """Hold the shared transition lock around a ref swap, and re-check the marker under it: a
+    `relay-land activate` running at the same time takes the lock exclusively (waiting for
+    this to finish — that is the drain) and flips the marker before it lets go, so a swap that
+    started in legacy mode never lands after the cutover."""
+    require_legacy_publisher(repo, what)
+    path = common_dir(repo) / PUBLICATION_LOCK
+    fd = os.open(str(path), os.O_CREAT | os.O_RDWR, 0o644)
+    try:
+        try:
+            fcntl.flock(fd, fcntl.LOCK_SH | fcntl.LOCK_NB)
+        except (BlockingIOError, OSError):
+            raise Fail("a publication-mode transition (relay-land activate/pause/rollback) holds "
+                       "%s; nothing was landed. Run `relay-land inventory` and try again when it "
+                       "is over." % path, code=7)
+        require_legacy_publisher(repo, what)
+        yield
+    finally:
+        try:
+            fcntl.flock(fd, fcntl.LOCK_UN)
+        finally:
+            os.close(fd)
 
 
 # --------------------------------------------------------------------------- begin
@@ -2106,6 +2227,13 @@ def cmd_commit(args, log):
 
     warn_overlaps(root, args.session, paths, log)
 
+    marker = publication_marker(repo)
+    if marker.get("mode", "legacy") != "legacy":
+        if not args.dry_run:
+            require_legacy_publisher(repo, "commit", marker)
+        log("note: this repository publishes through relay-land (mode %s); a real commit "
+            "would be refused" % marker["mode"])
+
     last_error, verified = None, None
     for attempt in range(1, SWAP_ATTEMPTS + 1):
         tip = branch_tip(repo, branch)          # read once per attempt, used everywhere below
@@ -2223,7 +2351,8 @@ def cmd_commit(args, log):
                        "are %s. Nothing was landed."
                        % (sorted(touched), sorted(entries)), code=3)
 
-        swap = git(repo, "update-ref", "refs/heads/%s" % branch, new, tip, check=False)
+        with legacy_publication(repo, "commit"):
+            swap = git(repo, "update-ref", "refs/heads/%s" % branch, new, tip, check=False)
         if swap.returncode != 0:
             last_error = swap.stderr.strip()
             log("%s moved under attempt %d (was %s); re-merging against the new tip"
@@ -2919,6 +3048,9 @@ def cmd_repair(args, log):
         "anything that landed on these paths afterwards is kept. No working-tree file was "
         "touched.\n" % (sha[:12], ", ".join(paths), sha[:12], parent[:12]))
 
+    if not args.dry_run:
+        require_legacy_publisher(repo, "repair")
+
     last_error = None
     for attempt in range(1, SWAP_ATTEMPTS + 1):
         tip = branch_tip(repo, branch)
@@ -2981,7 +3113,8 @@ def cmd_repair(args, log):
             raise Fail("name gate failed: the repair would touch %s but you asked for %s. "
                        "Nothing was landed." % (sorted(touched), sorted(entries)), code=3)
 
-        swap = git(repo, "update-ref", "refs/heads/%s" % branch, new, tip, check=False)
+        with legacy_publication(repo, "repair"):
+            swap = git(repo, "update-ref", "refs/heads/%s" % branch, new, tip, check=False)
         if swap.returncode != 0:
             last_error = swap.stderr.strip()
             log("%s moved under attempt %d (was %s); recomputing the repair"
@@ -3237,6 +3370,10 @@ def cmd_board_sync(args, log):
         if path not in paths:
             paths.append(path)
     message = read_message(args.message)
+    marker = publication_marker(repo)
+    if marker.get("mode") == "queue":
+        return board_sync_via_queue(repo, paths, args.token, message, marker, log)
+    require_legacy_publisher(repo, "board-sync", marker)
     last_error = None
     for attempt in range(1, SWAP_ATTEMPTS + 1):
         tip = branch_tip(repo, branch)
@@ -3259,7 +3396,8 @@ def cmd_board_sync(args, log):
             raise Fail("name gate failed: the commit would touch %s but board-sync's paths "
                        "are %s. Nothing was landed."
                        % (sorted(touched), sorted(entries)), code=3)
-        swap = git(repo, "update-ref", "refs/heads/%s" % branch, new, tip, check=False)
+        with legacy_publication(repo, "board-sync"):
+            swap = git(repo, "update-ref", "refs/heads/%s" % branch, new, tip, check=False)
         if swap.returncode != 0:
             last_error = swap.stderr.strip()
             log("%s moved under attempt %d (was %s); retrying against the new tip"
@@ -3273,6 +3411,35 @@ def cmd_board_sync(args, log):
     raise Fail("%s moved under every one of the %d attempts (last: %s). Nothing was landed; "
                "run board-sync again." % (branch, SWAP_ATTEMPTS, last_error or "swap refused"),
                code=3)
+
+
+def board_sync_via_queue(repo, paths, token, message, marker, log):
+    """Queue mode (#AMQQ): the Board snapshot is a metadata job for the integration service,
+    which is the repository's only publisher now. Prints the job id, or `nothing to land`."""
+    backend = Path(repo) / "backend"
+    if str(backend) not in sys.path:
+        sys.path.insert(0, str(backend))
+    try:
+        from relay_core import integration_service
+    except ImportError as exc:
+        raise Fail("this repository publishes through relay-land (mode queue) but "
+                   "relay_core.integration_service cannot be imported from %s: %s"
+                   % (backend, exc), code=2)
+    try:
+        service = integration_service.IntegrationService(
+            repo, state_root=marker.get("state_root") or None)
+        job = service.submit_board_snapshot(paths, session=token, message=message)
+    except (integration_service.ServiceError, Exception) as exc:  # noqa: BLE001
+        code = getattr(exc, "exit_code", 2)
+        raise Fail("board-sync via the queue failed: %s: %s" % (exc.__class__.__name__, exc),
+                   code=code if isinstance(code, int) else 2)
+    if job is None:
+        log("nothing to land")
+        return 0
+    log("submitted Board snapshot %s as landq job %s (kind metadata); the service publishes "
+        "it once its schema check passes" % (job["submitted_sha"][:12], job["id"]))
+    print(job["submitted_sha"])
+    return 0
 
 
 def cmd_reap(args, log):

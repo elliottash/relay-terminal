@@ -1213,8 +1213,22 @@ USAGE = """relay-land: submit work to a repository's landing queue and read it b
 
 Common options: --repo PATH (default: cwd), --state-root PATH, --repo-id ID, --target BRANCH.
 Output is JSON. Exit 0 success, 1 usage, 2 refused, 3 conflict, 5 gate failure, 7 the
-publisher is busy. Submit succeeds as soon as the job is recorded; `run` is B1's (card #AMQQ).
+publisher is busy. Submit succeeds as soon as the job is recorded. The service verbs
+(run, activate, try, main-status, ...) are in relay_core.integration_service (card #AMQQ).
 """
+
+
+def _drop_option(argv, name):
+    out, skip = [], False
+    for token in argv:
+        if skip:
+            skip = False
+            continue
+        if token == name:
+            skip = True
+            continue
+        out.append(token)
+    return out
 
 
 def _parse_args(argv):
@@ -1224,6 +1238,7 @@ def _parse_args(argv):
     parser.add_argument("--state-root", default=None)
     parser.add_argument("--repo-id", default=None)
     parser.add_argument("--target", default=None)
+    parser.add_argument("--cache-root", default=None)   # the service's; accepted here too
     sub = parser.add_subparsers(dest="verb")
     p = sub.add_parser("submit")
     p.add_argument("sha")
@@ -1245,15 +1260,46 @@ def _parse_args(argv):
     return parser, parser.parse_args(argv)
 
 
+COMMON_OPTIONS = ("--repo", "--state-root", "--repo-id", "--target", "--cache-root")
+
+
+def _leading_verb(argv) -> str | None:
+    """The first positional token, skipping the common `--opt value` pairs."""
+    skip = False
+    for token in argv:
+        if skip:
+            skip = False
+            continue
+        if token in COMMON_OPTIONS:
+            skip = True
+            continue
+        if token.startswith("-"):
+            continue
+        return token
+    return None
+
+
 def main(argv=None, *, out=None) -> int:
     out = out or sys.stdout
     argv = list(sys.argv[1:] if argv is None else argv)
+    verb = _leading_verb(argv)
+    if verb is not None and verb not in ("submit", "status", "cancel", "receipt", "recover",
+                                         "outbox"):
+        # The service verbs (run, activate, try, ...) live in relay_core.integration_service
+        # (card #AMQQ); this module keeps the queue's own.
+        from relay_core import integration_service
+        if verb in integration_service.SERVICE_VERBS:
+            # The service resolves identity and target from the registry itself.
+            return integration_service.main(_drop_option(_drop_option(argv, "--repo-id"),
+                                                         "--target"), out=out)
     try:
         parser, args = _parse_args(argv)
     except SystemExit as exc:
         return 0 if exc.code == 0 else 1
     if not args.verb:
         print(USAGE, file=out)
+        from relay_core import integration_service
+        print(integration_service.USAGE, file=out)
         return 1
 
     def emit(value):
