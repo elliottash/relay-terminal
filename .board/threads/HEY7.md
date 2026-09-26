@@ -213,3 +213,62 @@ Published da36edc478c3 onto main (target was 62885a6c8879). <!-- landq:c297d88aa
 
 <!-- relay:entry 20260926T080323Z-df author=agent kind=progress model=claude-opus-5-5 pane=c30592c5 turn=4c2d2da03628442180f8e51eb861c141/4607f5891c3746cc8948e6814646a975 -->
 Job 7088516c came back because a repair is capped at 24 files and it was measured as 69. The cause: this workspace's recorded base was still 053f4458, and a workspace submission takes its base from the record, so --base-sha is ignored. Fixes: squashed the change into one commit 4418e780 on main da36edc4 (src/Pane.h plus 11 evidence files; the unreferenced screenshots and logs are dropped); synced the workspace (relay-tree sync), so its base is now da36edc4; resubmitted as job 742eba28. On this base: ctest textjournal, windowstate and transcriptreplay pass; 144 pytest pass; the live shell-only and turn-then-11000 runs keep 12,000 of 12,000 lines, with the turn once and in order. Job abbc0671, the same commit with the old base, could not be cancelled while verifying; whichever job lands first carries the commit.
+
+<!-- relay:entry 20260926T081227Z-bq author=reconcile kind=note -->
+Landing job abbc067113277fe4 could not be reconciled automatically: the submission changed 64 files; a repair is bounded to 24. Returned to the author.. Returned to the author agent with the diagnostics. <!-- reconcile:abbc067113277fe4:author_required -->
+
+<!-- relay:entry 20260926T081227Z-y0 author=landq kind=note -->
+Landing job abbc067113277fe4 (4418e7807b8e for card #HEY7) failed the gate.
+Reason: command exited 8: sh -c set -eu
+root="${RELAY_VERIFY_ROOT:-${XDG_CACHE_HOME:-$HOME/.cache}/relay/verify/relay-terminal}"
+mkdir -p "$root/src" "$root/build"
+exec 9>"$root/.lock"; flock 9
+rsync -a --checksum --delete --delete-excluded --exclude=/.git --exclude=/build --exclude='/build-*' ./ "$root/src/"
+[ -f "$root/build/CMakeCache.txt" ] || cmake -S "$root/src" -B "$root/build" -DCMAKE_BUILD_TYPE=Release
+cmake --build "$root/build" --parallel "${RELAY_JOBS:-2}"
+ctest --test-dir "$root/build" --output-on-failure --no-tests=error -j "${RELAY_JOBS:-2}"
+cd "$root/src"
+scripts/test.sh
+; reconcile: the submission changed 64 files; a repair is bounded to 24. Returned to the author.
+Gate log: /home/elliott/.local/state/relay/integration/12c8c9ef12cf3b12/logs/abbc067113277fe4/verify-1-4418e7807b8e.log
+Fix it in your workspace and submit a new commit; the target was not moved. <!-- landq:abbc067113277fe4:failed -->
+
+<!-- relay:entry 20260926T081227Z-y1 author=landq kind=note -->
+Landing job abbc067113277fe4 (4418e7807b8e for card #HEY7) needs its author.
+Landing job abbc067113277fe4 could not be reconciled automatically.
+Target da36edc478c3 and your submission 4418e7807b8e conflict in: (no paths found).
+Reason: the submission changed 64 files; a repair is bounded to 24. Returned to the author.
+Sync your workspace to the current target, resolve these files there, run the project's checks, and submit the new commit. Nothing was changed in your workspace. <!-- landq:abbc067113277fe4:author_required -->
+
+<!-- relay:entry 20260926T082231Z-3m author=reconcile kind=note -->
+Landing job 742eba286b357660 could not be reconciled automatically: docs/qa_evidence/2026-09-26-hey7-mixed/shell-only/03-reopened.png is binary in 4418e7807b8e; a binary conflict is the author's.. Returned to the author agent with the diagnostics. <!-- reconcile:742eba286b357660:author_required -->
+
+<!-- relay:entry 20260926T082231Z-zd author=landq kind=note -->
+Landing job 742eba286b357660 (4418e7807b8e for card #HEY7) failed the gate.
+Reason: command exited 8: sh -c set -eu
+root="${RELAY_VERIFY_ROOT:-${XDG_CACHE_HOME:-$HOME/.cache}/relay/verify/relay-terminal}"
+mkdir -p "$root/src" "$root/build"
+exec 9>"$root/.lock"; flock 9
+rsync -a --checksum --delete --delete-excluded --exclude=/.git --exclude=/build --exclude='/build-*' ./ "$root/src/"
+[ -f "$root/build/CMakeCache.txt" ] || cmake -S "$root/src" -B "$root/build" -DCMAKE_BUILD_TYPE=Release
+cmake --build "$root/build" --parallel "${RELAY_JOBS:-2}"
+ctest --test-dir "$root/build" --output-on-failure --no-tests=error -j "${RELAY_JOBS:-2}"
+cd "$root/src"
+scripts/test.sh
+; reconcile: docs/qa_evidence/2026-09-26-hey7-mixed/shell-only/03-reopened.png is binary in 4418e7807b8e; a binary conflict is the author's.
+Gate log: /home/elliott/.local/state/relay/integration/12c8c9ef12cf3b12/logs/742eba286b357660/verify-1-4418e7807b8e.log
+Fix it in your workspace and submit a new commit; the target was not moved. <!-- landq:742eba286b357660:failed -->
+
+<!-- relay:entry 20260926T082231Z-ze author=landq kind=note -->
+Landing job 742eba286b357660 (4418e7807b8e for card #HEY7) needs its author.
+Landing job 742eba286b357660 could not be reconciled automatically.
+Target da36edc478c3 and your submission 4418e7807b8e conflict in: (no paths found).
+Reason: docs/qa_evidence/2026-09-26-hey7-mixed/shell-only/03-reopened.png is binary in 4418e7807b8e; a binary conflict is the author's.
+Sync your workspace to the current target, resolve these files there, run the project's checks, and submit the new commit. Nothing was changed in your workspace. <!-- landq:742eba286b357660:author_required -->
+
+<!-- relay:entry 20260926T082233Z-gj author=landq kind=note -->
+Landing job b272e47c9b79da56 (2086b8554ca3) landed.
+Published 2086b8554ca3 onto main (target was da36edc478c3). <!-- landq:b272e47c9b79da56:landed -->
+
+<!-- relay:entry 20260926T082412Z-v6 author=agent kind=note model=claude-opus-5-5 pane=c30592c5 turn=4c2d2da03628442180f8e51eb861c141/c17297ab88904dd29e2c65a062477529 -->
+Job 742eba28 (4418e780, base da36edc4) failed the gate itself; the binary-PNG refusal is only the repair that followed. The gate's ctest run had 14 failures: modelspane, settings, keymap, conversations, queuesubmit, consolemode, backends, panestatus, boardworkspace, cardtests, boardfilter, projectinit, calllines, backend-and-bash. None is about the pane restore or journal. They are Helper console, keymap Ctrl+J/Ctrl+Shift+J, queue steering, Board, project init and call lines. In this workspace, 12 of them rebuilt with main's own src/Pane.h (the only code file this commit changes) fail identically, 12 of 12. main da36edc4 is red on the full gate independently of #HEY7. Resubmit once main is green; the commit needs no change.
