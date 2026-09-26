@@ -27,6 +27,26 @@ checkout and all of its files; the queue changes how future work is allocated an
    unstaged changes, ignored build/dependency files, target SHA, hook handling, and the config
    policy hash. A dry run reports blockers and the planned symbolic HEAD move without changing
    mode. A dirty checkout is an item to preserve, not a reason to reset it.
+
+   **Live legacy claims are a readiness gate you check yourself.** `activate` blocks only on a
+   *running* `land.py commit`/`repair` process (`inventory` → `.legacy.processes`). It does not
+   block on sessions that hold claims and uncommitted hunks but are idle between commands
+   (`.legacy.sessions`, sessions active within the last 12 hours). Do not copy a count from
+   an earlier day into the rollout record. Capture the list at cutover time, in the same minute
+   as the dry run:
+
+   ```bash
+   relay-land --repo "$project" inventory | python3 -c \
+     'import json,sys; i=json.load(sys.stdin); print(json.dumps(i["legacy"], indent=1))'
+   python3 /path/to/relay/scripts/land.py who
+   python3 /path/to/relay/scripts/land.py orphans --json
+   ```
+
+   Every live session there must either `land.py commit`, `land.py abandon` (which leaves the
+   working tree alone) or be reaped (`land.py reap --token <t>`) before `activate`. Reaping keeps
+   dirty sessions for rescue. After activation, the legacy `land.py commit` procedure no longer
+   publishes, so a claim left open lands later only through a workspace submission. Its hunks
+   stay in the old checkout's working tree for their author to move.
 3. Stop new legacy publication and let existing `land.py commit`/`repair` and Board sync work
    drain. Stop or restart live agents only at a turn boundary; an already running process is not
    moved into a workspace. Resolve any other worktree still attached to `main` before activation.
@@ -36,6 +56,108 @@ checkout and all of its files; the queue changes how future work is allocated an
    tip*, writes the mode marker, and, if the human checkout was on `main`, creates `human` at
    that same SHA and changes HEAD symbolically. It does not rewrite the checkout files or index.
    Save the returned repo ID, accepted-policy hash, human branch and baseline ref.
+
+## Relay's own prepared configuration
+
+This is the `.relay/project.toml` prepared for `relay-terminal`. It is **not committed and not
+active**: it lands on `main` as step 1 of the real cutover, and `activate` accepts it from the
+target tip. It parses under the shipped `projectconf.normalize_config` (policy hash
+`f1b468a7afbe` on 2026-09-26). Its `main.install` and `main.smoke` were rehearsed against an
+existing `build-fast/`. `cmake --install` took 1.24 s and produced `bin/relay` plus
+`share/relay/{app,backend,remote,rendezvous,scripts,shell,theme}`, 86,294,432 bytes in all.
+`bin/relay --version` printed `relay 0.1.0` offscreen and the installed backend imported. That
+build was `-O0 -g1`, so a Release install will differ in size. The first real gate and main
+build still need measuring on the publication host.
+
+```toml
+version = 1
+
+[project]
+target = "main"
+
+[workspace]
+# Board and evidence stay in the canonical project root, never in author trees.
+exclude = [".board", "docs/qa_evidence"]
+max_workspaces = 24
+init = []
+
+[verification]
+timeout_seconds = 5400
+# The candidate tree's path changes per job, and a CMake build directory is pinned to one
+# source path. So each gate mirrors the candidate into a fixed, service-owned source directory
+# (rsync --checksum keeps the mtimes of unchanged files, so the warm build stays incremental),
+# then configures, builds and tests there. flock serializes this gate with a concurrent
+# `relay-land try`. `--no-tests=error` fails an empty ctest run.
+commands = [
+  ["sh", "-c", """
+set -eu
+root="${RELAY_VERIFY_ROOT:-${XDG_CACHE_HOME:-$HOME/.cache}/relay/verify/relay-terminal}"
+mkdir -p "$root/src" "$root/build"
+exec 9>"$root/.lock"; flock 9
+rsync -a --checksum --delete --exclude=/.git --exclude=/build --exclude='/build-*' ./ "$root/src/"
+[ -f "$root/build/CMakeCache.txt" ] || cmake -S "$root/src" -B "$root/build" -DCMAKE_BUILD_TYPE=Release
+cmake --build "$root/build" --parallel "${RELAY_JOBS:-2}"
+ctest --test-dir "$root/build" --output-on-failure --no-tests=error -j "${RELAY_JOBS:-2}"
+"""],
+  ["sh", "-c", "cd \"${RELAY_VERIFY_ROOT:-${XDG_CACHE_HOME:-$HOME/.cache}/relay/verify/relay-terminal}/src\" && scripts/test.sh"],
+]
+
+[verification.environment]
+QT_QPA_PLATFORM = "offscreen"
+RELAY_KEYRING = "off"
+
+[resources]
+memory_bytes = 17179869184   # 16 GiB: optimized compile at RELAY_JOBS=8 (#04EC: ~2 GiB/job)
+disk_bytes = 21474836480     # 20 GiB: mirrored source + warm build
+cpus = 8
+
+[main]
+build = [
+  ["cmake", "-S", "{source}", "-B", "{build}", "-DCMAKE_BUILD_TYPE=Release"],
+  ["cmake", "--build", "{build}", "--parallel", "--target", "relay"],
+]
+# cmake --install copies bin/relay and every runtime asset under share/relay.
+install = [["cmake", "--install", "{build}", "--prefix", "{dest}"]]
+executable = "bin/relay"
+smoke = [
+  ["sh", "-c", "QT_QPA_PLATFORM=offscreen \"{executable}\" --version"],
+  ["sh", "-c", "test -f \"{dest}/share/relay/backend/worker.py\" && PYTHONPATH=\"{dest}/share/relay/backend\" python3 -c 'import relay_core.board, relay_core.landq'"],
+]
+keep = 3
+timeout_seconds = 7200
+
+[reconcile]
+enabled = false
+max_attempts = 2
+tokens_per_case = 200000
+tokens_per_day = 10000000
+```
+
+Why it looks like this:
+
+- **Source and build are split.** `verification.commands` run with the disposable candidate
+  tree as cwd. The service does not yet export a warm build path such as `VERIFY_BUILD` or
+  `RELAY_BUILD_DIR` into the gate environment. That is why the gate names its own external
+  root (`RELAY_VERIFY_ROOT`, default `~/.cache/relay/verify/relay-terminal`) instead of
+  building inside the candidate. If B1 later exports a service-owned build directory, swap
+  the default for it. Until then this root belongs to the gate: nobody edits or builds there
+  by hand. The shared checkout's `build/` is still built by `scripts/relay-build`, and
+  `land.py try` keeps using its verify slots. There is no `relay-build --build-dir` flag, so
+  none is used here.
+- **`--delete` in the mirror** keeps an ignored or deleted source file from a previous
+  candidate out of the next one's build. A stale ignored Python module otherwise stays
+  importable and can pass a gate it should fail.
+- **Gate breadth is the owner's decision.** As written, every publication runs the full
+  `ctest` and `scripts/test.sh` suites, the same suites this repo tells sessions not to run by
+  hand. That is the safe default for the sole publication path, but it is the slowest. A
+  narrower accepted gate is a policy change: it lands on `main`, then someone runs
+  `capture-policy`.
+- **`reconcile.enabled = false`** until the owner turns it on. Conflicts then return to their
+  authors instead of spending High-tier tokens.
+- **`[main]` builds only the `relay` target** and installs with `cmake --install`. The
+  install rules in `CMakeLists.txt` copy the backend, shell integration, remote, rendezvous,
+  app, themes and helper scripts. The smoke commands prove that the installed binary starts
+  and that the installed backend imports without the source checkout.
 
 ## Keep the publisher running
 
@@ -99,10 +221,38 @@ promise; real projects need a matched workload and a week of measurements after 
    `--keep-head`, rollback only reattaches `main` if HEAD is at the same commit or Git accepts a
    safe fast-forward; otherwise it refuses and leaves the project paused. Resolve that checkout
    yourself, then retry. Never use `git reset --hard` or a broad `git clean` as a rollback step.
-3. Inspect `relay-land --repo "$project" inventory` and `status` again. Preserve any failed or
-   queued submission for its author, and use the legacy `land.py` procedure only after the marker
-   reports `legacy`. Restart old agents at a controlled boundary; do not silently move their
-   live processes or delete workspaces. Workspace removal requires a released lease, a receipt
+3. **`--keep-head` restores the mode, not the checkout.** After it, the marker says `legacy`,
+   but the canonical checkout is usually still on `human`, and that branch is usually *behind*
+   `main`, because the queue kept publishing while the human worked there. The legacy Relay
+   workflow assumes the checkout is on `main` at its tip. `land.py commit` merges against
+   `refs/heads/main` and builds from the working tree. Old sessions started on a `human`
+   checkout would edit, build and test a stale tree. So, before any legacy session resumes:
+
+   ```bash
+   git -C "$project" symbolic-ref -q HEAD || echo detached
+   git -C "$project" rev-parse HEAD main
+   git -C "$project" merge-base --is-ancestor HEAD main && echo "HEAD is behind or at main"
+   git -C "$project" status --short
+   git -C "$project" diff --cached --stat
+   ```
+
+   If `status` is empty and HEAD is an ancestor of `main`, move the checkout onto `main` in one
+   of two ways. You can run `rollback` again without `--keep-head`, which fast-forwards and
+   moves HEAD safely. Or you can run `git -C "$project" switch main`, which refuses to
+   overwrite local changes. If `status` is not empty, keep those files and use no reset. Commit
+   them on `human` and `submit` them *before* rolling back, or save them as a patch outside the
+   repository and re-apply it after `switch main`. `human` commits that are not on `main`
+   (`merge-base --is-ancestor` fails) must be submitted or merged first. Rollback refuses them
+   for the same reason. Check that the index shows no staged entries left over from the other
+   branch (`python3 /path/to/relay/scripts/land.py doctor`).
+4. Inspect `relay-land --repo "$project" inventory` and `status` again. Queued, failed and
+   conflicted jobs, their receipts and their workspace branches are retained. Nothing is
+   cancelled by rollback. Preserve them for their authors: resubmit after a later
+   re-activation, or carry the commit over by hand. Only once the marker reports `legacy`
+   *and* the checkout is on `main` at its tip should anyone use the legacy `land.py`
+   procedure. Do not blindly restart old agents because the marker changed. Restart them
+   one at a time at a turn boundary, after the checkout check above. Do not silently move
+   their live processes or delete workspaces. Workspace removal requires a released lease, a receipt
    matching its current tip, no pending job and no dirty, untracked or ignored files. A clean
    tree with an unlanded commit is still retained.
 
