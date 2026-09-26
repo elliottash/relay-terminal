@@ -2635,6 +2635,13 @@ void Pane::pollShell() {
         // PROMPT_COMMAND runs before Readline puts the tty into noncanonical mode.
         // Recheck on every tick, even when the state file has not changed.
         refreshShellReady();
+        // A restored pane's text waits for its shell to be idle at the first prompt, but the
+        // `ready` event is written by shell/event.py while that very process is still the tty's
+        // foreground group (and before the ready branch below drops auto native mode), so the
+        // replay at the event can find the shell "busy". Retry on every tick until it prints:
+        // otherwise the text stayed hidden until the next prompt, after a typed command (#MDQ8).
+        if (m_promptReported && !m_scrollbackReplayed && !m_restoredScrollback.isEmpty())
+            replayRestoredScrollback();
         if (!m_entries.isEmpty() && !m_activeValid) pumpQueue();
         // The guest channel is polled on the same tick (26.3), before state.json's own checks
         // below can return: a guest event must land even in a tick where the shell did not.

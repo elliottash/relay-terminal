@@ -1145,6 +1145,8 @@ if(BUILD_TESTING)
     set_tests_properties(boardturnsurface PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
     add_test(NAME consolemode COMMAND relay-consolemode-tests)
     add_test(NAME linkedshell COMMAND relay-consolemode-tests --linkedshell-only)   # card #2FQ9
+    add_test(NAME restorereplay COMMAND relay-consolemode-tests --mdq8-only)   # card #MDQ8
+    set_tests_properties(restorereplay PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
     set_tests_properties(consolemode PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
     add_test(NAME queuecontract COMMAND relay-consolemode-tests --xcxd-only)
     set_tests_properties(queuecontract PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
