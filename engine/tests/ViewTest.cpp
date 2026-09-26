@@ -687,6 +687,45 @@ private slots:
         QVERIFY(iface->textInterface()->text(0, 15).startsWith(QStringLiteral("accessible line")));
     }
 
+    void accessibleTextJoinOffsets()
+    {
+        // The join and the row offsets the queries read, tested directly on a
+        // hand-built frame: QAccessible::isActive() is not faked to route this
+        // through the interface (#9MYY).
+        ViewportFrame frame;
+        frame.lines.resize(3);
+        const char *rows[3] = {"abc", "", "wxyz"};
+        for (int r = 0; r < 3; ++r)
+            for (const char *p = rows[r]; *p; ++p) {
+                Cell c;
+                c.ch = char32_t(*p);
+                frame.lines[size_t(r)].cells.push_back(c);
+            }
+        const AccessibleText t = relay::accessibleText(frame);
+        QCOMPARE(t.text, QStringLiteral("abc\n\nwxyz"));
+        QCOMPARE(int(t.lineStart.size()), 3);
+        QCOMPARE(t.lineStart[0], 0);
+        QCOMPARE(t.lineStart[1], 4);
+        QCOMPARE(t.lineStart[2], 5);
+        QCOMPARE(t.rowLength(0), 3);
+        QCOMPARE(t.rowLength(1), 0);
+        QCOMPARE(t.rowLength(2), 4);
+        // An offset on a row's first character names that row, one on the '\n'
+        // that ends a row stays on that row, and one past the end stays on the
+        // last row — the answers characterRect()'s walk gave.
+        QCOMPARE(t.rowOf(0), 0);
+        QCOMPARE(t.rowOf(3), 0);
+        QCOMPARE(t.rowOf(4), 1);
+        QCOMPARE(t.rowOf(5), 2);
+        QCOMPARE(t.rowOf(int(t.text.size())), 2);
+        // An empty frame answers emptily.
+        const AccessibleText none = relay::accessibleText(ViewportFrame{});
+        QCOMPARE(none.text, QString());
+        QVERIFY(none.lineStart.empty());
+        QCOMPARE(none.rowOf(0), 0);
+        QCOMPARE(none.rowLength(0), 0);
+    }
+
     void keyMapper()
     {
         KeyInput k;
@@ -1093,6 +1132,7 @@ private slots:
         t.grab();
         // Every screen row the wrapped line occupies, swept cell by cell. The
         // view's frame follows the screen on its own timer, so poll for it.
+        const int candidates = 6;
         const auto rowContaining = [&t](const QString &token) {
             for (int wait = 0; wait < 400; ++wait) {
                 const QStringList visible = t.view->visibleRowsText();
@@ -1126,10 +1166,12 @@ private slots:
         const int firstSweep = probes - before;
         qInfo("#9MYY %s: sweep over %d cells ran %d probe calls", qPrintable(core), cells, firstSweep);
         QVERIFY2(firstSweep >= 1, "the sweep never scanned the line");
-        // Loose before the fix — every cell re-scans, so the count is cells
-        // times candidates. The fix commit replaces this with the per-frame
-        // ceiling the card promises.
-        QVERIFY2(firstSweep <= 100 * cells, "the sweep probed unreasonably often");
+        // One scan of the logical line per frame, not one per cell: the sweep
+        // crosses candidates-count paths once, with slack for the row lookups
+        // and the setup the frame still owes. (Before #9MYY this was 1232 calls
+        // for 88 cells — see the card's before/after evidence.)
+        QVERIFY2(firstSweep <= 6 * candidates + 12, "the sweep scanned more than once per frame");
+        QVERIFY2(firstSweep >= candidates, "the sweep did not probe every candidate once");
         // New output is a new frame: the next sweep has to scan again.
         t.backend->writeToDisplay("again\r\n");
         QVERIFY(t.waitScreen(QStringLiteral("again")));

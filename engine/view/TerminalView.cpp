@@ -41,6 +41,7 @@
 #include <QTableWidget>
 #include <QToolButton>
 #include <QUrl>
+#include <QVarLengthArray>
 #include <QVBoxLayout>
 #include <QWheelEvent>
 #include <QtMath>
@@ -158,6 +159,45 @@ bool copyOnSelectWorthCopying(const QString &text)
 
 // ---------------------------------------------------------------- accessibility
 
+AccessibleText accessibleText(const ViewportFrame &frame)
+{
+    AccessibleText out;
+    qsizetype total = 0;
+    for (const Line &l : frame.lines)
+        total += l.text().size() + 1;
+    out.text.reserve(total);
+    out.lineStart.reserve(frame.lines.size());
+    for (const Line &l : frame.lines) {
+        out.lineStart.push_back(int(out.text.size()));
+        out.text += l.text();
+        out.text += QLatin1Char('\n');
+    }
+    if (!out.text.isEmpty())
+        out.text.chop(1);   // the join separates rows; it does not end the text
+    return out;
+}
+
+int AccessibleText::rowOf(int offset) const
+{
+    if (lineStart.empty())
+        return 0;
+    // The last row whose start is at or before the offset: an offset on a row's
+    // first character is that row's, one on the '\n' is the row it ends, and
+    // one past the end stays on the last row, as the walk characterRect()
+    // replaced answered (#9MYY).
+    const int row = int(std::upper_bound(lineStart.begin(), lineStart.end(), offset) - lineStart.begin()) - 1;
+    return std::clamp(row, 0, int(lineStart.size()) - 1);
+}
+
+int AccessibleText::rowLength(int row) const
+{
+    if (lineStart.empty())
+        return 0;
+    const int r = std::clamp(row, 0, int(lineStart.size()) - 1);
+    const int next = r + 1 < int(lineStart.size()) ? lineStart[size_t(r + 1)] : int(text.size()) + 1;
+    return next - lineStart[size_t(r)] - 1;   // the '\n' that ends the row is not its text
+}
+
 class TerminalAccessible : public QAccessibleWidget, public QAccessibleTextInterface {
 public:
     explicit TerminalAccessible(TerminalView *view)
@@ -175,7 +215,7 @@ public:
     QString text(QAccessible::Text t) const override
     {
         if (t == QAccessible::Value)
-            return allText();
+            return joined().text;
         return QAccessibleWidget::text(t);
     }
 
@@ -191,35 +231,30 @@ public:
         const ViewportFrame &f = v->m_frame;
         if (!f.cursorInViewport)
             return 0;
-        int offset = 0;
-        for (int r = 0; r < f.cursor.row && r < int(f.lines.size()); ++r)
-            offset += f.lines[size_t(r)].text().size() + 1;
-        return offset + f.cursor.col;
+        const AccessibleText &t = joined();
+        if (f.cursor.row < 0 || f.cursor.row >= int(t.lineStart.size()))
+            return 0;
+        return t.lineStart[size_t(f.cursor.row)] + f.cursor.col;
     }
     void setCursorPosition(int) override {}
-    QString text(int startOffset, int endOffset) const override { return allText().mid(startOffset, endOffset - startOffset); }
-    int characterCount() const override { return allText().size(); }
+    QString text(int startOffset, int endOffset) const override { return joined().text.mid(startOffset, endOffset - startOffset); }
+    int characterCount() const override { return joined().text.size(); }
     QRect characterRect(int offset) const override
     {
         const TerminalView *v = view();
-        const QStringList lines = allText().split(QLatin1Char('\n'));
-        int row = 0;
-        while (row < lines.size() && offset > lines[row].size()) {
-            offset -= lines[row].size() + 1;
-            ++row;
-        }
-        const QRect local = v->cellRect(row, offset);
+        const AccessibleText &t = joined();
+        const int row = t.rowOf(offset);
+        const QRect local = v->cellRect(row, offset - t.lineStart[size_t(row)]);
         return QRect(v->mapToGlobal(local.topLeft()), local.size());
     }
     int offsetAtPoint(const QPoint &point) const override
     {
         const TerminalView *v = view();
         const TerminalView::CellPos c = v->cellAt(v->mapFromGlobal(point));
-        const QStringList lines = allText().split(QLatin1Char('\n'));
-        int offset = 0;
-        for (int r = 0; r < c.row && r < lines.size(); ++r)
-            offset += lines[r].size() + 1;
-        return offset + std::min(c.col, int(lines.value(c.row).size()));
+        const AccessibleText &t = joined();
+        if (c.row < 0 || c.row >= int(t.lineStart.size()))
+            return t.text.size();   // off the grid: the end of the text
+        return t.lineStart[size_t(c.row)] + std::min(c.col, t.rowLength(c.row));
     }
     void scrollToSubstring(int, int) override {}
     QString attributes(int offset, int *startOffset, int *endOffset) const override
@@ -231,13 +266,19 @@ public:
 
 private:
     TerminalView *view() const { return static_cast<TerminalView *>(widget()); }
-    QString allText() const
+    // The join and its row offsets, rebuilt when the view's frame version
+    // moves (#9MYY): every query answered from the one build while the frame
+    // holds, where each rebuilt allText() from scratch.
+    const AccessibleText &joined() const
     {
-        QStringList out;
-        for (const Line &l : view()->m_frame.lines)
-            out << l.text();
-        return out.join(QLatin1Char('\n'));
+        if (m_textVersion != view()->m_frameVersion) {
+            m_text = relay::accessibleText(view()->m_frame);
+            m_textVersion = view()->m_frameVersion;
+        }
+        return m_text;
     }
+    mutable AccessibleText m_text;
+    mutable quint64 m_textVersion = 0;
 };
 
 static QAccessibleInterface *terminalAccessibleFactory(const QString &className, QObject *object)
@@ -616,6 +657,9 @@ void TerminalView::pullFrame()
     m_frameProse.clear();
     m_frameImages.clear();
     m_frameMedia.clear();
+    // The hover's id→URI answers belong to the frame that asked for them, like
+    // m_frameProse (#9MYY).
+    m_hoverUris.clear();
     // Anchors are re-read before the frame, so the rows the fold layer works
     // with belong to the same content the frame will show. The heartbeat only
     // has something to find when content has moved under the anchors since the
@@ -878,6 +922,27 @@ void TerminalView::paintRow(QPainter &p, int row, const Line &line, int realRow)
         return {fg, bg, bgDefault && bg == m_scheme.background};
     };
 
+    // Every cell's colours and highlight flag, answered once for the whole row
+    // paint: the background run loop and the text loop each asked colorsFor per
+    // cell before, so a row cost it twice (#9MYY). colorsFor stays the one
+    // place the rules live; this only caches its answers. The highlight flag
+    // is painted by walking the ranges once instead of walking the list per
+    // column — in list order, so a later highlight still wins a column an
+    // earlier one also covers, exactly as colorsFor's own loop decides it.
+    QVarLengthArray<CellColors, 256> cellColors;
+    QVarLengthArray<char, 256> isHighlighted;
+    cellColors.reserve(cols);
+    isHighlighted.resize(cols);
+    std::fill(isHighlighted.begin(), isHighlighted.end(), 0);
+    for (const Line::Highlight &h : line.highlights) {
+        const int from = std::max(0, int(h.start));
+        const int to = std::min(int(h.end), cols - 1);
+        for (int col = from; col <= to; ++col)
+            isHighlighted[col] = 1;
+    }
+    for (int col = 0; col < cols; ++col)
+        cellColors.append(colorsFor(col));
+
     // Backgrounds, merged into runs.
     int runStart = -1;
     QColor runColor;
@@ -885,7 +950,7 @@ void TerminalView::paintRow(QPainter &p, int row, const Line &line, int realRow)
         QColor bg;
         bool none = true;
         if (col < cols) {
-            const CellColors cc = colorsFor(col);
+            const CellColors &cc = cellColors[col];
             none = cc.bgIsDefault;
             bg = cc.bg;
         }
@@ -922,23 +987,18 @@ void TerminalView::paintRow(QPainter &p, int row, const Line &line, int realRow)
     std::vector<char> restLink;
     if (m_linksAtRest && !m_frame.altScreen && !roleRow)   // a role row's ink is the role's
         restLinkColumns(realRow - m_frame.viewportTop, &restLink);
-    const auto highlighted = [&line](int col) {
-        for (const Line::Highlight &h : line.highlights)
-            if (col >= h.start && col <= h.end) return true;
-        return false;
-    };
     std::u32string cps;
     for (int col = 0; col < cols; ++col) {
         const Cell &c = line.cells[size_t(col)];
         if (c.ch == kWideTail)
             continue;
         const int w = c.width == 2 ? 2 : 1;
-        CellColors cc = colorsFor(col);
+        CellColors cc = cellColors[col];
         // The link colour, on a cell whose ink is plain (plainInk: the default foreground or any
         // achromatic one — the agent's prose is bright white, a tool line is the host's grey) and
         // that nothing else claims: a find match keeps its ink, a chromatic colour a program chose
         // keeps its meaning.
-        if (col < int(restLink.size()) && restLink[size_t(col)] && !(c.attrs & AttrReverse) && !highlighted(col)
+        if (col < int(restLink.size()) && restLink[size_t(col)] && !(c.attrs & AttrReverse) && !isHighlighted[col]
             && (CellColor::kind(c.fg) == CellColor::Default || plainInk(cc.fg)))
             cc.fg = m_scheme.link;
         const int x = m_padding + col * m_cw;
@@ -1023,7 +1083,7 @@ void TerminalView::paintRow(QPainter &p, int row, const Line &line, int realRow)
         const int foldIndex = m_folds.foldAtAnchorStart(realRow);
         if (foldIndex >= 0) {
             const QRect r = cellRect(row, 0, 1);
-            const CellColors cc = colorsFor(0);
+            const CellColors &cc = cellColors[0];
             p.save();
             p.setClipRect(r);
             p.fillRect(r, cc.bgIsDefault ? groundAt(y) : cc.bg);
@@ -2030,6 +2090,11 @@ void TerminalView::setCardLookup(links::CardLookup lookup)
     // The hover is cached per cell and the walk's list is built once: both were scanned without
     // the board, so a pane that has just learnt its cards re-reads them on the next move.
     m_hoverCellRow = m_hoverCellCol = -2;
+    // ... and the per-frame row/scan cache was scanned with the old cards (#9MYY).
+    m_hover.version = 0;
+    m_hover.firstRow = -1;
+    m_hover.mode = -1;
+    m_hover.found.clear();
     endLinkWalk();
 }
 
@@ -2048,6 +2113,11 @@ void TerminalView::linkProbeUpdated()
     m_hoverCellRow = m_hoverCellCol = -2;
     m_restLinks.clear();
     m_frameCwdValid = false;   // the host may have changed what paths resolve against
+    // The per-frame row/scan cache was scanned with the old answers (#9MYY).
+    m_hover.version = 0;
+    m_hover.firstRow = -1;
+    m_hover.mode = -1;
+    m_hover.found.clear();
     m_forceFull = true;
     update();
     if (!m_linkCursor.active())
@@ -2061,31 +2131,69 @@ void TerminalView::linkProbeUpdated()
 // The logical line the cell belongs to: soft-wrapped rows of the viewport joined into one
 // string, with the (row, column) each UTF-16 unit came from.
 namespace {
-struct LogicalRow {
-    QString text;
-    std::vector<std::pair<int, int>> cellOf;
-};
+
+// The index in a logical row's cell map of the (row, column) a screen cell
+// maps to, or -1. The map is built in row-then-column order, so it is searched,
+// not walked (#9MYY).
+int idxOfCell(const TerminalView::LogicalRow &logical, int row, int col)
+{
+    const auto it = std::lower_bound(logical.cellOf.begin(), logical.cellOf.end(),
+                                     std::make_pair(row, col));
+    if (it != logical.cellOf.end() && *it == std::make_pair(row, col))
+        return int(it - logical.cellOf.begin());
+    return -1;
+}
 
 // The logical line frame row `row` belongs to — its soft-wrapped rows joined — and, for each
 // character of it, the (frame row, column) it came from. Long URLs and paths wrap at the edge.
-void logicalRowAt(const ViewportFrame &frame, int row, LogicalRow *out)
+void logicalRowAt(const ViewportFrame &frame, int row, TerminalView::LogicalRow *out)
 {
     int firstRow = row, lastRow = row;
     while (firstRow > 0 && frame.lines[size_t(firstRow)].continuation)
         --firstRow;
     while (lastRow + 1 < int(frame.lines.size()) && frame.lines[size_t(lastRow + 1)].continuation)
         ++lastRow;
+    // Size both once and reuse one scratch buffer: this used to grow the text
+    // and the cell map per cell and build a throw-away QString per cell, which
+    // is what made every hovered cell rebuild the whole wrapped line (#9MYY).
+    size_t cells = 0;
+    for (int r = firstRow; r <= lastRow; ++r)
+        cells += frame.lines[size_t(r)].cells.size();
+    out->text.clear();
+    out->text.reserve(int(cells));
+    out->cellOf.clear();
+    out->cellOf.reserve(cells);
+    out->firstRow = firstRow;
+    std::u32string cps;
+    const Cell blank;
     for (int r = firstRow; r <= lastRow; ++r) {
         const Line &rowLine = frame.lines[size_t(r)];
         const int n = r < lastRow ? frame.columns : int(rowLine.cells.size());
         for (int i = 0; i < n; ++i) {
-            const Cell cell = i < int(rowLine.cells.size()) ? rowLine.cells[size_t(i)] : Cell();
+            const Cell &cell = i < int(rowLine.cells.size()) ? rowLine.cells[size_t(i)] : blank;
             if (cell.ch == kWideTail)
                 continue;
-            const QString text = rowLine.cellText(cell);
-            for (int k = 0; k < text.size(); ++k)
+            cps.clear();
+            if (rowLine.cellCodepoints(cell, &cps) == 0) {
+                // A blank cell prints one space, as Line::cellText answers.
+                out->text += QChar(u' ');
                 out->cellOf.push_back({r, i});
-            out->text += text;
+                continue;
+            }
+            for (const char32_t ch : cps) {
+                // Line::cellText hands the codepoints to QString::fromUcs4,
+                // which encodes an astral codepoint as a surrogate pair; keep
+                // one cell-map entry per UTF-16 unit either way.
+                if (ch >= 0x10000) {
+                    out->text += QChar(char16_t(0xD800 + ((ch - 0x10000) >> 10)));
+                    out->cellOf.push_back({r, i});
+                    out->text += QChar(char16_t(0xDC00 + ((ch - 0x10000) & 0x3FF)));
+                    out->cellOf.push_back({r, i});
+                } else {
+                    out->text += QChar(char16_t(ch));
+                    out->cellOf.push_back({r, i});
+                }
+            }
         }
     }
 }
@@ -2112,7 +2220,9 @@ bool TerminalView::resolveLabelLink(const QString &uri, Link *link)
         link->url = true;
         return true;
     }
-    for (const links::Found &found : links::scan(raw, currentDirectory(), QDir::homePath(),
+    // The hover asks here, so the pane's directory is the one the frame was
+    // pulled with — resolved once per frame, not once per probe (#9MYY).
+    for (const links::Found &found : links::scan(raw, frameDirectory(), QDir::homePath(),
                                                  m_linkProbe ? m_linkProbe : links::systemProbe(),
                                                  m_cardLookup, links::Mode::Prose)) {
         // The whole target, not a word inside it: `[x](notes about src/a.c)` is not a link.
@@ -2129,6 +2239,28 @@ bool TerminalView::resolveLabelLink(const QString &uri, Link *link)
         return true;
     }
     return false;
+}
+
+// The OSC 8 URI behind a cell of the current frame, by the link id the frame's
+// cell carries. Both cores intern one id per distinct URI when a frame is built
+// and never hand one id two different URIs inside a frame — LibVtermCore keeps
+// an append-only id table and documents that ids are never reused; GhosttyCore
+// interns per frame pull — so the answer is memoised per frame next to
+// m_frameProse. linkAt() hovers used to call hyperlinkAt() per probe, which
+// converts the whole row to answer one cell's URI (#9MYY).
+QString TerminalView::frameHyperlinkUri(uint32_t id, int frameRow, int col)
+{
+    if (!id)
+        return QString();
+    for (const auto &known : m_hoverUris)
+        if (known.first == id)
+            return known.second;
+    const QString uri = m_session->withCore([&](VtCore &core) {
+        CoreRow at(core, frameRow);
+        return core.hyperlinkUri(id, at.row, col);
+    });
+    m_hoverUris.push_back({id, uri});
+    return uri;
 }
 
 bool TerminalView::linkAt(const CellPos &c, Link *link, int *startCol, int *endCol, QVector<QRect> *segments)
@@ -2187,7 +2319,7 @@ bool TerminalView::linkAt(const CellPos &c, Link *link, int *startCol, int *endC
             col += cells[size_t(i)].width;
         }
         if (hit < 0) return false;
-        for (const auto &found : links::scan(text, currentDirectory(), QDir::homePath(),
+        for (const auto &found : links::scan(text, frameDirectory(), QDir::homePath(),
                                             m_linkProbe ? m_linkProbe : links::systemProbe(),
                                             m_cardLookup, links::Mode::Prose)) {
             const int begin = found.candidate.start;
@@ -2227,13 +2359,17 @@ bool TerminalView::linkAt(const CellPos &c, Link *link, int *startCol, int *endC
         return false;
     const Line &l = m_frame.lines[size_t(row)];
 
-    // An OSC 8 hyperlink: the program itself said what the text points at.
-    // A prose anchor (#R2WQ) is not a link — it only names the block the view
+    // An OSC 8 hyperlink: the program itself said what the text points at. A
+    // prose anchor (#R2WQ) is not a link — it only names the block the view
     // re-wraps — so the row reads as ordinary text and the scan below still
     // finds the paths and URLs inside it. A prose URI that carries a `#l=`
     // fragment is the exception: that is a markdown link's label, and the
     // fragment is what it opens (#MDKN).
-    const QString uri = m_session->withCore([&](VtCore &core) { CoreRow at(core, m_frame.viewportTop + row); return core.hyperlinkAt(at.row, c.col); });
+    // A cell without a link id cannot be a hyperlink, so the core is not asked:
+    // hyperlinkAt() would convert the whole row to answer empty (#9MYY).
+    QString uri;
+    if (c.col < int(l.cells.size()) && l.cells[size_t(c.col)].link)
+        uri = frameHyperlinkUri(l.cells[size_t(c.col)].link, m_frame.viewportTop + row, c.col);
     // An image row's cell (#1MGS) is a picture, never a URL to open: imageAt() answers for it.
     if (uri.startsWith(QLatin1String(inlineimage::kImagePrefix)))
         return false;
@@ -2306,16 +2442,23 @@ bool TerminalView::linkAt(const CellPos &c, Link *link, int *startCol, int *endC
     }
 
     // Plain text, joined across the soft-wrapped rows of the viewport (long URLs and
-    // paths wrap at the terminal edge).
-    LogicalRow logical;
-    logicalRowAt(m_frame, row, &logical);
-    int idx = -1;
-    for (int i = 0; i < int(logical.cellOf.size()); ++i) {
-        if (logical.cellOf[size_t(i)].first == row && logical.cellOf[size_t(i)].second == c.col) {
-            idx = i;
-            break;
-        }
+    // paths wrap at the terminal edge). The logical line and its scan are one
+    // entry per frame, keyed on the line's first row: sweeping the pointer along
+    // a link lands on the same logical line from every screen row it spans, and
+    // every cell used to rebuild and re-scan the whole line (#9MYY).
+    int firstRow = row;
+    while (firstRow > 0 && m_frame.lines[size_t(firstRow)].continuation)
+        --firstRow;
+    if (m_hover.version != m_frameVersion || m_hover.firstRow != firstRow) {
+        logicalRowAt(m_frame, row, &m_hover.logical);
+        m_hover.version = m_frameVersion;
+        m_hover.firstRow = m_hover.logical.firstRow;
+        m_hover.mode = -1;
+        m_hover.found.clear();
+        m_hover.idxOfCell.clear();
     }
+    const LogicalRow &logical = m_hover.logical;
+    const int idx = idxOfCell(logical, row, c.col);
     if (idx < 0 || idx >= logical.text.size())
         return false;
     // The row under the pointer is Relay-printed prose when its cells carry the block's
@@ -2323,13 +2466,36 @@ bool TerminalView::linkAt(const CellPos &c, Link *link, int *startCol, int *endC
     // hyperlink returned above). Prose scans in Prose mode (#SFZC): a bare folder word is
     // plain text there, a folder links only with its slash.
     const links::Mode mode = FoldLayer::isProseUri(uri) ? links::Mode::Prose : links::Mode::Program;
-    for (const links::Found &found : links::scan(logical.text, currentDirectory(), QDir::homePath(),
-                                                 m_linkProbe ? m_linkProbe : links::systemProbe(), m_cardLookup,
-                                                 mode)) {
+    // The mode, not the answer, keys the scan: a line without a single link is
+    // still a scanned line, and re-running it for every pointer cell is what
+    // this cache exists to stop (#9MYY).
+    if (m_hover.mode != int(mode)) {
+        m_hover.found = links::scan(logical.text, frameDirectory(), QDir::homePath(),
+                                    m_linkProbe ? m_linkProbe : links::systemProbe(), m_cardLookup,
+                                    mode);
+        m_hover.mode = int(mode);
+        // Which scan answer covers each UTF-16 unit of the line, so the pointer
+        // lookup is a table read instead of a walk (#9MYY). The first answer
+        // covering a unit wins, as the per-cell walk did.
+        m_hover.idxOfCell.assign(size_t(logical.cellOf.size()), -1);
+        for (int f = 0; f < m_hover.found.size(); ++f) {
+            const int s = m_hover.found[f].candidate.start;
+            const int e = std::min<int>(s + m_hover.found[f].candidate.length,
+                                        int(m_hover.idxOfCell.size()));
+            for (int u = s; u < e; ++u)
+                if (m_hover.idxOfCell[size_t(u)] < 0)
+                    m_hover.idxOfCell[size_t(u)] = f;
+        }
+    }
+    const int hit = idx < int(m_hover.idxOfCell.size()) ? m_hover.idxOfCell[size_t(idx)] : -1;
+    if (hit < 0)
+        return false;
+    {
+        const links::Found &found = m_hover.found[hit];
         const int s = found.candidate.start;
         const int e = s + found.candidate.length - 1;
-        if (idx < s || idx > e || e >= int(logical.cellOf.size()))
-            continue;
+        if (e >= int(logical.cellOf.size()))
+            return false;
         link->target = found.target.target;
         link->text = found.candidate.text;
         link->card = found.target.kind == links::Kind::Card ? found.candidate.path : QString();
@@ -2339,6 +2505,8 @@ bool TerminalView::linkAt(const CellPos &c, Link *link, int *startCol, int *endC
         link->line = found.target.line;
         link->column = found.target.column;
         if (segments) {
+            // Recomputed every call: the pointer's cell decides how a wrapped
+            // line is cut into screen rectangles (#9MYY).
             segments->clear();
             for (int i = s; i <= e; ++i) {
                 const auto cell = logical.cellOf[size_t(i)];
@@ -2359,7 +2527,6 @@ bool TerminalView::linkAt(const CellPos &c, Link *link, int *startCol, int *endC
         *endCol = logical.cellOf[size_t(e)].first == row ? logical.cellOf[size_t(e)].second : m_frame.columns - 1;
         return true;
     }
-    return false;
 }
 
 void TerminalView::setLinksColouredAtRest(bool on)

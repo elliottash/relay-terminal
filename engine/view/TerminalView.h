@@ -131,6 +131,15 @@ public:
     // A link the view found: an OSC 8 hyperlink, a URL, a file or folder that exists, or a
     // `#K7Q2` reference to a Board card the host's board knows.
     // The recognition and resolution rules live in src/OutputLinks.* and are tested there.
+    // A wrapped screen row as one logical line: the text, for every UTF-16 unit
+    // of it the screen cell the unit was printed in, and the first screen row of
+    // the wrap (#9MYY). logicalRowAt() fills it; the file-local helpers in
+    // TerminalView.cpp work on it, so it is public.
+    struct LogicalRow {
+        QString text;
+        std::vector<std::pair<int, int>> cellOf;
+        int firstRow = -1;
+    };
     struct Link {
         QString target;         // an absolute path, the URL as written, or relay://card/<id>
         QString text;           // the output text it was found as
@@ -378,6 +387,13 @@ private:
     void afterUserInput();
     void updateHover(const QPoint &pos, Qt::KeyboardModifiers mods);
     bool linkAt(const CellPos &c, Link *link, int *startCol, int *endCol, QVector<QRect> *segments = nullptr);
+    // The OSC 8 URI behind a frame cell, by the link id the frame's cell
+    // carries. Both cores intern one id per distinct URI when a frame is built
+    // and never hand one id two URIs inside a frame (LibVtermCore's table is
+    // append-only; GhosttyCore interns per pull), so the answer is memoised per
+    // frame next to m_frameProse — hyperlinkAt() converts the whole row for
+    // every hover probe otherwise (#9MYY).
+    QString frameHyperlinkUri(uint32_t id, int frameRow, int col);
     bool linkHovered(int row, int col) const;
     // A markdown link's label (card #MDKN): its OSC 8 URI is the block's anchor with the target
     // the agent wrote as a fragment, and the target is resolved here through relay::links exactly
@@ -588,6 +604,22 @@ private:
     // derived from the frame alone — the hover caches, the accessible text —
     // keys its one entry on this instead of diffing the screen.
     quint64 m_frameVersion = 0;
+    // The hover's one-entry per-frame cache (#9MYY): the logical line the
+    // pointer last crossed and its link scan. Sweeping the pointer along a link
+    // used to rebuild the wrapped line and re-run links::scan for every cell;
+    // now it is one build and one scan per frame. Dropped on a frame version
+    // change and when the link probe or the card lookup changes.
+    struct {
+        quint64 version = 0;                     // the frame the entry was built for
+        int firstRow = -1;                       // the logical line's first screen row
+        int mode = -1;                           // links::Mode the scan ran in
+        LogicalRow logical;
+        std::vector<int> idxOfCell;              // per UTF-16 unit: which Found covers it, -1 if none
+        QVector<links::Found> found;             // the scan's answers for that line
+    } m_hover;
+    // The frame's link ids answered once, cleared with the frame (see
+    // frameHyperlinkUri).
+    std::vector<std::pair<uint32_t, QString>> m_hoverUris;
     std::vector<std::pair<uint32_t, bool>> m_frameProse;
     // Inline images (#1MGS): which link ids of this frame are image rows (thrown away with the
     // frame, like m_frameProse), the parsed URIs across frames, and the decoded pictures.
@@ -650,5 +682,20 @@ private:
     QLineEdit *m_searchEdit = nullptr;
     QLabel *m_searchLabel = nullptr;
 };
+
+// The viewport as one accessibility text (#9MYY): every row's text joined with
+// '\n', and for each row the offset of its first character in that join. The
+// screen-reader queries answered this per call before — a full join for
+// text()/characterCount(), then a split of it for characterRect() and
+// offsetAtPoint() — and now read this one table instead. A free function over
+// the frame so the join and the offsets are testable directly, without faking
+// QAccessible::isActive() to get at them through the interface.
+struct AccessibleText {
+    QString text;                // the rows joined with '\n'
+    std::vector<int> lineStart;  // per row: the offset of the row's first character
+    int rowOf(int offset) const;    // binary search: the row an offset falls in
+    int rowLength(int row) const;   // the characters of a row in text
+};
+AccessibleText accessibleText(const ViewportFrame &frame);
 
 } // namespace relay
