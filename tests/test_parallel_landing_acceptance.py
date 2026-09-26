@@ -1715,7 +1715,7 @@ class LiveGui(AcceptanceCase):
         subprocess.run(["xdotool", "windowfocus", "--sync", window[0]], env=env, timeout=30)
         subprocess.run(["xdotool", "key", keys], env=env, timeout=30)
 
-    def test_each_pane_shell_starts_in_its_own_lease_and_leases_end_with_their_panes(self):
+    def test_each_pane_has_its_own_lease_its_shell_stays_in_the_checkout_and_leases_end(self):
         self.launch("--fresh")
         first = self.wait_for(lambda: list(self.pane_leases()), timeout=60, what="first pane")
         one = first[0]
@@ -1725,9 +1725,11 @@ class LiveGui(AcceptanceCase):
                             timeout=60, what="second pane")[0]
         self.wait_for(lambda: self.shell_cwd(two), timeout=60, what="second shell")
         leases = self.pane_leases()
+        # The lease is the agent's; the user's shell stays in the real checkout, where the
+        # Board is (owner, 2026-09-26: a shell moved into a tree is not a terminal).
         for token in (one, two):
-            self.assertEqual(Path(leases[token]["path"]).resolve(), self.shell_cwd(token),
-                             "pane %s's shell is not in its own workspace" % token[:8])
+            self.assertEqual(self.p.repo.resolve(), self.shell_cwd(token),
+                             "pane %s's shell left the checkout" % token[:8])
         self.assertNotEqual(leases[one]["path"], leases[two]["path"])
         # Closing the second pane ends its lease; quitting ends the first one's.
         self.key("ctrl+w")
@@ -1759,7 +1761,7 @@ class LiveGui(AcceptanceCase):
         self.wait_for(lambda: self.pane_leases()[token]["status"] == "active", timeout=60,
                       what="the restored pane to reacquire its tree")
         self.wait_for(lambda: self.shell_cwd(token), timeout=60, what="restored shell")
-        self.assertEqual(tree.resolve(), self.shell_cwd(token))
+        self.assertEqual(self.p.repo.resolve(), self.shell_cwd(token))
         self.assertEqual(lease["path"], self.pane_leases()[token]["path"])
         self.assertEqual(tip, git(tree, "rev-parse", "HEAD"))
         self.assertEqual("dirty, uncommitted\n", (tree / "scratch.txt").read_text())

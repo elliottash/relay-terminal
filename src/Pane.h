@@ -918,11 +918,11 @@ public:
     void publishGuestSlashCatalog(const QString &guest) {
         if (guest != QStringLiteral("claude") && guest != QStringLiteral("codex")) return;
         auto *scan = new QProcess(this);
-        scan->setWorkingDirectory(m_cwd);
+        scan->setWorkingDirectory(executionCwd());
         scan->setProcessEnvironment(guestHelperEnvironment());
         scan->setProgram(m_python);
         scan->setArguments({QStringLiteral("-X"), QStringLiteral("utf8"), QStringLiteral("-m"), QStringLiteral("relay_core.guest_slash"),
-                            QStringLiteral("--emit"), guest, QStringLiteral("--cwd"), m_cwd});
+                            QStringLiteral("--emit"), guest, QStringLiteral("--cwd"), executionCwd()});
         connect(scan, qOverload<int, QProcess::ExitStatus>(&QProcess::finished), this,
                 [this, scan, guest](int code, QProcess::ExitStatus exit) {
                     if (exit != QProcess::NormalExit || code != 0)
@@ -1041,6 +1041,15 @@ public:
     std::function<void()> onHeaderClose;
 
     QString cwd() const { return m_cwd; }
+    // Where this pane's agent works: its leased workspace tree in a queue-mode project, else the
+    // shell's cwd. The interactive shell never moves there; only the agent side does.
+    QString executionCwd() const {
+        if (m_treeStatus.value(QStringLiteral("state")).toString() == QStringLiteral("active")) {
+            const QString tree = m_treeStatus.value(QStringLiteral("execution_cwd")).toString();
+            if (!tree.isEmpty()) return tree;
+        }
+        return m_cwd;
+    }
     QString sessionToken() const { return m_token; }
     QString workspace() const { return m_workspace; }
     QJsonObject treeStatus() const { return m_treeStatus; }
@@ -3411,11 +3420,11 @@ private:
         stopGuestTail();
         if (guest != QStringLiteral("codex") || m_runtime.path().isEmpty()) return;
         m_guestTail = new QProcess(this);
-        m_guestTail->setWorkingDirectory(m_cwd);
+        m_guestTail->setWorkingDirectory(executionCwd());
         m_guestTail->setProcessEnvironment(guestHelperEnvironment());
         m_guestTail->setProgram(m_python);
         m_guestTail->setArguments({QStringLiteral("-X"), QStringLiteral("utf8"), QStringLiteral("-m"), QStringLiteral("relay_core.guest_codex"),
-                                   QStringLiteral("tail"), QStringLiteral("--cwd"), m_cwd});
+                                   QStringLiteral("tail"), QStringLiteral("--cwd"), executionCwd()});
         m_guestTail->setStandardOutputFile(QProcess::nullDevice());
         m_guestTail->setStandardErrorFile(QProcess::nullDevice());
         connect(m_guestTail, &QProcess::errorOccurred, this, [this](QProcess::ProcessError) {
@@ -11294,7 +11303,7 @@ private:
             environment.remove(QStringLiteral("DBUS_SESSION_BUS_ADDRESS"));
         m_worker.setProcessEnvironment(environment);
         m_worker.setWorkingDirectory(m_treeStatus.value(QStringLiteral("state")).toString()
-            == QStringLiteral("active") ? m_cwd : QString());
+            == QStringLiteral("active") ? executionCwd() : QString());
         relay::log::info(QStringLiteral("worker_start pane=%1 workspace_set=%2")
                              .arg(paneLogId()).arg(m_workspace.isEmpty() ? 0 : 1));
         m_agentUnit.clear();
@@ -17833,7 +17842,6 @@ private:
     QJsonObject m_treeStatus;
     QProcess *m_workspacePrepare = nullptr;
     bool m_workspaceReady = false;
-    bool m_hadActiveWorkspace = false;
     // Cross-pane messaging (#R5TC, protocol 37): this pane's address, its wake budget, and the
     // state the reverse gate reads.
     int m_paneHandle = 0;
