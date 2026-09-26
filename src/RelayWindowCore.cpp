@@ -1334,7 +1334,8 @@ QWidget *RelayWindow::buildNodeWidget(const QJsonObject &node) {
                     QWidget *page = w->pageOf(guard);
                     if (page && w->tabProject(page).isEmpty())
                         w->attachTab(page, workspace, QString::fromLatin1(relay::projects::kReasonRestored));
-                    w->waitForBoardCard(guard, id, 0);
+                    if (page) page->setProperty("relayDeferBoardAgent", true);
+                    guard->board()->pinSolo(id);
                 });
                 return tool;
             }
