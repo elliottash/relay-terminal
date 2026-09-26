@@ -1,5 +1,12 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
-"""Poll a project's durable publication outbox from an author worker."""
+"""Poll a project's durable publication outbox from an author worker.
+
+Delivery is at least once. A handoff row stays pending in the service until the author's turn
+that read it has *finished* (a child's: finished and its thread saved) — never on enqueue, since
+the turn queue and a child's inbox live in memory. A worker that dies before then leaves the row
+pending and the next worker wakes it again; the stable key `land-handoff:<id>` keeps a live
+worker from queuing it twice.
+"""
 from __future__ import annotations
 
 import threading
@@ -13,7 +20,9 @@ class AuthorHandoffs:
         self._identity = {}
         self._stop = threading.Event()
         self._thread = None
-        self._seen = set()
+        #: handoff id -> ("main"|"child", request key): woken, not yet acknowledged. In memory on
+        #: purpose: after a worker restart it is empty and the still-pending row wakes again.
+        self._inflight = {}
         self._pending_reasons = {}
         self._event_id = 0
 
@@ -22,7 +31,7 @@ class AuthorHandoffs:
         self._identity = dict(identity) if identity.get("state") == "active" else {}
         if self._identity:
             self._identity["session"] = session
-        self._seen.clear()
+        self._inflight.clear()
         self._pending_reasons.clear()
         self._event_id = 0
         if not self._identity:
@@ -66,27 +75,43 @@ class AuthorHandoffs:
                 self.emit({"event": "main_moved", **{k: v for k, v in event.items() if k != "kind"}})
         session = self._identity.get("session")
         workspace_id = self._identity["workspace_id"]
+        rows = service.handoffs(pending_only=True)
+        for handoff_id in set(self._inflight) - {row["id"] for row in rows}:
+            self._forget(handoff_id)          # acknowledged elsewhere
         # A child submission carries its own session, so fetch all outstanding rows and address
         # only this pane's workspace or a child actually held by this manager.
-        for row in service.handoffs(pending_only=True):
+        for row in rows:
             handoff_id = row["id"]
-            if handoff_id in self._seen:
-                service.ack_handoff(handoff_id)
-                self._seen.discard(handoff_id)
-                continue
+            key = f"land-handoff:{handoff_id}"
             target = row.get("workspace_id")
+            if handoff_id in self._inflight:
+                state = self._state(handoff_id)
+                if state in ("queued", "running", "sent"):
+                    continue                  # delivered once already; its turn has not ended
+                if state in ("done", "removed"):
+                    # The turn that read it finished (or the person dismissed it from the
+                    # strip). Only now is it acknowledged; a failed ACK leaves the entry here
+                    # and the next poll retries the ACK alone, never the wake.
+                    service.ack_handoff(handoff_id)
+                    self._forget(handoff_id)
+                    self.emit({"event": "handoff_delivered", "handoff_id": handoff_id,
+                               "job_id": row.get("job_id"), "workspace_id": target})
+                    continue
+                self._forget(handoff_id)      # error, cancelled, gone, failed: wake it again
             text = row.get("text") or ""
             try:
                 if target == workspace_id and row.get("session") == session:
-                    if not self.turns.queue_handoff(text, f"land-handoff:{handoff_id}"):
-                        reason = "author turn is stopped, paused, or not configured"
-                        delivered = False
-                    else:
+                    if self.turns.queue_handoff(text, key):
+                        self._inflight[handoff_id] = ("main", key)
                         delivered, reason = True, ""
+                    else:
+                        delivered, reason = False, "author turn is stopped, paused, or not configured"
                 elif target and target != workspace_id:
-                    delivered = self.subagents.deliver_workspace_handoff(target, text)
+                    delivered = self.subagents.deliver_workspace_handoff(target, text, key)
                     if delivered is None:
                         continue
+                    if delivered:
+                        self._inflight[handoff_id] = ("child", key)
                     reason = "child author is unavailable or stopped" if not delivered else ""
                 else:
                     continue
@@ -105,11 +130,16 @@ class AuthorHandoffs:
                 self.emit({"event": "handoff_pending", "handoff_id": handoff_id,
                            "job_id": row.get("job_id"), "reason": reason})
                 continue
-            # Mark this process before the durable acknowledgement so a transient database
-            # failure cannot enqueue the same message twice on the next poll.
-            self._seen.add(handoff_id)
-            service.ack_handoff(handoff_id)
-            self._seen.discard(handoff_id)
             self._pending_reasons.pop(handoff_id, None)
-            self.emit({"event": "handoff_delivered", "handoff_id": handoff_id,
+            self.emit({"event": "handoff_queued", "handoff_id": handoff_id,
                        "job_id": row.get("job_id"), "workspace_id": target})
+
+    def _state(self, handoff_id) -> str | None:
+        where, key = self._inflight[handoff_id]
+        if where == "main":
+            return self.turns.handoff_state(key)
+        return self.subagents.workspace_handoff_state(key)
+
+    def _forget(self, handoff_id) -> None:
+        where, key = self._inflight.pop(handoff_id)
+        (self.turns.forget_handoff if where == "main" else self.subagents.forget_workspace_handoff)(key)

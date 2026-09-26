@@ -9414,6 +9414,20 @@ session is `<parent workspace>:child:<agent id>`, so a restored child resumes on
 Removal is explicit (`relay-tree remove`). Every subcommand prints one JSON line; any failure
 is `{state: "refused", recoverable, reason}` with exit 2, never a traceback.
 
+A queue-mode worker polls its project's publication service (`integration_handoffs.py`) and
+emits `queue_status` and `main_moved`. Each pending handoff addressed to this pane's workspace
+and session, or to a child it holds, is queued as a Relay turn with request id
+`land-handoff:<id>` (or sent to the child) and reported `handoff_queued {handoff_id, job_id,
+workspace_id}`. Delivery is at least once. The service row is acknowledged only after that turn ends
+`done`, or after the child's run that read it finishes and saves its thread. The worker then emits
+`handoff_delivered`. A row queued only in memory is never acknowledged. After a worker crash or
+restart it is still pending and is woken again. The stable key keeps a live worker from queuing it
+twice. A failed ACK is retried without a second wake. A turn that ends `error` or `cancelled`, a
+child run that is stopped or fails, or a queue cleared by a reconfigure is woken again. Removing
+the queued row from the strip is taken as dismissal and acknowledges it. A Stop, paused queue or
+stopped child refuses the wake. The row stays pending with `handoff_pending {handoff_id, job_id,
+reason}`, and the reason is also written to the service's event log.
+
 `python -m relay_core.workspace_context queue-status --project ROOT` prints
 `queue_status`: `repo_id`, `jobs` with `id`, `card`, `workspace_id`, `status`,
 `reason`, `age_seconds`, `candidate_sha`, `published_sha`, and an optional

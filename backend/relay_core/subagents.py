@@ -461,6 +461,9 @@ class Subagent:
     last_activity: str = "queued"
     last_progress: float = 0.0
     inbox: list = field(default_factory=list)
+    #: Publication handoffs sent to this child (protocol 37): key -> [labelled text, state], state
+    #: `sent` until the run that read it ends, then that run's outcome.
+    handoffs: dict = field(default_factory=dict)
     subscribed: bool = False
     stop_requested: bool = False
     pause_requested: bool = False      # agent_pause: end the run held, resumable (#ZQNG)
@@ -1111,6 +1114,7 @@ class SubagentManager:
         sub.finished = self.clock()
         sub.last_activity = outcome
         self._save_thread(sub)
+        self._settle_handoffs_locked(sub, outcome)
         self._report_usage(sub)
         if sub.generation == self._generation and outcome != "paused":
             # not a subagent of a conversation that was replaced. A paused run is held, not
@@ -1190,13 +1194,17 @@ class SubagentManager:
                 if handoff != "wake":
                     break
 
+    @staticmethod
+    def _labelled(agent_id, text, origin: str) -> str:
+        who = "the user" if origin == "user" else "Relay's publication queue" if origin == "relay" else "the main agent"
+        return f"[Message from {who} to subagent {agent_id}]\n{text}"
+
     def send_message(self, agent_id, text, *, origin: str) -> dict:
         if not isinstance(agent_id, str):
             raise ValueError("id must be a subagent id.")
         if not isinstance(text, str) or not text.strip() or len(text.encode("utf-8")) > MAX_TASK_BYTES:
             raise ValueError(f"text must be 1-{MAX_TASK_BYTES} bytes.")
-        who = "the user" if origin == "user" else "Relay's publication queue" if origin == "relay" else "the main agent"
-        labelled = f"[Message from {who} to subagent {agent_id}]\n{text}"
+        labelled = self._labelled(agent_id, text, origin)
         with self._lock:
             sub = self._agents.get(agent_id)
             if sub is None:
@@ -1220,8 +1228,12 @@ class SubagentManager:
             self._start_thread(sub, labelled)
             return {"id": agent_id, "delivered": "resumed", "status": "running", "background": True}
 
-    def deliver_workspace_handoff(self, workspace_id: str, text: str) -> bool | None:
-        """Wake this child's author; None means the workspace belongs elsewhere."""
+    def deliver_workspace_handoff(self, workspace_id: str, text: str, key: str | None = None) -> bool | None:
+        """Wake this child's author; None means the workspace belongs elsewhere.
+
+        With `key`, the delivery is tracked (`workspace_handoff_state`) and idempotent: a key
+        already sent and not yet ended is not sent again.
+        """
         with self._lock:
             matches = [s for s in self._agents.values()
                        if (getattr(getattr(s.agent, "executor", None), "workspace_identity", {}) or {}).get(
@@ -1230,9 +1242,45 @@ class SubagentManager:
                 return None
             if len(matches) != 1 or self._closed or matches[0].status in ("stopped", "paused", "cancelled"):
                 return False
-            agent_id = matches[0].id
-        self.send_message(agent_id, text, origin="relay")
+            sub = matches[0]
+            if key is not None and sub.handoffs.get(key, [None, None])[1] in ("sent", "done"):
+                return True
+            labelled = self._labelled(sub.id, text, "relay")
+            if key is not None:
+                sub.handoffs[key] = [labelled, "sent"]
+            try:
+                self.send_message(sub.id, text, origin="relay")
+            except ValueError:
+                sub.handoffs.pop(key, None)
+                raise
         return True
+
+    def workspace_handoff_state(self, key: str) -> str | None:
+        """`sent` while the child has not finished the run that reads it, then `done`, or
+        `failed` (stopped, paused, failed: send it again); None if this manager never sent it."""
+        with self._lock:
+            for sub in self._agents.values():
+                if key in sub.handoffs:
+                    return sub.handoffs[key][1]
+        return None
+
+    def forget_workspace_handoff(self, key: str) -> None:
+        with self._lock:
+            for sub in self._agents.values():
+                sub.handoffs.pop(key, None)
+
+    def _settle_handoffs_locked(self, sub: Subagent, outcome: str) -> None:
+        """After the thread is saved: a run that finished read its handoffs; any other end
+        takes an unread one back out of the inbox so a redelivery is not doubled."""
+        for entry in sub.handoffs.values():
+            if entry[1] != "sent":
+                continue
+            if outcome in ("done", "limit", "blocked") and entry[0] not in sub.inbox:
+                entry[1] = "done"
+            else:
+                if entry[0] in sub.inbox:
+                    sub.inbox.remove(entry[0])
+                entry[1] = "failed"
 
     def pause(self, target) -> list[str]:
         """``agent_pause`` (id or "all"): hold live subagents (#ZQNG).

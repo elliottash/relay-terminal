@@ -133,6 +133,11 @@ class TurnSupervisor:
         # Steering prompts waiting for the running turn's next step boundary.
         self._steer: list[dict] = []
         self._steer_inflight: list[dict] = []
+        #: Publication handoffs (protocol 37): request id -> queue item id, and how each such item
+        #: ended. A handoff is acknowledged to the service only once its turn has finished, so a
+        #: worker that dies with it still queued leaves it pending and it is delivered again.
+        self._handoffs: dict[str, str] = {}
+        self._handoff_ends: dict[str, str] = {}
         self._thread = threading.Thread(target=self._dispatch, name="relay-turns", daemon=True)
         self._thread.start()
 
@@ -158,12 +163,42 @@ class TurnSupervisor:
             return self._agent is not None and not self._closed and not self._paused and not self._user_stopped
 
     def queue_handoff(self, prompt: str, request_id: str) -> bool:
-        """Queue a publisher note only if this queue can currently run it."""
+        """Queue a publisher note only if this queue can currently run it.
+
+        Idempotent by `request_id`: a handoff already queued or running is not queued twice. The
+        Stop check and the submit happen under one lock, so a Stop cannot slip between them.
+        """
         with self._lock:
             if self._agent is None or self._closed or self._paused or self._user_stopped:
                 return False
-            self.submit(prompt, "queue", request_id, origin="relay")
+            if self.handoff_state(request_id) in ("queued", "running", "done"):
+                return True
+            self._handoff_ends.pop(self._handoffs.get(request_id, ""), None)
+            self._handoffs[request_id] = self.submit(prompt, "queue", request_id, origin="relay")
             return True
+
+    def handoff_state(self, request_id: str) -> str | None:
+        """How a `queue_handoff` item stands: queued, running, done, error, cancelled, removed
+        (by the person, from the strip) or gone (cleared by a reconfigure); None if never queued."""
+        with self._lock:
+            item_id = self._handoffs.get(request_id)
+            if item_id is None:
+                return None
+            if item_id == self._running:
+                return "running"
+            if any(i["id"] == item_id for i in self._queue):
+                return "queued"
+            return self._handoff_ends.get(item_id, "gone")
+
+    def forget_handoff(self, request_id: str) -> None:
+        with self._lock:
+            self._handoff_ends.pop(self._handoffs.pop(request_id, ""), None)
+
+    def _end_handoffs_locked(self, items, how: str) -> None:
+        wanted = set(self._handoffs.values())
+        for item in items:
+            if item["id"] in wanted:
+                self._handoff_ends[item["id"]] = how
 
     @property
     def agent(self):
@@ -625,6 +660,7 @@ class TurnSupervisor:
                 if item["id"] == item_id:
                     self._queue.remove(item)
                     self._ledger_cancel([item], "Removed from the queue by the user.")
+                    self._end_handoffs_locked([item], "removed")
                     break
             else:
                 raise ValueError("That prompt is not queued (it may already have started).")
@@ -659,6 +695,7 @@ class TurnSupervisor:
         """queue_clear (and before a session load): waiting prompts are cancelled by the user."""
         with self._lock:
             self._ledger_cancel(list(self._queue) + list(self._steer), "Cleared from the queue by the user.")
+            self._end_handoffs_locked(self._queue, "removed")
             self._clear_locked()
             if self._steer_inflight:
                 self._emit({"event": "status", "text": "Steering already sent to the guest is awaiting "
@@ -798,6 +835,7 @@ class TurnSupervisor:
                 if self._stop_reason:
                     finished["stop_reason"] = self._stop_reason
                 self._emit(finished)
+                self._end_handoffs_locked([item], outcome)
                 if self._steer or self._steer_inflight:
                     self._return_steer_locked()
                 self._running = None
