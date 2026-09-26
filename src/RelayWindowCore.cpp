@@ -290,8 +290,16 @@ void RelayWindow::runActionNow(const QString &id, Pane *target) {
         // program instead of starting a shell. splitToward carries the plugin id in the pane's
         // spec, and the pane does the rest: the ask, the argv in its pty, the header chip, the
         // shell it falls back to when the kernel cannot start.
-        else if (id == QStringLiteral("pane.newPythonConsole")) splitToward(relay::panes::Direction::Right, false, QStringLiteral("relay.python"));
-        else if (id == QStringLiteral("pane.newStataConsole")) splitToward(relay::panes::Direction::Right, false, QStringLiteral("relay.stata"));
+        else if (id == QStringLiteral("pane.newPythonConsole")) {
+            splitToward(relay::panes::Direction::Right, false, QStringLiteral("relay.python"));
+            hintNewPaneChooser();
+        }
+        else if (id == QStringLiteral("pane.newStataConsole")) {
+            splitToward(relay::panes::Direction::Right, false, QStringLiteral("relay.stata"));
+            hintNewPaneChooser();
+        }
+        // Ctrl+Alt+E: the palette, opened on the "New pane" list (#83YV).
+        else if (id == QStringLiteral("pane.newChooser")) openNewPaneChooser();
         // The split that stays on this machine when the focused pane is on a host (#XQ8F).
         else if (id == QStringLiteral("pane.splitLocal")) splitToward(relay::panes::Direction::Right, true);
         // The pane chrome's one ⊞ button (#803C): a pane on the right at once, and no arrow window —

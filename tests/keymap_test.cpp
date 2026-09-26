@@ -156,6 +156,18 @@ private slots:
         QVERIFY(keymap.conflicts().isEmpty());
     }
 
+    // Ctrl+Alt+E opens the "New pane" chooser in every preset (#83YV), and nothing else holds it.
+    void newPaneChooserOwnsCtrlAltE() {
+        Keymap &keymap = Keymap::instance();
+        keymap.clearOverrides();
+        for (const auto &preset : Keymap::presets()) {
+            keymap.setPreset(preset.first);
+            QCOMPARE(keymap.actionForKey(QStringLiteral("Ctrl+Alt+E")), QStringLiteral("pane.newChooser"));
+            QVERIFY(keymap.conflicts().isEmpty());
+        }
+        keymap.setPreset(QStringLiteral("relay"));
+    }
+
     void backgroundRunOwnsCtrlAltEnterAcrossPresets() {
         Keymap &keymap = Keymap::instance();
         keymap.clearOverrides();

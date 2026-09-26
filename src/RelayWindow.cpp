@@ -435,6 +435,7 @@ QList<RelayWindow::PaletteItem> RelayWindow::rootItems() {
                             QStringLiteral("IPython on the workspace kernel, shared with the agent"), QStringLiteral("pane.newPythonConsole"));
         items << actionItem(panes, QStringLiteral("New Stata console"),
                             QStringLiteral("Stata in a terminal pane, when installed"), QStringLiteral("pane.newStataConsole"));
+        items << newPaneMenu();   // what Ctrl+Alt+E opens on, reachable from the root too
         {
             const auto planned = std::pair{QStringLiteral("New card"), QStringLiteral("#Y2BA")};
             PaletteItem item;

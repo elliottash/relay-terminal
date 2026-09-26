@@ -256,10 +256,13 @@ private:
         // end-of-input for a running program. Ctrl+Shift+E is the twin that programs cannot swallow.
         // One key is now the whole of "new pane": it makes one on the right, and Left, Up or Down
         // within two seconds re-docks it there instead (issue #78BN). The other three directions
-        // keep actions of their own so they can be bound or run from the palette, but the separate
-        // "new pane below" key (Ctrl+Alt+E) is dropped.
+        // keep actions of their own so they can be bound or run from the palette. The old
+        // "new pane below" key, Ctrl+Alt+E, is now the chooser: a new pane of any kind — shell,
+        // Python console, Stata console — picked in the palette (owner, 2026-09-26, #83YV).
         add("pane.splitRight", "pane", "New shell to the right (then ← ↑ ↓ places it)",
             {QStringLiteral("Ctrl+E"), QStringLiteral("Ctrl+Shift+E")});
+        add("pane.newChooser", "pane", "New pane of any kind: shell, Python console, Stata console…",
+            {QStringLiteral("Ctrl+Alt+E")});
         add("pane.splitDown", "pane", "New shell below", {});
         add("pane.splitLeft", "pane", "New shell to the left", {});
         add("pane.splitUp", "pane", "New shell above", {});

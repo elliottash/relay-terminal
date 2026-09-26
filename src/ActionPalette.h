@@ -59,6 +59,10 @@ public:
     ~ActionPalette() override;
 
     void open();
+    // Open straight into `item`'s children, as if it had been chosen from the root: the "New
+    // pane" chooser of Ctrl+Alt+E (#83YV). Esc or Backspace in the empty box closes the palette
+    // rather than climbing to a root the person never saw.
+    void openSubmenu(const ActionItem &item);
     void close();
     void toggle();
     bool isOpen() const;
@@ -151,6 +155,7 @@ private:
     std::optional<QList<ActionItem>> m_flat;   // m_items with children flattened, read on first need
     QList<Row> m_rows;
     std::optional<ActionItem> m_submenu;    // the item whose children are listed, if any
+    bool m_submenuOnly = false;             // opened by openSubmenu: leaving the submenu closes
     QPointer<QWidget> m_returnFocus;
     int m_lastButton = 0;
     bool m_inResults = false;

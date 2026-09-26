@@ -357,6 +357,31 @@ private slots:
         QCOMPARE(m_ran.size(), 2);
     }
 
+    // Ctrl+Alt+E's "New pane" chooser (#83YV): the palette opens on a submenu the person never
+    // entered, so typing filters it, Enter runs a child, and Esc closes instead of climbing.
+    void openSubmenuStartsInsideItAndEscCloses()
+    {
+        const ActionItem models = catalog().at(5);
+        m_palette->openSubmenu(models);
+        QVERIFY(m_palette->isOpen());
+        QCOMPARE(rowsOf(m_palette->list()), (QStringList{QStringLiteral("# Model"), QStringLiteral("glm-5.3"), QStringLiteral("opus")}));
+        QTest::keyClick(m_palette->searchBox(), Qt::Key_Escape);
+        QVERIFY(!m_palette->isOpen());
+        m_palette->openSubmenu(models);
+        QTest::keyClick(m_palette->searchBox(), Qt::Key_Backspace);   // empty box: closes too
+        QVERIFY(!m_palette->isOpen());
+        m_palette->openSubmenu(models);
+        QTest::keyClicks(m_palette->searchBox(), QStringLiteral("opus"));
+        QTest::keyClick(m_palette->searchBox(), Qt::Key_Return);
+        QCOMPARE(m_ran, QStringList{QStringLiteral("agent.model.opus")});
+        QVERIFY(!m_palette->isOpen());
+        m_palette->open();   // an ordinary open afterwards still climbs out of a submenu
+        QTest::keyClicks(m_palette->searchBox(), QStringLiteral("model"));
+        QTest::keyClick(m_palette->searchBox(), Qt::Key_Return);
+        QTest::keyClick(m_palette->searchBox(), Qt::Key_Escape);
+        QVERIFY(m_palette->isOpen());
+    }
+
     void aSubmenuListsItsChildren()
     {
         m_palette->open();

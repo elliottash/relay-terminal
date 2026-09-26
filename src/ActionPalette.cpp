@@ -396,6 +396,7 @@ void ActionPalette::open()
     m_items = m_catalog ? m_catalog() : QList<ActionItem>();
     m_flat.reset();
     m_submenu.reset();
+    m_submenuOnly = false;
     m_conversations.clear();
     m_cards.clear();
     m_searchTimer->stop();
@@ -864,9 +865,20 @@ void ActionPalette::enterSubmenu(const ActionItem &item)
     m_search->setFocus(Qt::OtherFocusReason);
 }
 
+void ActionPalette::openSubmenu(const ActionItem &item)
+{
+    open();
+    enterSubmenu(item);
+    m_submenuOnly = true;
+}
+
 bool ActionPalette::leaveSubmenu()
 {
     if (!m_submenu) return false;
+    if (m_submenuOnly) {
+        close();
+        return true;
+    }
     m_submenu.reset();
     const QSignalBlocker block(m_search);
     m_search->clear();

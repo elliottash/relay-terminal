@@ -2084,7 +2084,7 @@ private:
         owner->searchPaletteConversations(query, openSessionIds());
     }
 
-    void togglePalette() {
+    relay::ActionPalette *palette() {
         if (!m_palette)
             m_palette = new relay::ActionPalette(this, [this] { return searchableActions(); },
                                                  [this] { return paletteForThisPane(); },
@@ -2093,11 +2093,56 @@ private:
         m_palette->setConversationSearch([this](const QString &query) { searchPaletteConversations(query); });
         m_palette->setEditShortcut([this](const QString &key) { editShortcutOf(key); });
         QList<QKeySequence> chords;
-        for (const QString &id : {QStringLiteral("palette.open"), QStringLiteral("help.shortcuts")})
+        for (const QString &id : {QStringLiteral("palette.open"), QStringLiteral("help.shortcuts"),
+                                  QStringLiteral("pane.newChooser")})
             for (const QString &keys : Keymap::instance().keysFor(id))
                 chords << QKeySequence::fromString(keys, QKeySequence::PortableText);
         m_palette->setToggleKeys(chords);
-        m_palette->toggle();
+        return m_palette;
+    }
+
+    void togglePalette() { palette()->toggle(); }
+
+    // Ctrl+Alt+E (owner, 2026-09-26, #83YV): "new pane but you choose what it is". The palette
+    // opens on this list, so typing filters it ("py", Enter) and Esc closes it. Each row runs the
+    // same action as its palette entry and pane-menu item; a remote pane adds the local shell.
+    PaletteItem newPaneMenu() {
+        return submenu(QStringLiteral("menu:newpane"), QStringLiteral("Panes and tabs"), QStringLiteral("New pane…"),
+                       QStringLiteral("Shell, Python console, Stata console, file"), [this] {
+            const QString section = QStringLiteral("New pane");
+            const auto row = [this, &section](const QString &label, const QString &detail, const QString &action) {
+                PaletteItem item = actionItem(section, label, detail, action);
+                item.run = [this, action] {
+                    m_newFromChooser = true;
+                    runAction(action);
+                    m_newFromChooser = false;
+                };
+                return item;
+            };
+            QList<PaletteItem> items;
+            items << row(QStringLiteral("Shell"), QStringLiteral("On this pane's host when it is on one · then ← ↑ ↓ places it"),
+                         QStringLiteral("pane.splitRight"));
+            items << row(QStringLiteral("Python console"), QStringLiteral("IPython on the workspace kernel, shared with the agent"),
+                         QStringLiteral("pane.newPythonConsole"));
+            items << row(QStringLiteral("Stata console"), QStringLiteral("Stata in a terminal pane, when installed"),
+                         QStringLiteral("pane.newStataConsole"));
+            if (m_active && !m_active->remoteCommandLine().isEmpty())
+                items << row(QStringLiteral("Local shell"), QStringLiteral("On this machine, not the host"),
+                             QStringLiteral("pane.splitLocal"));
+            items << row(QStringLiteral("File…"), QStringLiteral("Preview a file in a pane"), QStringLiteral("files.open"));
+            return items;
+        });
+    }
+
+    void openNewPaneChooser() { palette()->openSubmenu(newPaneMenu()); }
+
+    // A console pane made the slow way (its palette row, the pane menu) teaches the chooser key;
+    // a pane made from the chooser does not.
+    void hintNewPaneChooser() {
+        if (m_newFromChooser) return;
+        const QString keys = Keymap::instance().shortcutText(QStringLiteral("pane.newChooser"));
+        if (!keys.isEmpty())
+            hint(QStringLiteral("pane.newChooser"), relay::ShortcutHints::nextTime(keys, QStringLiteral("any new pane")));
     }
 
     // "Change shortcut…" on a palette row (#MAGP): a small dialog that takes the new keys. Press a
@@ -8826,6 +8871,7 @@ private:
     QTabWidget *m_tabs = nullptr;
     QPointer<Pane> m_returnPane;        // where focus was when the Settings pane opened
     QPointer<relay::ActionPalette> m_palette;   // Ctrl+?, made on first use (#MAGP)
+    bool m_newFromChooser = false;              // a Ctrl+Alt+E row is running its action (#83YV)
     QPointer<QWidget> m_returnFocus;
     // True while toggleBoardPane is closing the Switchboard with its own key, so closePane does
     // not hint that key to the person who has just used it.
