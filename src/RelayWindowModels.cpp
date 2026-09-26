@@ -256,6 +256,8 @@ relay::SettingsSection RelayWindow::modelsSection(bool inModelsPane) {
                 notice(QStringLiteral("Asking every subscription for its usage…"));
             });
         bool firstProvider = true;
+        std::function<void(int)> addClaudeAccount;
+        std::function<void(int)> addCodexAccount;
         for (const QJsonObject &preset : std::as_const(listed)) {
             const QString id = str(preset, "id");
             const QString label = str(preset, "label").toLower();
@@ -305,6 +307,8 @@ relay::SettingsSection RelayWindow::modelsSection(bool inModelsPane) {
             row.kind = relay::SettingRow::Buttons;
             row.id = QStringLiteral("provider:") + id;
             row.label = label;
+            if (guest && str(preset, "account").isEmpty() && !str(preset, "email").isEmpty())
+                row.label += QStringLiteral(" (") + str(preset, "email") + QLatin1Char(')');
             row.detail = status;
             if (stableStatus != status) row.agentDetail = stableStatus;
             row.aliases = QStringLiteral("provider key api keyring login ") + id + QLatin1Char(' ') + str(preset, "provider").toLower();
@@ -353,7 +357,7 @@ relay::SettingsSection RelayWindow::modelsSection(bool inModelsPane) {
                 const QString login = !str(preset, "login_command").isEmpty() ? str(preset, "login_command")
                     : cli == QStringLiteral("claude") ? QStringLiteral("claude auth login") : cli + QStringLiteral(" login");
                 row.buttonTexts = account.isEmpty()
-                    ? QStringList{QStringLiteral("change login"), QStringLiteral("test"), QStringLiteral("add account…")}
+                    ? QStringList{QStringLiteral("change login"), QStringLiteral("test")}
                     : QStringList{QStringLiteral("sign in"), QStringLiteral("test"), QStringLiteral("remove")};
                 if (!account.isEmpty()) {
                     row.aliases += QStringLiteral(" account subscription ") + account + QLatin1Char(' ') + str(preset, "config_dir");
@@ -442,6 +446,10 @@ relay::SettingsSection RelayWindow::modelsSection(bool inModelsPane) {
                                  {"key", cli + QLatin1Char(':') + account}});
                     }
                 };
+                if (account.isEmpty()) {
+                    if (cli == QStringLiteral("claude")) addClaudeAccount = row.onButton;
+                    else if (cli == QStringLiteral("codex")) addCodexAccount = row.onButton;
+                }
             } else if (preset.value(QStringLiteral("custom")).toBool()) {
                 // A custom endpoint (§28.6): edit reopens the form, delete removes it and its key.
                 row.buttonTexts = QStringList{QStringLiteral("edit…"), QStringLiteral("test"), QStringLiteral("delete")};
@@ -919,6 +927,20 @@ relay::SettingsSection RelayWindow::modelsSection(bool inModelsPane) {
                 }
                 arranged << row;
             }
+            if (i == 0 && (addClaudeAccount || addCodexAccount))
+                arranged << buttonRow(QStringLiteral("models.addGuestAccount"), QStringLiteral("add account"),
+                    QStringLiteral("add a separate Claude Code or Codex subscription login"),
+                    QStringLiteral("add account…"), [this, addClaudeAccount, addCodexAccount] {
+                        QStringList choices;
+                        if (addClaudeAccount) choices << QStringLiteral("Claude Code");
+                        if (addCodexAccount) choices << QStringLiteral("Codex");
+                        bool ok = false;
+                        const QString choice = QInputDialog::getItem(this, QStringLiteral("Add account"),
+                            QStringLiteral("Which subscription?"), choices, 0, false, &ok);
+                        if (!ok) return;
+                        if (choice == QStringLiteral("Claude Code")) addClaudeAccount(2);
+                        else if (choice == QStringLiteral("Codex")) addCodexAccount(2);
+                    });
         }
         arranged << afterGroups;
         if (inModelsPane) arranged << original.mid(profilesAt, defaultsAt - profilesAt);
