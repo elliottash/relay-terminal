@@ -1404,7 +1404,7 @@ private:
             const int mine = m_current >= 0 && m_current < m_segments.size() ? segmentHint(m_current) : 0;
             const int others = m_segments.size() - (mine ? 1 : 0);
             const int share = others > 0
-                ? std::max(24, (room - textX() - mine - (m_segments.size() - 1) * sepWidth()) / others)
+                ? std::max(24, (room - textX() - mine - (int(m_segments.size()) - 1) * sepWidth()) / others)
                 : room;
             return i == m_current ? mine : std::min(segmentHint(i), share);
         }

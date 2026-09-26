@@ -1468,7 +1468,7 @@ private:
             const int profilesAt = [&sources] {
                 for (int i = 0; i < sources.rows.size(); ++i)
                     if (sources.rows.at(i).id == QStringLiteral("heading:profiles")) return i;
-                return sources.rows.size();
+                return int(sources.rows.size());
             }();
             const QList<relay::SettingRow> profiles = sources.rows.mid(profilesAt);
             sources.rows = sources.rows.mid(0, profilesAt);

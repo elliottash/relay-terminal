@@ -2841,7 +2841,7 @@ TerminalView::MediaInfo TerminalView::mediaInfo(const QString &manifest)
             if (kind == QStringLiteral("table") && info.valid)   // header + the rows a preview can show
                 info.head = readDelimited(info.path, info.delimiter, 1 + kTablePreviewRows, 1 << 20);
             const QJsonArray wave = obj.value(QStringLiteral("waveform")).toArray();
-            for (int i = 0; i < std::min(128, wave.size()); ++i)
+            for (int i = 0; i < std::min(128, int(wave.size())); ++i)
                 info.waveform.append(std::clamp<qreal>(wave.at(i).toDouble(), 0, 1));
         }
     }
@@ -3286,12 +3286,12 @@ void TerminalView::openTable(const MediaInfo &info)
     dialog->resize(850, 520);
     auto *layout = new QVBoxLayout(dialog);
     auto *table = new QTableWidget(dialog);
-    const int columns = std::min(100, rows.first().size());
+    const int columns = std::min(100, int(rows.first().size()));
     table->setColumnCount(columns);
     table->setHorizontalHeaderLabels(rows.first().mid(0, columns));
     table->setRowCount(rows.size() - 1);
     for (int r = 1; r < rows.size(); ++r)
-        for (int c = 0; c < std::min(columns, rows.at(r).size()); ++c)
+        for (int c = 0; c < std::min(columns, int(rows.at(r).size())); ++c)
             table->setItem(r - 1, c, new SortableTableItem(rows.at(r).at(c)));
     table->setSortingEnabled(true);
     layout->addWidget(table);

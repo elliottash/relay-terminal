@@ -145,7 +145,7 @@ bool isShellPrompt(const QString &line) { return shellPrompt(line.trimmed()); }
 
 bool rowHoldsPrompt(const QString &row, int cursorX)
 {
-    const int x = std::clamp(cursorX, 0, row.size());
+    const int x = std::clamp(cursorX, 0, int(row.size()));
     const QString typed = row.left(x);
     if (!isShellPrompt(typed)) return false;
     const QString rest = row.mid(x).trimmed();
