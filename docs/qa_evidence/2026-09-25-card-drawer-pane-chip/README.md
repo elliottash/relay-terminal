@@ -3,6 +3,7 @@
 **Card:** #6BY7 *Card drawer in a terminal pane: the header chip toggles the card inline
 (read-only plus Done)* — wave-2 slice of #P2W8.
 **Date:** 2026-09-25 · **Session:** pane `c26b448b` (land session `8531c4b7`), kimi/k3.
+**Landed revision:** `f7dff8f41e91` (its verify gate reported *the exact tree builds*).
 
 ## What the change is
 
@@ -53,13 +54,15 @@ only the seven hunks above, and no `PaneJournal.h` include.
   `theCardDrawerRendersTheHelperAnswerAndRefreshesOnChange`,
   `theCardDrawerDoneSendsBoardMoveAndShowsRefusals`,
   `aPromptOnAWorkedCardWritesNothingToTheBoard`. None appears in the ctest `FAIL` list.
-- Two other, pre-existing cases fail in that tree at the same tip (`edited != path`,
-  `line != 2`, `context.seen != …` in the open-path case; two tool-call-summary `text.contains`
-  assertions). They are **not** from this change: the same hunks passed them on tip
-  `f8359d9557be`, and they fail only after tip moved to `5858d5c1` (#9MYY *view hot paths:
-  hover linkAt cache, paintRow colours once*), whose paths this change does not touch; both
-  cases run before the four new ones. The suite already carries an open machine signal,
-  `ctest:consolemode` (card #VZ8C).
+- One other, pre-existing case fails in that tree at the tip of the run whose log is attached
+  (`edited != path`, `line != 2`, `context.seen != …` — the open-path case at
+  `consolemode_test.cpp:726/727/739`). It is **not** this change's: the same hunks passed it
+  on tip `f8359d9557be`, it breaks only after tip moved to `5858d5c1` (#9MYY *view hot paths:
+  hover linkAt cache, paintRow colours once* — paths this change does not touch), and it runs
+  before the four new cases. The set of unrelated failures moves with the tip: on `5858d5c1`
+  two tool-call-summary `text.contains` assertions also failed, and both pass again on
+  `ec9412a0`. That is itself the evidence that they follow `main`, not this commit. The suite
+  already carries an open machine signal, `ctest:consolemode` (card #VZ8C).
 
 ## What the verifier can check (Done means)
 
