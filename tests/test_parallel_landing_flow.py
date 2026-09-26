@@ -121,7 +121,7 @@ class ParallelLandingFlow(unittest.TestCase):
         shutil.copytree(source / "backend", installed / "backend",
                         ignore=shutil.ignore_patterns("__pycache__", "*.pyc"))
         (installed / "scripts").mkdir()
-        for name in ("relay-tree", "relay-land"):
+        for name in ("relay-tree", "relay-land", "relay-board.py"):
             shutil.copy2(source / "scripts" / name, installed / "scripts" / name)
             env = {k: v for k, v in os.environ.items()
                    if not k.startswith(("PYTHON", "GIT_"))}
