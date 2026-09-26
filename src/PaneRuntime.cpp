@@ -1653,7 +1653,7 @@ void Pane::refreshPickers() {
         const QSignalBlocker modelBlock(m_modelBox);
         if (m_modeChip) {
             m_modeChip->setText(m_modeValue == QStringLiteral("program") ? QStringLiteral("PROGRAM · %1").arg(foregroundProgramName())
-                                : m_modeValue == QStringLiteral("shell") ? QStringLiteral("terminal")
+                                : m_modeValue == QStringLiteral("shell") ? shellModeLabel()
                                 : m_modeValue == QStringLiteral("agent") ? QStringLiteral("agent")
                                                                          : QStringLiteral("auto"));
             m_modeChip->setToolTip(QStringLiteral("Where this line goes (%1 cycles). %2")

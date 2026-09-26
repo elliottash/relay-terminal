@@ -4681,6 +4681,12 @@ public:
         return host.isEmpty() ? QStringLiteral("Shell") : QStringLiteral("Shell · %1").arg(host);
     }
 
+    // What the mode chip calls the pty side of the pane: "shell", or the console's own name
+    // ("python" for relay.python), so a console pane's picker reads "agent" vs "python".
+    QString shellModeLabel() const {
+        return m_consolePluginRequest.isEmpty() ? QStringLiteral("shell") : consoleName(m_consolePluginRequest).toLower();
+    }
+
     // The plugin this pane was made a console of (#83YV), empty for a shell pane. A saved layout
     // replays it as `console_plugin` in the pane spec, and the new pane asks for its console
     // program again rather than coming back as a plain shell.
@@ -17110,7 +17116,7 @@ struct PendingPrompt { QString text, why, program; bool fix = false, handoff = f
             const QString previous = m_preProgramMode.isEmpty() ? QStringLiteral("auto") : m_preProgramMode;
             setMode(previous);
             toast(QStringLiteral("Input: %1 · program exited").arg(previous == QStringLiteral("shell")
-                      ? QStringLiteral("Terminal") : previous == QStringLiteral("agent")
+                      ? consoleName(shellModeLabel()) : previous == QStringLiteral("agent")
                       ? QStringLiteral("Agent") : QStringLiteral("Auto")));
         }
         if (!m_programBar) return;

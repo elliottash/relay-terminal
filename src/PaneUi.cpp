@@ -158,15 +158,16 @@ void Pane::buildUi() {
         m_modeChip->setPopupMode(QToolButton::InstantPopup);
         {
             auto *menu = new QMenu(m_modeChip);
-            for (const auto &pair : {std::pair<const char *, const char *>{"auto", "auto"},
-                                     {"shell", "terminal"}, {"agent", "agent"}}) {
-                const QString value = QString::fromLatin1(pair.first);
-                menu->addAction(QString::fromLatin1(pair.second), this, [this, value] { setMode(value); focusInput(); });
+            QAction *shellMode = nullptr;
+            for (const QString &value : {QStringLiteral("auto"), QStringLiteral("shell"), QStringLiteral("agent")}) {
+                auto *action = menu->addAction(value, this, [this, value] { setMode(value); focusInput(); });
+                if (value == QStringLiteral("shell")) shellMode = action;
             }
             auto *programMode = menu->addAction(QStringLiteral("program"), this, [this] {
                 setMode(QStringLiteral("program")); focusInput();
             });
-            connect(menu, &QMenu::aboutToShow, this, [this, programMode] {
+            connect(menu, &QMenu::aboutToShow, this, [this, programMode, shellMode] {
+                shellMode->setText(shellModeLabel());   // "shell", or the console's name ("python")
                 programMode->setEnabled(!m_native && !m_altScreen && processBusy());
             });
             m_modeChip->setMenu(menu);
