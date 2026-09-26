@@ -120,9 +120,9 @@ A QA reopen is not a status: the card returns to Ready with label `reopened` and
 
 ## 4. UI
 
-### 4.0 The three object tabs (#9FX8, 2026-09-25)
+### 4.0 The object tabs (#9FX8, 2026-09-25; Live since #C52H)
 
-The pane opens on a segmented row — **Cards | Skills | Memories** (`kPageDefs`, `BoardView::applyPage`). These are
+The pane opens on a segmented row — **Cards | Skills | Memories | Live | Background** (`kPageDefs`, `BoardView::applyPage`). These are
 *objects*, not the category tabs 4.6 removed (owner, 2026-09-18): the Cards page is the list of 4.2 untouched with
 `board.yaml`'s categories inside it, so that decision stands; the row sits above it because the person is choosing
 what to look *at*, not filtering what they see. **Cards** is the default and the tab the pane opens on. **Skills**
@@ -134,18 +134,24 @@ first (#EA37: `reviewed` older than the newest commit touching `paths`, computed
 then Active and Suggestions, Retired and Rejected folded; a memory opens on the ordinary card page (a memory is a
 card: `#ID` addresses it, no `memory:` prefix). A card opened from Skills or Memories goes solo and Esc returns to
 the tab it left; a pinned card pane (#Y2BA) carries no row at all. The choice persists per board in the pane's
-navigation state. A fourth object (Artifacts, #EA37) is one entry in `kPageDefs` — no redesign.
+navigation state. Another object (Artifacts, #EA37) is one entry in `kPageDefs` — no redesign.
 
-**The Live strip** (#TBRH, `PROJECT-BOARD-DESIGN.md` §6, #EA37 decision 3). Panes get no tab. Under the tab row, on
-the Cards tab only, one row answers "who is working on this project right now": a chip per open terminal pane whose
-tab is attached to this project or whose workspace is it (`⧉` + its token's first eight, its model, ✦ while a turn
-runs), followed by the open cards whose `session` is that pane's token (`board::Model::claimedBy`, the reverse the
-row chips already draw). The pane chip reveals the pane (`onFocusPane`); a card chip opens the card. It is computed,
-never stored: `BoardView::syncLiveStrip` asks the window's `livePanes` callback (the same walk `feedProjects` does for
-the Projects page) at the end of every rebuild, and again every 2 s while the pane is visible, because panes open,
-close and start turns without any board event. It writes no card field and sends no protocol message. It is hidden
-when no pane is attached, on Skills and Memories, while the sections editor is open, and on a pinned card pane. The
-Projects page keeps attach, reveal and filter.
+**The Live page** (#TBRH as a strip over the list; its own tab since #C52H, 2026-09-25;
+`PROJECT-BOARD-DESIGN.md` §6, #EA37 decision 3). One tab answers "who is working on this project right now", one
+row per open terminal pane whose tab is attached to this project or whose workspace is it: the pane chip (`⧉` + its
+token's first eight, its model, ✦ while a turn runs), the pane's title, then the open cards whose `session` is that
+pane's token (`board::Model::claimedBy`, the reverse the card rows already draw). The pane chip reveals the pane
+(`onFocusPane`); a card chip opens the card solo, and middle-click docks it (#HKY4). It is computed, never stored:
+`BoardView::syncLivePage` asks the window's `livePanes` callback (the same walk `feedProjects` does for the
+Projects page) at the end of every rebuild, and again every 2 s while the pane is visible, because panes open,
+close and start turns without any board event. It writes no card field and sends no protocol message. With no pane
+attached the tab says so in one line. It is hidden on Cards, Skills and Memories, while a card or the sections
+editor is open, and on a pinned card pane. The Projects page keeps attach, reveal and filter.
+
+**The Background page** (#C52H) lists this project's panes that continue running after they leave the
+visible layout. Each row gives the pane title, model and current state, with Reopen focusing that
+same pane. With none, it says so in one line. Ctrl+Shift+B opens the Board on this tab; pressed
+again while the Board is focused, it closes the Board. The list refreshes while visible.
 
 ### 4.1 Opening
 

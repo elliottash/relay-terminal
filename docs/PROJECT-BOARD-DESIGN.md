@@ -257,18 +257,23 @@ file (open, preview, diff) is the file pane's. A run row is never deleted, only 
 documented trap: deleting a run deletes its artifacts). The tab exists only once `runs.jsonl`
 does; until then the card page shows `links.artifacts` as plain paths.
 
-## 6. Panes and sessions: a Live strip, not a tab
+## 6. Panes and sessions: a Live page (a strip until 2026-09-25)
 
 "Pane list (to compare with sessions, maybe not needed)" — not needed as a tab. The Projects page
 of Sessions & Projects already lists a project's live panes (and the panes on no project) and is
 where attach, reveal and filter live (#P7SJ, #SPSG). What the Board lacks is the *reverse*: from
-the Board, who is working here right now. That is one **Live** strip at the top of the Cards
-tab, computed and never stored: one chip per pane attached to this project — its first-eight
-token, its model, the card it holds (`session` on a card in `executing`), and ✦ while a turn
-runs — each chip revealing the pane on click, the same link the card row already draws from
-`session`. Sessions (past conversations) stay in the Sessions page; a card's thread already links
-the pane tokens that touched it; and a pane is never a stored link target (§4.1). Nothing new is
-written for this.
+the Board, who is working here right now. That is **Live**, computed and never stored. As first
+built (#TBRH) it was a chip strip at the top of the Cards tab; on 2026-09-25 the owner moved it
+to its own tab, one row per pane (#C52H). One row per pane attached to this project — its
+first-eight token, its model, its title, the card it holds (`session` on a card in `executing`),
+and ✦ while a turn runs — the pane chip revealing the pane on click, the same link the card row
+already draws from `session`. Sessions (past conversations) stay in the Sessions page; a card's
+thread already links the pane tokens that touched it; and a pane is never a stored link target
+(§4.1). Nothing new is written for this.
+
+Background work has its own Board tab (#C52H), adjacent to Live. It shows the panes retained in
+hidden windows for this project, their running state, and a Reopen action. Ctrl+Shift+B opens it
+directly; the nested Background page in Sessions has been retired.
 
 ## 7. The pages: one shape for every tab
 

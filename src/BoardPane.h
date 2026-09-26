@@ -163,6 +163,10 @@ public:
     // field (`claimedBy`). The Projects page keeps attach, reveal and filter. Unset (a test that
     // does not set it, a window that cannot look) means no strip.
     std::function<QJsonArray()> livePanes;
+    // Background panes belonging to this board's project, as
+    // [{token, title, model, state}]. The window supplies the live list.
+    std::function<QJsonArray()> backgroundPanes;
+    std::function<void(const QString &token)> onFocusBackground;
     // A signal thread's history (#AQ6X phase 3): `threadId` and the owner session it is saved
     // beside, the same two the Sessions manager's `onOpenThread` hands over. A signal a thread
     // claimed wears the *thread's* id as its chip, so the chip opens a thread rather than
@@ -194,6 +198,7 @@ public:
     QJsonObject drive(const QJsonObject &request);
     void handleEvent(const QJsonObject &event);
     void focusInput();
+    void showBackgroundPage();
     void reload();                                           // board_open
 
     QString workspace() const { return m_workspace; }
@@ -448,21 +453,23 @@ private:
     // The cleanup's result, in the list page itself rather than over it: outcome, counts, every
     // change with its card as a link, the refusals, the agent's report and the changelog.
     void buildCleanupPanel(QVBoxLayout *layout);
-    // ---- the pane's three object tabs: Cards | Skills | Memories (#9FX8 step 2).
+    // ---- the pane's object tabs: Cards | Skills | Memories | Live (#9FX8 step 2, #C52H).
     //
     // `m_page` below is which object the pane is about. Cards is the existing list page untouched
     // and the pane's default; Skills lists the *project* skills of the `skills_registry` rows (the
     // owner's decision 2 — global ones belong to Globals) with a page per skill: profile strip,
     // provenance, the last cases and the cards that name it; Memories is this board's
-    // `type: memory` cards, Expired section first, opened on the ordinary card page. A card
+    // `type: memory` cards, Expired section first, opened on the ordinary card page; Live (#C52H)
+    // is the panes open on this project and the cards they hold — one row per pane, moved off the
+    // Cards page where it was a chip strip (#TBRH). A card
     // opened from those pages goes solo (`openCardSolo`) so the tab survives the round trip,
     // and a pinned card pane (#Y2BA) shows no tabs at all. The tab row is built from
-    // `kPageDefs` so a fourth object (Artifacts, #EA37) is one entry in one place.
-    enum class Page { Cards, Skills, Memories };
+    // `kPageDefs` so another object is one entry in one place.
+    enum class Page { Cards, Skills, Memories, Live, Background };
     struct PageDef { Page page; const char *label; const char *objectName; };
-    static const PageDef kPageDefs[3];
-    // `buildPageTabs` is the segmented row at the top of the pane; the Skills and Memories pages
-    // are built beside the list page and shown in the tab's place. `setPage` switches,
+    static const PageDef kPageDefs[5];
+    // buildPageTabs is the segmented row at the top of the pane; the Skills, Memories and Live
+    // pages are built beside the list page and shown in the tab's place. `setPage` switches,
     // `applyPage` is the visibility rule rebuild() re-runs, and the two refill methods re-read
     // what the pane already holds (the registry rows; the model's memory cards). A registry
     // fetch happens on the first switch to Skills, never at pane open: a board nobody inspects
@@ -473,6 +480,8 @@ private:
     // console and card page.
     void buildSkillsPage(QVBoxLayout *layout);
     void buildMemoriesPage(QVBoxLayout *layout);
+    void buildLivePage(QVBoxLayout *layout);
+    void buildBackgroundPage(QVBoxLayout *layout);
     void setPage(Page page);
     void applyPage();
     void refillMemories();
@@ -777,7 +786,7 @@ private:
     QSet<QString> m_quickAddChosenRelated;
     bool m_quickAddTabTouched = false, m_quickAddLabelsTouched = false;
 
-    // ---- the three object tabs' state (#9FX8 step 2); the `Page` enum and `kPageDefs` sit with
+    // ---- the object tabs' state (#9FX8 step 2); the `Page` enum and `kPageDefs` sit with
     // the methods, above, where the declarations can name them. The Skills page keeps its own
     // registry rows and selection; the Memories page reads the model's own memory cards, so it
     // keeps nothing but the selection.
@@ -880,16 +889,22 @@ private:
     // pinSolo (#Y2BA): the pane is one card's for good, and which card that is.
     bool m_pinned = false;
     QString m_pinnedCard;
-    // The Live strip (#TBRH): a row under the tab row, rebuilt by `syncLiveStrip` from
-    // `livePanes` at the end of every rebuild and on `m_liveTimer` while the pane is visible —
-    // panes open, close and start turns without a board event. `m_liveKey` is what was last
-    // drawn, so an unchanged tick touches no widget.
-    void buildLiveStrip(QVBoxLayout *layout);
-    void syncLiveStrip();
-    QWidget *m_liveStrip = nullptr;
-    QLayout *m_liveLayout = nullptr;   // a FlowLayout: the chips wrap rather than widen the pane
+    // The Live page (#C52H, moved off the Cards page where #TBRH drew it as a strip): one row
+    // per open pane — the pane chip, its title, the cards it holds — rebuilt by `syncLivePage`
+    // from `livePanes` at the end of every rebuild and on `m_liveTimer` while the pane is
+    // visible — panes open, close and start turns without a board event. `m_liveKey` is what was
+    // last drawn, so an unchanged tick touches no widget.
+    void syncLivePage();
+    void syncBackgroundPage();
+    QWidget *m_livePage = nullptr;
+    QVBoxLayout *m_liveRows = nullptr; // a row widget per open pane, cleared and refilled
+    QLabel *m_liveEmpty = nullptr;     // shown on the tab when no pane is open
     QTimer *m_liveTimer = nullptr;
     QString m_liveKey;
+    QWidget *m_backgroundPage = nullptr;
+    QVBoxLayout *m_backgroundRows = nullptr;
+    QLabel *m_backgroundEmpty = nullptr;
+    QString m_backgroundKey;
     // Which of the two pages that sizing was for (#AQ6X): the card's or the signal's, so opening
     // the other one re-divides the splitter instead of leaving it sized for the first.
     bool m_sizedForSignal = false;

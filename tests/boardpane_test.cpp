@@ -92,11 +92,12 @@ private slots:
     void metadataPageListsChildrenReverseLinksAndCommits();
     void hygieneChecksBeforeCleanup();
     void emptyAgentTranscriptDoesNotReserveConversationHeight();
-    // The three object tabs (#9FX8 step 2).
+    // The object tabs (#9FX8 step 2, four since #C52H).
     void theSkillsTabListsProjectSkillsAndOpensAPage();
     void theMemoriesTabShowsExpiredFirstAndOpensTheCard();
-    // The Live strip on the Cards tab (#TBRH).
-    void theLiveStripListsThisProjectsPanesAndTheirCards();
+    // The Live page (#TBRH as a strip, its own tab since #C52H).
+    void theLivePageListsThisProjectsPanesAndTheirCards();
+    void theBackgroundPageListsAndReopensWork();
     // The reverse side of the Linked panels, from `board_links` (#EE42).
     void theLinkedPanelsDrawTheReverseSideFromBoardLinks();
 };
@@ -1025,94 +1026,172 @@ void BoardPaneTests::theMemoriesTabShowsExpiredFirstAndOpensTheCard()
                 && sent.last().value(QStringLiteral("status")).toString() == QStringLiteral("retired"));
 }
 
-// The Live strip (#TBRH, PROJECT-BOARD-DESIGN §6): computed from the window's panes and each
-// card's `session`, one chip per pane and one per open card it holds; hidden with no pane, and
-// never on Skills, Memories or a pinned card pane.
-void BoardPaneTests::theLiveStripListsThisProjectsPanesAndTheirCards()
+// The Live page (#TBRH as a strip over the list, its own tab since #C52H; PROJECT-BOARD-DESIGN
+// §6): computed from the window's panes and each card's `session`, one row per pane — the pane
+// chip, its title, one chip per open card it holds; an empty note with no pane, and never on
+// Cards, Skills, Memories or a pinned card pane.
+void BoardPaneTests::theLivePageListsThisProjectsPanesAndTheirCards()
 {
-    relay::BoardView view(QStringLiteral("/tmp/relay-live-strip-test"));
+    relay::BoardView view(QStringLiteral("/tmp/relay-live-page-test"));
     view.resize(1000, 700);
     view.show();
     const QString busyToken = QStringLiteral("c522363d-fa8e-4db1-afcd-a6e58451cd14");
     const QString idleToken = QStringLiteral("af0737e5-0000-4000-8000-000000000000");
     QJsonObject held = row(QStringLiteral("K7Q2"), QStringLiteral("in-progress"));
-    held.insert(QStringLiteral("title"), QStringLiteral("Live strip on Cards"));
+    held.insert(QStringLiteral("title"), QStringLiteral("Live page"));
     held.insert(QStringLiteral("session"), busyToken);
     QJsonObject closed = row(QStringLiteral("D0N3"), QStringLiteral("done"));
     closed.insert(QStringLiteral("session"), busyToken);      // a closed card is not "held"
     QJsonObject stale = row(QStringLiteral("G0NE"), QStringLiteral("ready"));
     stale.insert(QStringLiteral("session"), QStringLiteral("deadbeef-gone"));   // no such pane
 
-    // No window callback, and then a window with no pane here: no strip.
+    // The pane starts on Cards; the Live tab is where the page lives, empty until a pane opens.
     view.handleEvent(opened({held, closed, stale}));
-    auto *strip = view.findChild<QWidget *>(QStringLiteral("boardLiveStrip"));
-    QVERIFY(strip);
-    QVERIFY(strip->isHidden());
+    auto *page = view.findChild<QWidget *>(QStringLiteral("boardLivePage"));
+    QVERIFY(page);
+    QVERIFY(page->isHidden());
+    view.findChild<QAbstractButton *>(QStringLiteral("boardPageTabLive"))->click();
+    QVERIFY(page->isVisibleTo(&view));
+    QVERIFY(page->findChild<QLabel *>(QStringLiteral("boardLiveEmpty"))->isVisibleTo(page));
     QJsonArray panes;
     view.livePanes = [&panes] { return panes; };
     view.handleEvent(opened({held, closed, stale}));
-    QVERIFY(strip->isHidden());
+    QVERIFY(page->isVisibleTo(&view));
 
-    // Two panes: one working on K7Q2, one idle holding nothing.
+    // Two panes: one working on K7Q2, one idle holding nothing. One row per pane.
     panes = QJsonArray{
         QJsonObject{{"token", busyToken}, {"title", "relay-terminal"}, {"model", "claude-opus-5-5"},
                     {"busy", true}},
         QJsonObject{{"token", idleToken}, {"title", "shell"}, {"model", ""}, {"busy", false}}};
     view.handleEvent(opened({held, closed, stale}));
-    QVERIFY(strip->isVisibleTo(&view));
+    QVERIFY(page->isVisibleTo(&view));
     QCoreApplication::sendPostedEvents(nullptr, QEvent::DeferredDelete);   // the empty draws' leftovers
+    QVERIFY(!page->findChild<QLabel *>(QStringLiteral("boardLiveEmpty"))->isVisibleTo(page));
     const QList<QPushButton *> chips =
-        strip->findChildren<QPushButton *>(QStringLiteral("boardLivePaneChip"));
+        page->findChildren<QPushButton *>(QStringLiteral("boardLivePaneChip"));
     QCOMPARE(chips.size(), 2);
     QCOMPARE(chips.at(0)->text(), QStringLiteral("⧉ c522363d · claude-opus-5-5 ✦"));
     QCOMPARE(chips.at(1)->text(), QStringLiteral("⧉ af0737e5"));
     const QList<QPushButton *> cardChips =
-        strip->findChildren<QPushButton *>(QStringLiteral("boardLiveCardChip"));
+        page->findChildren<QPushButton *>(QStringLiteral("boardLiveCardChip"));
     QCOMPARE(cardChips.size(), 1);                       // K7Q2 only: not the done card, not G0NE
     QCOMPARE(cardChips.at(0)->property("card").toString(), QStringLiteral("K7Q2"));
-    QCOMPARE(cardChips.at(0)->parentWidget(), chips.at(0)->parentWidget());   // grouped with its pane
+    QCOMPARE(cardChips.at(0)->parentWidget(), chips.at(0)->parentWidget());   // one row per pane
     if (qEnvironmentVariableIsSet("RELAY_QA_SCREENSHOT")) {
         QTest::qWait(100);
         QVERIFY(view.grab().save(qEnvironmentVariable("RELAY_QA_SCREENSHOT")));
     }
 
-    // The pane chip reveals the pane; the card chip opens the card through the worker.
+    // The pane chip reveals the pane.
     QString focused;
     view.onFocusPane = [&focused](const QString &token) { focused = token; };
     chips.at(0)->click();
     QCOMPARE(focused, busyToken);
     QList<QJsonObject> sent;
     view.onSend = [&sent](const QJsonObject &message) { sent << message; };
-    cardChips.at(0)->click();
+
+    // A middle-click on the card chip docks that card in a pane of its own (#HKY4): the press
+    // the button ignores reaches the page, which finds the chip by its "card" property.
+    QStringList ownPanes;
+    view.onOpenInNewPane = [&ownPanes](const QString &id) { ownPanes << id; };
+    auto *liveCardChip = page->findChild<QPushButton *>(QStringLiteral("boardLiveCardChip"));
+    QVERIFY(liveCardChip && liveCardChip->isVisibleTo(page));
+    const QPoint at = liveCardChip->mapTo(page, liveCardChip->rect().center());
+    QMouseEvent mid(QEvent::MouseButtonPress, QPointF(at), QPointF(at),
+                    Qt::MiddleButton, Qt::NoButton, Qt::NoModifier);
+    QCoreApplication::sendEvent(page, &mid);
+    QCOMPARE(ownPanes, (QStringList{QStringLiteral("K7Q2")}));
+
+    // A plain card click opens the card through the worker.
+    liveCardChip->click();
     QTRY_VERIFY(std::any_of(sent.cbegin(), sent.cend(), [](const QJsonObject &message) {
         return message.value(QStringLiteral("type")).toString() == QStringLiteral("board_card_get")
                && message.value(QStringLiteral("card")).toString() == QStringLiteral("K7Q2");
     }));
+    view.closeDetail();
 
-    // Not on Skills or Memories; back on Cards it returns.
-    view.findChild<QAbstractButton *>(QStringLiteral("boardPageTabSkills"))->click();
-    QVERIFY(strip->isHidden());
-    view.findChild<QAbstractButton *>(QStringLiteral("boardPageTabMemories"))->click();
-    QVERIFY(strip->isHidden());
+    // Nowhere but on its own tab; back on Live it returns.
     view.findChild<QAbstractButton *>(QStringLiteral("boardPageTabCards"))->click();
-    QVERIFY(strip->isVisibleTo(&view));
+    QVERIFY(page->isHidden());
+    view.findChild<QAbstractButton *>(QStringLiteral("boardPageTabSkills"))->click();
+    QVERIFY(page->isHidden());
+    view.findChild<QAbstractButton *>(QStringLiteral("boardPageTabMemories"))->click();
+    QVERIFY(page->isHidden());
+    view.findChild<QAbstractButton *>(QStringLiteral("boardPageTabLive"))->click();
+    QVERIFY(page->isVisibleTo(&view));
 
-    // The last pane closes: the strip goes on the next refresh. Nothing was written anywhere.
+    // The last pane closes: the rows go on the next refresh and the empty note comes back.
+    // Nothing was written anywhere.
     panes = QJsonArray{};
     view.handleEvent(opened({held, closed, stale}));
-    QVERIFY(strip->isHidden());
+    QVERIFY(page->isVisibleTo(&view));
+    QCoreApplication::sendPostedEvents(nullptr, QEvent::DeferredDelete);
+    QVERIFY(page->findChild<QLabel *>(QStringLiteral("boardLiveEmpty"))->isVisibleTo(page));
+    QVERIFY(page->findChildren<QPushButton *>(QStringLiteral("boardLivePaneChip")).isEmpty());
     for (const QJsonObject &message : std::as_const(sent))
         QVERIFY(!message.value(QStringLiteral("type")).toString().startsWith(QStringLiteral("board_update")));
 
     // A pinned card pane (#Y2BA) never shows it.
     panes = QJsonArray{QJsonObject{{"token", busyToken}, {"model", "m"}, {"busy", false}}};
-    relay::BoardView pinned(QStringLiteral("/tmp/relay-live-strip-test"));
+    relay::BoardView pinned(QStringLiteral("/tmp/relay-live-page-test"));
     pinned.livePanes = [&panes] { return panes; };
     pinned.show();
     pinned.handleEvent(opened({held}));
     pinned.pinSolo(QStringLiteral("K7Q2"));
     pinned.handleEvent(opened({held}));
-    QVERIFY(pinned.findChild<QWidget *>(QStringLiteral("boardLiveStrip"))->isHidden());
+    QVERIFY(pinned.findChild<QWidget *>(QStringLiteral("boardLivePage"))->isHidden());
+}
+
+void BoardPaneTests::theBackgroundPageListsAndReopensWork()
+{
+    relay::BoardView view(QStringLiteral("/tmp/relay-background-page-test"));
+    view.resize(1000, 700);
+    view.show();
+    view.handleEvent(opened({}));
+    auto *page = view.findChild<QWidget *>(QStringLiteral("boardBackgroundPage"));
+    QVERIFY(page);
+    QVERIFY(page->isHidden());
+    view.showBackgroundPage();
+    QVERIFY(page->isVisibleTo(&view));
+    QVERIFY(page->findChild<QLabel *>(QStringLiteral("boardBackgroundEmpty"))->isVisibleTo(page));
+
+    const QString token = QStringLiteral("c522363d-fa8e-4db1-afcd-a6e58451cd14");
+    QJsonArray panes{QJsonObject{{"token", token}, {"title", "Research agent"},
+                             {"model", "codex"}, {"state", "needs-you"}}};
+    view.backgroundPanes = [&panes] { return panes; };
+    view.handleEvent(opened({}));
+    QCoreApplication::sendPostedEvents(nullptr, QEvent::DeferredDelete);
+    QCOMPARE(page->findChildren<QWidget *>(QStringLiteral("boardBackgroundRow")).size(), 1);
+    QVERIFY(page->findChild<QWidget *>(QStringLiteral("boardBackgroundRow"))->isVisibleTo(page));
+    QCOMPARE(page->findChild<QLabel *>(QStringLiteral("boardBackgroundState"))->text(),
+             QStringLiteral("Needs you"));
+    QVERIFY(!page->findChild<QLabel *>(QStringLiteral("boardBackgroundEmpty"))->isVisibleTo(page));
+    if (qEnvironmentVariableIsSet("RELAY_QA_SCREENSHOT")) {
+        QTest::qWait(100);
+        QVERIFY(view.grab().save(qEnvironmentVariable("RELAY_QA_SCREENSHOT")));
+    }
+    QString focused;
+    view.onFocusBackground = [&focused](const QString &value) { focused = value; };
+    page->findChild<QPushButton *>(QStringLiteral("boardBackgroundOpen"))->click();
+    QCOMPARE(focused, token);
+
+    const std::pair<const char *, const char *> states[] = {
+        {"working", "Working"}, {"done", "Done"}, {"failed", "Failed"},
+        {"interrupted", "Interrupted"}};
+    for (const auto &state : states) {
+        panes = QJsonArray{QJsonObject{{"token", token}, {"title", "Research agent"},
+                                      {"model", "codex"}, {"state", state.first}}};
+        view.handleEvent(opened({}));
+        QCoreApplication::sendPostedEvents(nullptr, QEvent::DeferredDelete);
+        QCOMPARE(page->findChild<QLabel *>(QStringLiteral("boardBackgroundState"))->text(),
+                 QString::fromLatin1(state.second));
+    }
+
+    panes = QJsonArray{};
+    view.handleEvent(opened({}));
+    QCoreApplication::sendPostedEvents(nullptr, QEvent::DeferredDelete);
+    QVERIFY(page->findChild<QLabel *>(QStringLiteral("boardBackgroundEmpty"))->isVisibleTo(page));
+    QVERIFY(page->findChildren<QWidget *>(QStringLiteral("boardBackgroundRow")).isEmpty());
 }
 
 // The card page and the skill page each ask `board_links` about what they show (#EE42) and
