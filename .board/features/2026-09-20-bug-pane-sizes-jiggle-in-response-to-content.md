@@ -1,9 +1,10 @@
 ---
 id: SDXE
 type: work
-status: needs-verification
+status: discussing
 assignee: agent
 implemented_by: anthropic/claude-opus-5
+waiting_on: owner
 rank: zzzzzzzzzzzzzzzi
 created: '2026-09-20'
 links: {plans: [], commits: [b2461d52a248e366353b2b63295f4a5b88800cf3], evidence: [docs/qa_evidence/2026-09-20-pane-width-jiggle/], related: [], github: null}

@@ -78,3 +78,15 @@ Deliberately left: a pane's minimum still moves by 8 px — one row gap — as t
 
 <!-- relay:entry 20260925T225104Z-m9 author=agent kind=event mention=6BY7 model=glm-5.3 pane=switchboard turn=31b1b48aee4e5b1a7b8b486bbf061816/2a6577e6451b4155bda84e2e96d7eb24 -->
 mentioned in #6BY7 · 2026-09-25 · agent
+
+<!-- relay:entry 20260926T152036Z-3f author=owner kind=comment mode=discuss -->
+this is not verfieid, still happening
+
+<!-- relay:entry 20260926T152118Z-eq author=agent kind=question model=k3 pane=switchboard turn=04c0b5fbfae73d0399c786e05f22fd2b/4db53f66c2ef48cd959ecdcca837a16b -->
+Owner reports (2026-09-26): "this is not verfieid, still happening". The fix `b2461d52` is on `main` and the running `build/relay` postdates it, so the clamped header minimums did not close the issue. To aim the next round: what did you see move? (a) Which pane(s) — agent pane, shell, Switchboard? (b) What content was arriving — agent streaming, subagent badges appearing, usage meter ticking, a rename? (c) Roughly how big was the movement — the documented residual is 8 px (one header row-gap as the usage chip appears/disappears); anything larger than that is a different, still-live mover. If you can reproduce it with `RELAY_LAYOUT_LOG=1 build/relay`, the once-a-second per-pane width/minimum log names the contributing widget — that log attached to this card would pin it immediately. Recommendation: capture the log during a repro, then hand back to Executing.
+
+<!-- relay:entry 20260926T152124Z-j0 author=agent kind=event model=k3 pane=switchboard turn=04c0b5fbfae73d0399c786e05f22fd2b/4db53f66c2ef48cd959ecdcca837a16b -->
+- ✦ agent moved this card · Needs verification → Discussing · Owner: "this is not verfieid, still happening" — fix b2461d52 is on main and in the running build, yet the jiggle still reproduces; back to Discussing for repro details (question on card).
+
+<!-- relay:entry 20260926T152147Z-vp author=agent kind=event model=k3 pane=switchboard turn=04c0b5fbfae73d0399c786e05f22fd2b/4db53f66c2ef48cd959ecdcca837a16b -->
+- ✦ agent updated this card · waiting_on: (unset) → owner
