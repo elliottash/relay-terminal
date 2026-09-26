@@ -11,7 +11,7 @@ rank: zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzr
 created: '2026-09-25'
 verify: {artifact: code, primary: script, also: [ai-visual], human: optional, criteria: engine ViewTest anchor-walk cases pass; live shots show each key doing what the toast says, sign_off: none, effort: low}
 source: Claude Code guest pane, 2026-09-25
-links: {plans: [], commits: [a71ca0d55115], evidence: [docs/qa_evidence/2026-09-25-ctrl-j-fold-walk/], related: [], github: null}
+links: {plans: [], commits: [a71ca0d55115, e3d85ba7649e], evidence: [docs/qa_evidence/2026-09-25-ctrl-j-fold-walk/], related: [], github: null}
 ---
 # Ctrl+J: step through tool calls and reasoning folds from the keyboard
 
