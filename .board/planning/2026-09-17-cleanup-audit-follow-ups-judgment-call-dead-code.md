@@ -1,13 +1,16 @@
 ---
 id: 265N
 type: work
-status: planned
+status: needs-verification
 labels: [bug]
+assignee: agent
+implemented_by: anthropic/claude-opus-5-5 via claude-code
+session: 131947ca-655f-4eef-8401-b4970c2f0a2d
 rank: zzzi
 created: '2026-09-17'
-source: Relay pane, cleanup audit 2026-09-17
 verify: {artifact: code, primary: script, also: [probe], human: none, sign_off: none, effort: medium, stakes: rework, blast: capability}
-links: {plans: [], commits: [], evidence: [], related: [], github: null}
+source: Relay pane, cleanup audit 2026-09-17
+links: {plans: [], commits: [6bb47ddfe4fd, a99f092e0dc2, d4b6658acc4a, b37a4777be7f, 7b2140b081a6], evidence: [docs/qa_evidence/2026-09-25-265n-cleanup/], related: [ZR3N, ZR2M], github: null}
 ---
 # Cleanup audit follow-ups: judgment-call dead code, deprecated spike alias, unscanned areas
 
@@ -22,13 +25,13 @@ look for cleanup opportunities
 
 ## Tasks
 
-- [ ] Decide BoardModel::allLabels()/allIds() (src/BoardModel.cpp:404,415) — uncalled; keep as library API or remove <!-- t:6d -->
-- [ ] RemoteShare::stopAll() (src/RemoteShare.cpp:228) has no call site — check whether quit leaks share sessions; wire it into shutdown or remove <!-- t:fj -->
-- [ ] Remove RELAY_BUILD_ENGINE_SPIKE deprecated alias (CMakeLists.txt:198) and consider renaming the relay-vterm-spike binary (engine/CMakeLists.txt:107) <!-- t:yk -->
-- [ ] Delete docs/ENGINE-SPIKE.md redirect stub if nothing links to it, or keep and leave as-is <!-- t:p5 -->
-- [ ] Verify engine/pty/PtyUnix.cpp:~395 post-EOF waitpid(WNOHANG) loop has a sleep/backoff <!-- t:6s -->
-- [ ] Verify src/Voice.cpp QProcess error-signal connections (Voice.h:118) <!-- t:tp -->
-- [ ] Second audit pass over unscanned areas: RelayWindow methods in main.cpp, unused #includes in largest files, unused config keys, engine/ internals (GhosttyCore, TerminalSession, TerminalView beyond noted items), Python dead code in backend/remote/rendezvous <!-- t:v6 -->
+- [x] BoardModel::allLabels()/allIds() are both used in BoardPane.cpp; keep them <!-- t:6d -->
+- [x] Wire RemoteShare shutdown into app quit so the sidecar can remove sharing routes and exit cleanly <!-- t:fj -->
+- [x] Remove the deprecated RELAY_BUILD_ENGINE_SPIKE CMake alias; keep the harness binary name unless deliberately renamed <!-- t:yk -->
+- [x] Repoint live documentation links to ENGINE.md and remove the ENGINE-SPIKE.md redirect stub <!-- t:p5 -->
+- [x] PtyUnix post-EOF waitpid loop already has a 50 ms select backoff <!-- t:6s -->
+- [x] Voice QProcess error and finish paths are connected and guarded against double completion <!-- t:tp -->
+- [x] Run the bounded second audit pass over current RelayWindow, engine, settings, includes and remote Python paths; report findings and file real faults <!-- t:v6 -->
 
 ## Plan
 **Goal** — Close out the seven 2026-09-17 audit follow-ups against the tree as it is on 2026-09-25: three are now verified no-ops, one is a real quit-path fault to wire, two are small build/docs removals, and the audit pass is a bounded, report-only sweep whose findings become their own cards.
@@ -66,3 +69,21 @@ look for cleanup opportunities
 - Step 2 live: start Relay under Xvfb with an isolated `XDG_CONFIG_HOME`, turn remote always-on (local-only, no tailnet), quit; the log shows `gui_quit` then `remote_shutdown clean=1`, the sidecar pid is gone, and stderr has no `QProcess: Destroyed while process … is still running`.
 - Steps 4–5: `scripts/relay-build --cmake-arg=-DRELAY_BUILD_ENGINE=ON` (or a scratch build dir) builds the harness; `ctest --test-dir build -R relay-engine-tests` passes; `grep -rn ENGINE_SPIKE CMakeLists.txt engine docs` and `grep -rn "ENGINE-SPIKE.md" docs --exclude-dir=qa_evidence` are empty.
 - Step 6: this card's thread holds the findings note, and each real fault has its own card linked in `links.related`.
+
+## Decisions
+Owner, 2026-09-25: “Keep relay-vterm-spike”; “2 seconds”; “Delete stub”. Keep the existing harness executable name and remove only the deprecated CMake alias. On quit, wait up to two seconds for the remote sidecar to finish route/tunnel teardown before forcing it to exit. Repoint the three live ENGINE-SPIKE links to ENGINE.md and delete the stub.
+
+## Execution Summary
+- t:fj: `RemoteShare::shutdown()` runs stopAll(), closes the sidecar's stdin (EOF) and waits inside a 2 s cap before killing; `main.cpp` calls it from aboutToQuit after the saves and logs `remote_shutdown clean=… ms=…` (a99f092e). Test: new `remoteshutdown` ctest case (in relay-consolemode-tests, the only test target that compiles RemoteShare.cpp) plus a stdin-EOF-runs-Sidecar.stop() pin in tests/test_remote_gui_host.py.
+- t:yk: `RELAY_BUILD_ENGINE_SPIKE` option and its OR clause removed; `relay-vterm-spike` keeps its name (d4b6658a).
+- t:p5: three live links repointed to ENGINE.md's history section; `docs/ENGINE-SPIKE.md` and README's Superseded paragraph deleted (b37a4777).
+- t:6d / t:6s / t:tp: verified no-ops (see Plan findings 1, 5, 6).
+- t:v6: bounded audit posted on the thread; #ZR3N filed (3 dead RelayWindow methods); #ZR2M found and closed as fixed by a99f092e.
+
+The work was done by subagents a2 then a4; a4 failed before writing up the audit and ticking the card, and the parent session reran the audit scripts on a clean export and wrote the evidence.
+
+## Tests
+- `land.py try phone-265n --commit HEAD --tests "remoteshutdown|sharing|remotesettings|boardpane"` on main c926b960: whole tree builds, 4 suites pass (try-landed-main.txt).
+- `pytest tests/test_remote_gui_host.py -q`: 52 passed.
+- Clean export with `-DRELAY_BUILD_ENGINE=ON`: `relay-vterm-spike` builds (engine-alias-build.txt).
+- Live quit under Xvfb, isolated XDG_CONFIG_HOME, always-on remote: `remote_shutdown clean=1 ms=985`, no surviving sidecar, no QProcess-destroyed warning (quit-check-xvfb.txt, by a2 before landing).
