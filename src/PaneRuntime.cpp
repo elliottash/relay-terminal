@@ -88,6 +88,38 @@ void Pane::launchPreparedWorkspace() {
     else status(QStringLiteral("Starting the %1 console…").arg(consoleName(m_consolePluginRequest)));
 }
 
+void Pane::releasePreparedWorkspace() {
+    // A pane can close before its allocation helper has replied, or without ever configuring
+    // an agent. The GUI owns this lease, so worker shutdown alone cannot release it.
+    if (m_workspacePrepare) {
+        QProcess *pending = m_workspacePrepare;
+        pending->disconnect(this);
+        if (pending->state() != QProcess::NotRunning && !pending->waitForFinished(3000)) {
+            pending->kill();
+            pending->waitForFinished(1000);
+        }
+        const QJsonObject result = QJsonDocument::fromJson(pending->readAllStandardOutput()).object();
+        if (result.value(QStringLiteral("state")).toString() == QStringLiteral("active"))
+            m_treeStatus = result;
+        m_workspacePrepare = nullptr;
+    }
+    if (m_treeStatus.value(QStringLiteral("state")).toString() != QStringLiteral("active")) return;
+    QProcess release;
+    release.setProcessEnvironment(guestHelperEnvironment());
+    release.start(m_python, {QStringLiteral("-S"), QStringLiteral("-m"),
+        QStringLiteral("relay_core.workspace_context"), QStringLiteral("release"),
+        QStringLiteral("--project"), m_treeStatus.value(QStringLiteral("project_root")).toString(),
+        QStringLiteral("--workspace-id"), m_treeStatus.value(QStringLiteral("workspace_id")).toString(),
+        QStringLiteral("--session"), m_token});
+    if (!release.waitForFinished(3000)) {
+        release.kill();
+        release.waitForFinished(1000);
+    }
+    if (release.exitStatus() != QProcess::NormalExit || release.exitCode() != 0)
+        relay::log::info(QStringLiteral("workspace_release_pending pane=%1 workspace=%2")
+            .arg(paneLogId(), m_treeStatus.value(QStringLiteral("workspace_id")).toString()));
+}
+
 bool Pane::restoreAgentPrompt() {
     if (!m_editor->toPlainText().isEmpty() || inQueueSelection()
         || m_recallPrompt.text.isEmpty() || m_recallPrompt.taken) return false;
@@ -1119,7 +1151,7 @@ void Pane::startTerminal(bool cleanShell, const ConsoleProgram &program) {
             const QProcessEnvironment system = QProcessEnvironment::systemEnvironment();
             // The guests' Relay-owned home too (#5A37), or a tmux server a Relay without it
             // started would send `claude` in this pane back to ~/.claude.
-            for (const char *name : {"RELAY_SESSION_TOKEN", "RELAY_RUNTIME_DIR", "RELAY_SHELL_EVENT",
+            for (const char *name : {"RELAY_START_DIR", "RELAY_SESSION_TOKEN", "RELAY_RUNTIME_DIR", "RELAY_SHELL_EVENT",
                                      "RELAY_SHELL_INTEGRATION", "RELAY_CLEAN_SHELL", "RELAY_SSH_NEVER",
                                      "RELAY_GUEST_HOME", "CLAUDE_CONFIG_DIR", "CODEX_HOME",
                                      "RELAY_USER_CLAUDE_CONFIG_DIR", "RELAY_USER_CODEX_HOME"}) {

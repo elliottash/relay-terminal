@@ -739,6 +739,12 @@ public:
         // crash left behind (src/RuntimeDirs.h).
         relay::runtimedirs::markOwned(m_runtime.path());
         m_token = QUuid::createUuid().toString(QUuid::WithoutBraces);
+        // Queue leases belong to the logical pane across layout restore. A duplicated live
+        // pane still gets a new token and its own tree.
+        const QString workspaceSession = restoreSpec.value(QStringLiteral("workspace_session")).toString();
+        if (!QUuid(workspaceSession).isNull()
+            && !relay::panedir::Directory::instance().tokens().contains(workspaceSession))
+            m_token = workspaceSession;
         // The saved scrollback is filed under the pane's token unless a restore hands it the id
         // its saved text already has (initRestore).
         m_scrollbackId = m_token;
@@ -883,6 +889,7 @@ public:
                 m_worker.waitForFinished(1000);
             }
         }
+        releasePreparedWorkspace();
     }
 
     // The environment a guest helper Relay itself starts needs to reach *this* pane's spool
@@ -11121,6 +11128,7 @@ private:
     // ----- end request ledger UI ------------------------------------------------------------------
 
     void prepareWorkspace();
+    void releasePreparedWorkspace();
     void launchPreparedWorkspace();
 
     void startWorker() {

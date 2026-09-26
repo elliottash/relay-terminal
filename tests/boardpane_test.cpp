@@ -1169,6 +1169,7 @@ void BoardPaneTests::theLivePageShowsWorkspaceQueueAndMainState()
     view.handleEvent(QJsonObject{{"event", "tree_status"}, {"tree_status", tree}});
     view.handleEvent(QJsonObject{{"event", "queue_status"}, {"repo_id", "repo-1"},
         {"jobs", QJsonArray{QJsonObject{{"id", "job-1"}, {"workspace_id", "tree-1"},
+                                        {"age_seconds", 272.522},
                                         {"status", "verifying"}, {"reason", "waiting for host capacity"}}}},
         {"workspaces", QJsonArray{QJsonObject{{"workspace_id", "tree-2"}, {"branch", "relay/dev/tree-2"},
                                                {"state", "released"}, {"unlanded", true},
@@ -1182,6 +1183,7 @@ void BoardPaneTests::theLivePageShowsWorkspaceQueueAndMainState()
     QVERIFY(workspace->text().contains(QStringLiteral("waiting for host capacity")));
     auto *job = view.findChild<QLabel *>(QStringLiteral("boardQueueJob"));
     QVERIFY(job && job->isVisibleTo(&view));
+    QVERIFY(job->text().contains(QStringLiteral("273 s")));
     auto *retained = view.findChild<QLabel *>(QStringLiteral("boardRetainedWorkspace"));
     QVERIFY(retained && retained->isVisibleTo(&view));
     QVERIFY(retained->text().contains(QStringLiteral("work retained")));

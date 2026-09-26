@@ -6973,7 +6973,7 @@ void BoardView::syncLivePage()
             const QString card = job.value(QStringLiteral("card")).toString();
             if (!card.isEmpty()) detail += QStringLiteral(" · #%1").arg(card);
             if (job.value(QStringLiteral("age_seconds")).isDouble())
-                detail += QStringLiteral(" · %1 s").arg(job.value(QStringLiteral("age_seconds")).toInt());
+                detail += QStringLiteral(" · %1 s").arg(qRound64(job.value(QStringLiteral("age_seconds")).toDouble()));
             const QString reason = job.value(QStringLiteral("reason")).toString();
             if (!reason.isEmpty()) detail += QStringLiteral(" · ") + reason;
             auto *label = new QLabel(detail, m_livePage);

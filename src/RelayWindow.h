@@ -6369,6 +6369,8 @@ private:
                              {"agent_mode", pane->agentMode()},
                              {"input_mode", pane->mode() == QStringLiteral("program") ? QStringLiteral("auto") : pane->mode()},
                              {"effort", pane->effort()}};
+            if (pane->treeStatus().value(QStringLiteral("state")).toString() == QStringLiteral("active"))
+                leaf.insert(QStringLiteral("workspace_session"), pane->sessionToken());
             // An empty core means "whatever the process default is"; storing it would pin the empty
             // string and defeat --engine-core on the next start.
             if (!pane->engineCore().isEmpty()) leaf.insert(QStringLiteral("engine_core"), pane->engineCore());
