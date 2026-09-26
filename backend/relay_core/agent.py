@@ -4590,16 +4590,18 @@ class Agent:
         self.emit(event)
 
     def _sync_board_writes(self, record: dict) -> None:
-        """Board-sync this turn's board writes in the background (card #FYEY, decision 6).
+        """Board-sync this turn's board writes (card #FYEY, decision 6; routes in #AMQQ).
 
-        Hands the `.board/` paths this turn wrote to `integration_service.sync_board_writes`
-        on a daemon thread and returns at once (card #AMQQ): in queue mode that is a metadata
-        job through the installed module on the canonical project — no `scripts/land.py` or
-        `<repo>/backend` needed, so a second project's pane writes reach its queue too; in
-        legacy mode it is this repository's `scripts/land.py board-sync` when there is one.
-        The thread logs one line and swallows everything, because a landing that fails must
-        not fail the turn it serves. Does nothing when this agent has no board, wrote no board
-        paths this turn, or holds no pane token.
+        Hands the `.board/` paths this turn wrote to `integration_service.sync_board_writes`:
+        in queue mode that is a metadata job through the installed module on the canonical
+        project — no `scripts/land.py` or `<repo>/backend` needed, so a second project's pane
+        writes reach its queue too — recorded *synchronously*, before the turn completes, so
+        a worker that exits right after its turn cannot lose it (no gate runs there; it is a
+        few git hash-objects and a row). Legacy mode is this repository's `scripts/land.py
+        board-sync` when there is one, on a daemon thread as before. Everything is swallowed
+        and logged in one line, because a landing that fails must not fail the turn it
+        serves. Does nothing when this agent has no board, wrote no board paths this turn, or
+        holds no pane token.
         """
         try:
             board = self.board
@@ -4615,21 +4617,37 @@ class Agent:
             repo = str(engine.repo)                        # the canonical project repository
             message = f"board: {pane} {turn_id}".strip()
 
-            def run_sync() -> None:
-                try:
-                    from .integration_service import sync_board_writes
-                    result = sync_board_writes(repo, paths, session=token, message=message)
-                    ok = result.get("route") in ("queue", "skipped") or result.get("code") == 0
-                    logs.event(_log, "board_sync", session=self.session_id, turn=turn_id,
-                               level_name="info" if ok else "warning",
-                               route=result.get("route"), code=result.get("code"),
-                               paths=len(paths),
-                               result=str(result.get("job_id") or result.get("result")
-                                          or result.get("reason") or "")[:200])
-                except Exception as exc:                    # never fails the turn
-                    logs.event(_log, "board_sync", session=self.session_id, turn=turn_id,
-                               level_name="warning", error=str(exc)[:200], paths=len(paths))
-            threading.Thread(target=run_sync, name="relay-board-sync", daemon=True).start()
+            def report(result: dict) -> None:
+                ok = result.get("route") in ("queue", "skipped") or result.get("code") == 0
+                logs.event(_log, "board_sync", session=self.session_id, turn=turn_id,
+                           level_name="info" if ok else "warning",
+                           route=result.get("route"), code=result.get("code"), paths=len(paths),
+                           result=str(result.get("job_id") or result.get("result")
+                                      or result.get("reason") or "")[:200])
+
+            def run_legacy(argv: list) -> dict:
+                def run_sync() -> None:
+                    try:
+                        run = subprocess.run(argv, capture_output=True, text=True, timeout=120,
+                                             cwd=repo)
+                        detail = ((run.stdout or "") + (run.stderr or "")).strip().splitlines()
+                        report({"route": "legacy", "code": run.returncode,
+                                "result": detail[0] if detail else ""})
+                    except Exception as exc:                # never fails the turn
+                        logs.event(_log, "board_sync", session=self.session_id, turn=turn_id,
+                                   level_name="warning", error=str(exc)[:200], paths=len(paths))
+                threading.Thread(target=run_sync, name="relay-board-sync", daemon=True).start()
+                return {"thread": "relay-board-sync"}
+
+            try:
+                from .integration_service import sync_board_writes
+                result = sync_board_writes(repo, paths, session=token, message=message,
+                                           run_legacy=run_legacy)
+                if result.get("route") != "legacy":
+                    report(result)
+            except Exception as exc:                        # never fails the turn
+                logs.event(_log, "board_sync", session=self.session_id, turn=turn_id,
+                           level_name="warning", error=str(exc)[:200], paths=len(paths))
         except Exception:                                  # never fails the turn
             pass
 

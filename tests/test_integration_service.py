@@ -454,6 +454,44 @@ class FlowTests(ServiceCase):
         self.assertEqual(service.main_status()["installed_sha"], self.base,
                          "the runnable main follows the target, which did not move")
 
+    def test_split_delivery_across_polls_and_a_restart_wakes_the_author_once(self):
+        wakes = []
+        service = self.service(wake=lambda h: wakes.append(h["kind"]))
+        ws, path, sha = self.author(service, "split", "line 2\n", "candidate\n", card="AA11")
+        (path / "shared.txt").write_text("only one line\n")
+        run_git(path, "commit", "-q", "-am", "break the invariant")
+        job = service.submit(workspace_id=ws["workspace_id"], request_id="split-1")
+        # No deliveries during the tick: the queue's `failed` and `author_required` rows are
+        # both in the outbox, undelivered, as a worker would see them between polls.
+        service.deliver_handoffs = lambda **kw: []
+        self.assertEqual(service.run_once()["job"]["status"], "failed")
+        outbox = service.queue.outbox()
+        self.assertEqual([r["kind"] for r in outbox], ["failed", "author_required"])
+        # Poll 1 delivers only the first row (`failed`), then the process dies.
+        first = S.IntegrationService(self.repo, state_root=self.state, cache_root=self.cache,
+                                     admission=self.admission(), reconciler=self.reconciler(),
+                                     land_root=self.land_root, wake=lambda h: wakes.append(h["kind"]))
+        delivered = first.deliver_handoffs(limit=1)
+        self.assertEqual([d["kind"] for d in delivered], ["failed"])
+        self.assertEqual(wakes, [], "the non-actionable row never wakes, whatever order it comes in")
+        self.assertEqual(first.handoffs(session="split"), [], "nothing actionable yet")
+        # A fresh process delivers the rest: exactly one wake, for the actionable kind.
+        second = S.IntegrationService(self.repo, state_root=self.state, cache_root=self.cache,
+                                      admission=self.admission(), reconciler=self.reconciler(),
+                                      land_root=self.land_root, wake=lambda h: wakes.append(h["kind"]))
+        self.assertEqual([d["kind"] for d in second.deliver_handoffs()], ["author_required"])
+        self.assertEqual(wakes, ["author_required"])
+        self.assertEqual([h["kind"] for h in second.handoffs(session="split")], ["author_required"])
+        self.assertEqual(sorted(h["kind"] for h in second.handoffs(session="split", pending_only=False)),
+                         ["author_required", "failed"])
+        self.assertEqual(second.deliver_handoffs(), [], "nothing left; no second wake")
+        self.assertEqual(second.actionable_kind(second.queue.status(job["id"])), "author_required")
+        # A landed job with no other rows: its own kind is the actionable one.
+        ok_ws, ok_path, ok_sha = self.author(service, "fine", "line 3\n", "fine\n")
+        fine = service.submit(workspace_id=ok_ws["workspace_id"], request_id="fine-1")
+        service.run_once()
+        self.assertEqual(second.actionable_kind(second.queue.status(fine["id"])), "landed")
+
     def test_admission_shortfall_defers_the_job_instead_of_failing_it(self):
         service = self.service(admission=self.admission(limits={"cpus": 1.0, "memory_bytes": 100 * MB,
                                                                  "disk_bytes": 100 * MB}))
@@ -814,6 +852,13 @@ class LegacyGuardTests(ServiceCase):
         self.assertEqual(legacy["route"], "legacy")
         self.assertEqual(legacy["code"], 0, legacy)
         self.assertIn("edited by a pane", git_out(self.repo, "show", "main:" + card))
+        # A caller may run the legacy subprocess elsewhere (the agent's daemon thread).
+        (self.repo / card).write_text((self.repo / card).read_text() + "async\n")
+        ran = []
+        started = S.sync_board_writes(self.repo, [card], session="pane", state_root=self.state,
+                                      land_script=self.LAND, run_legacy=lambda argv: ran.append(argv) or {"thread": "t"})
+        self.assertEqual((started["route"], started["started"], started["thread"]), ("legacy", True, "t"))
+        self.assertEqual(ran[0][1:3], [str(self.LAND), "board-sync"])
         # Legacy without land.py (a second project): nothing to hand to, said so, no error.
         (self.repo / card).write_text((self.repo / card).read_text() + "again\n")
         skipped = S.sync_board_writes(self.repo, [card], session="pane", state_root=self.state,
@@ -832,6 +877,18 @@ class LegacyGuardTests(ServiceCase):
         self.assertEqual(service.handoffs(session="pane-2")[0]["kind"], "landed")
         same = S.sync_board_writes(self.repo, [card], session="pane-2", state_root=self.state)
         self.assertEqual((same["route"], same["submitted"]), ("queue", False))
+        # The queue route is durable before it returns: a worker that exits the instant after
+        # its turn (its legacy thread never running) has already stored the job.
+        (self.repo / card).write_text((self.repo / card).read_text() + "third\n")
+        never = []
+        stored = S.sync_board_writes(self.repo, [card], session="pane-3", state_root=self.state,
+                                     run_legacy=lambda argv: never.append(argv))
+        self.assertEqual(stored["route"], "queue")
+        self.assertEqual(never, [], "queue mode does not go through the legacy runner")
+        rows = [j for j in service.queue.status() if j["id"] == stored["job_id"]]
+        self.assertEqual(rows[0]["status"], "queued", "the job row exists when the call returns")
+        self.assertEqual(git_out(self.repo, "rev-parse", "refs/landq/jobs/%s/submitted" % stored["job_id"]),
+                         stored["submitted_sha"], "the snapshot commit is retained")
         # Paused: refused with the reason; the edit stays in the canonical Board.
         service.pause(reason="hold")
         (self.repo / card).write_text((self.repo / card).read_text() + "while paused\n")
@@ -839,7 +896,7 @@ class LegacyGuardTests(ServiceCase):
         self.assertEqual(held["route"], "refused")
         self.assertIn("paused", held["reason"])
         self.assertIn("while paused", (self.repo / card).read_text())
-        self.assertEqual(len(service.queue.status()), 1)
+        self.assertEqual(len(service.queue.status()), 2, "nothing was recorded while paused")
 
     def test_a_corrupt_or_unknown_marker_fails_closed_in_both_publishers(self):
         service = self.service(activate=False)

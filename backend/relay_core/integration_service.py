@@ -1429,20 +1429,19 @@ class IntegrationService:
         handoff = {"delivery_key": record["delivery_key"], "job_id": job["id"], "kind": kind,
                    "session": session, "workspace_id": workspace_id, "card": card, "text": text,
                    "payload": payload}
-        # Collapse to one actionable handoff per job: a pending row of a lower-priority kind
-        # for this job is superseded by this one; this one is superseded on arrival when a
-        # higher-priority kind for the job is already pending or due in the same batch.
-        rank = HANDOFF_PRIORITY.get(kind, 0)
-        outranked = any(HANDOFF_PRIORITY.get(r["kind"], 0) > rank for r in self.queue.outbox()
-                        if r["job_id"] == job["id"] and r["delivery_key"] != record["delivery_key"])
+        # One actionable handoff per job terminal outcome, whichever order or batch the
+        # queue's rows arrive in: the actionable kind is a function of *every* outbox row the
+        # job has (the queue writes `failed` and `author_required` in one transaction, so both
+        # are visible to whichever delivery comes first, in this poll, the next, or after a
+        # restart). A row of any other kind is stored as history, superseded, and never wakes.
+        actionable = self.actionable_kind(job)
+        outranked = kind != actionable
         now = _now()
         with self._tx() as conn:
             for other in conn.execute("SELECT id, kind FROM handoffs WHERE job_id=? AND acked_at IS NULL"
                                       " AND superseded_at IS NULL AND delivery_key!=?",
                                       (job["id"], record["delivery_key"])).fetchall():
-                if HANDOFF_PRIORITY.get(other["kind"], 0) > rank:
-                    outranked = True
-                else:
+                if other["kind"] != actionable:
                     conn.execute("UPDATE handoffs SET superseded_at=? WHERE id=?", (now, other["id"]))
             cur = conn.execute(
                 "INSERT OR IGNORE INTO handoffs(delivery_key, job_id, kind, session, workspace_id,"
@@ -1462,6 +1461,15 @@ class IntegrationService:
             self._note_card(card, job["id"], kind, text)
         if self.wake is not None and not handoff["superseded"]:
             self.wake(handoff)
+
+    def actionable_kind(self, job) -> str:
+        """The one kind the author is woken for on this job: the highest-priority kind among
+        all of the job's outbox rows (delivered or not), ties broken by the job's own status.
+        Stable across polls and restarts because it reads the rows, not the batch."""
+        kinds = {r["kind"] for r in self.queue.outbox(pending_only=False) if r["job_id"] == job["id"]}
+        if not kinds:
+            return job["status"]
+        return max(kinds, key=lambda k: (HANDOFF_PRIORITY.get(k, 0), k == job["status"], k))
 
     def _note_card(self, card, job_id, kind, text):
         from . import board as board_mod
@@ -2342,7 +2350,7 @@ def _build_parser() -> _Parser:
 
 
 def sync_board_writes(repo, paths, *, session, message=None, state_root=None,
-                      land_script=None, timeout=120) -> dict:
+                      land_script=None, timeout=120, run_legacy=None) -> dict:
     """A pane's end-of-turn Board writes, wherever the project is and whatever files it has:
 
     * queue mode — a metadata job through this installed module, in process, on the canonical
@@ -2351,6 +2359,11 @@ def sync_board_writes(repo, paths, *, session, message=None, state_root=None,
       become a later job);
     * legacy — the repository's own `scripts/land.py board-sync` when it has one (this
       repository), else nothing: a legacy project without land.py has no publisher to hand to.
+
+    The queue route is *synchronous and durable*: when this returns, the snapshot commit is
+    retained under `refs/landq/…` and the job row exists — a worker may exit the instant
+    after its turn. No gate runs here. The legacy route is a subprocess; `run_legacy(argv)`
+    lets a caller run it elsewhere (a background thread) and return at once.
 
     Returns `{"route": queue|legacy|skipped|refused, ...}` and never raises on a refusal.
     """
@@ -2384,6 +2397,10 @@ def sync_board_writes(repo, paths, *, session, message=None, state_root=None,
         return {"route": "skipped", "mode": "legacy", "reason": "no scripts/land.py in %s" % repo}
     argv = [sys.executable, str(land), "board-sync", session, "-m",
             message or "board: %s" % session, *paths]
+    if run_legacy is not None:
+        started = run_legacy(argv)
+        return {"route": "legacy", "mode": "legacy", "started": True,
+                **(started if isinstance(started, dict) else {})}
     run = subprocess.run(argv, capture_output=True, text=True, timeout=timeout, cwd=str(repo))
     detail = ((run.stdout or "") + (run.stderr or "")).strip().splitlines()
     return {"route": "legacy", "mode": "legacy", "code": run.returncode,
