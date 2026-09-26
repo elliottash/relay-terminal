@@ -104,3 +104,14 @@ Check · 4 passed. The status is under `## Tests`; earlier checks are in this th
 
 <!-- relay:entry 20260926T034558Z-km author=agent kind=event model=gpt-6-sol pane=f9f958ae turn=630cb4fff2074ac8baf257b4f3f543e0/9d84eed5c0b944e1a1ce8afdc93741ee -->
 - ✦ agent moved this card · Running → Needs verification, wrote `## Execution Summary`, `## Tests` · Implementation landed; 50,000-line restore and targeted checks pass. Independent verification remains for Recently closed and mixed shell/conversation replay. · evidence docs/qa_evidence/2026-09-26-hey7-final/ · implemented_by openai/gpt-6-sol via codex:ashe-ethz-ch
+
+<!-- relay:entry 20260926T044530Z-c7 author=land.py kind=note -->
+8 hunk(s) uncommitted in backend/worker.py (snapshot 1h44m), pane unknown; resume with `land.py orphans`
+
+<!-- relay:entry 20260926T054224Z-8r author=agent kind=evidence model=claude-opus-5-5 pane=c30592c5 turn=4c2d2da03628442180f8e51eb861c141/bfb844a729834adca42bdbd74a58810f -->
+Live check of the two open cases (Recently closed; mixed shell + conversation pane) found three bugs, fixed in e8c48572 and c5c168a6 (queued, jobs 1bfc4e76dfd89992 and d6c0df4f8d6ef262). Evidence: docs/qa_evidence/2026-09-26-hey7-mixed/README.md.
+1. A pane reopened from Recently closed came back blank. It waited on a transcript fill for its never-saved session, and the open "no longer saved" note held the replay for good. On quit its fresh screen overwrote the saved text. Fixed.
+2. Data loss: with a model configured, the pane reported its worker session to the journal at first configure, and the journal then dropped every evicted shell row. The 50,000-line run missed this because its default was the deferred guest:claude. The journal is no longer told about the conversation; every row is kept.
+3. A restored turn printed twice and out of order (a #KDB4 fill on top of the journal). Panes with a journal skip the fill.
+After the fixes: 12,000 of 12,000 lines kept in shell-only, turn-then-50 and turn-then-11000; the turn is printed once, in order. ctest textjournal/windowstate/transcriptreplay pass, and 144 pytest pass.
+Not met: Done-means bullet 2 (no text in two stores). Conversation rows that scroll out are now in both the journal and the transcript. The fix is plan step 3, not yet built: an OSC 7772 `reply` row role on agent rows, turn ranges on references, and row ranges for guest TUIs.
