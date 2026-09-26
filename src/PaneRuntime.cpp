@@ -8,7 +8,13 @@
 void Pane::prepareWorkspace() {
     if (m_closing || m_workspacePrepare) return;
     if (m_workspaceReady) { launchPreparedWorkspace(); return; }
-    if (m_workspace.isEmpty()) m_workspace = QDir::currentPath();
+    // An unset project is a global pane, even when Relay was launched in a repository.
+    // Keep its shell cwd independent from its Board/workspace identity.
+    if (m_workspace.isEmpty()) {
+        m_workspaceReady = true;
+        launchPreparedWorkspace();
+        return;
+    }
     const QString backend = m_data + QStringLiteral("/backend");
     auto *process = new QProcess(this);
     m_workspacePrepare = process;

@@ -13725,7 +13725,6 @@ private:
         if (preset.isEmpty()) return;
         m_configureAutoRetried = false;
         m_deferredPreset.clear(); m_deferredModel.clear();   // whatever was being held, this replaces it
-        if (m_workspace.isEmpty()) m_workspace = QDir::currentPath();
         QSettings settings;
         const int tokens = settings.value(QStringLiteral("provider/max_tokens"), 0).toInt();
         const QString model = modelOverride.isEmpty() ? preset.value(QStringLiteral("model")).toString() : modelOverride;
