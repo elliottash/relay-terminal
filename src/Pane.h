@@ -4283,7 +4283,7 @@ public:
     // The pane's older text (card #HEY7): every line its journal holds, with its colours, read in
     // `less -R` from this pane's own shell — the terminal can hold only its newest rows. `q` goes
     // back. Without `less` (Windows), or with the shell busy, the plain text opens in a file pane.
-    void readJournal(const QString &id) {
+    void readJournal(const QString &id, int fromCommand = -1) {
         const QString dir = relay::textjournal::journalDirectory(id);
         if (dir.isEmpty() || !QFileInfo::exists(dir)) {
             status(QStringLiteral("This pane's earlier text is no longer kept."));
@@ -4292,18 +4292,26 @@ public:
         if (id == m_scrollbackId) m_paneJournal.flush(m_backend);
         const QString script = m_data + QStringLiteral("/backend/relay_core/textjournal.py");
         const QString less = QStandardPaths::findExecutable(QStringLiteral("less"));
-        if (!less.isEmpty() && hasShell() && shellIdleAtPrompt() && !m_login.active) {
+        const QString commandArg = fromCommand >= 0
+            ? QStringLiteral(" --from-command %1").arg(fromCommand) : QString();
+        if (fromCommand < 0 && !less.isEmpty() && hasShell() && shellIdleAtPrompt() && !m_login.active) {
             sendShellInput(shellQuote(m_python) + QStringLiteral(" -S ") + shellQuote(script) + QStringLiteral(" cat ")
-                           + shellQuote(dir) + QStringLiteral(" | less -R +G\n"));
+                           + shellQuote(dir) + commandArg
+                           + (fromCommand >= 0 ? QStringLiteral(" | less -R\n")
+                                               : QStringLiteral(" | less -R +G\n")));
             return;
         }
         QProcess cat;
-        cat.start(m_python, {QStringLiteral("-S"), script, QStringLiteral("cat"), dir, QStringLiteral("--plain")});
+        QStringList catArgs{QStringLiteral("-S"), script, QStringLiteral("cat"), dir, QStringLiteral("--plain")};
+        if (fromCommand >= 0) catArgs << QStringLiteral("--from-command") << QString::number(fromCommand);
+        cat.start(m_python, catArgs);
         if (!cat.waitForFinished(30000) || cat.exitCode() != 0) {
             status(QStringLiteral("Could not read this pane's earlier text."));
             return;
         }
-        const QString path = m_runtime.path() + QStringLiteral("/earlier-text.txt");
+        const QString path = m_runtime.path() + (fromCommand >= 0
+            ? QStringLiteral("/shell-hit-%1.txt").arg(fromCommand)
+            : QStringLiteral("/earlier-text.txt"));
         QFile file(path);
         if (!file.open(QIODevice::WriteOnly) || file.write(cat.readAllStandardOutput()) < 0) {
             status(QStringLiteral("Could not write this pane's earlier text: ") + file.errorString());
@@ -8840,8 +8848,8 @@ public:
                                   {"session_id", sessionId}, {"query", query}});
         };
         view->onResume = [self](const QJsonObject &item, bool newPane, bool) { if (self) self->openSavedSession(item, newPane); };
-        view->onOpenShell = [self](const QString &journalId) {
-            if (self && !journalId.isEmpty()) self->readJournal(journalId);
+        view->onOpenShell = [self](const QString &journalId, int command) {
+            if (self && !journalId.isEmpty()) self->readJournal(journalId, command);
         };
         // Ctrl+Enter. `fork` copies the conversation the worker is holding (protocol 5), so a saved
         // one nobody has loaded cannot be forked in one step: it opens in a new pane instead, and
