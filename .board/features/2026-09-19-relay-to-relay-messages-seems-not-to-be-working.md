@@ -71,13 +71,22 @@ choice of Execute card is left: #R5TC already owns and has landed the build.
 ### Check: worker cross-pane battery (2026-09-26)
 `python3 -m unittest tests.test_panes` — PASS, 17 tests in 0.053 s. Covers the worker's simulated busy delivery and idle wake outcome, framing, depth rule, refusal and cap. The GUI delivery in this battery is `FakePane`, so this is not a live two-pane result.
 
+
+### Live two-pane probe (2026-09-26)
+Ran the built `build/relay` under Xvfb with isolated XDG paths and a loopback scripted model. `python3 -m unittest tests.test_panes` also passed 17 tests (0.057 s). The synthetic recipient prompt was `CARD-WORK-BUSY`; this was an agent turn, but not a claimed Board card.
+
+The sender in p1 called `pane_send` to p2 during the recipient's busy turn. Its tool result said `outcome: delivered` and `busy: true`. At p2's next step boundary, the Relay frame contained `BUSY-PING reply to p1`; p2 called `pane_send` with `BUSY-REPLY received`, and p1 displayed that reply. This confirms a live busy-path round trip.
+
+After p2 displayed its completed-turn checkmark, the drive waited 20 seconds and sent `IDLE-PING` from p1. The tool result still said `outcome: delivered` and `busy: true`, so the idle wake path was not exercised. No `IDLE-REPLY` appeared in either pane. The earlier p2 reply itself had produced a `woke` result for idle p1. That establishes wake delivery in the reverse direction, but does not satisfy this card's idle recipient reply requirement. The drive used the previously built binary and did not build current source. Screenshots and model-request trace are in `/tmp/mjg6_live/` for this session.
+
 ## QA checklist
 
-- [x] Verified the publication mode is legacy: no `.git/relay-publication.json`; `relay-land inventory` reports `mode: legacy`.
+- [x] Rechecked publication mode: `.git/relay-publication.json` now reports `mode: queue`.
 - [x] Read #MJG6 and #R5TC cards and threads; #R5TC's backend and pane-side commits are landed.
 - [x] Ran the targeted worker battery (17 passing).
-- [ ] Observe an isolated live Relay with two model-backed agent panes: delivery while the card-working recipient is busy, an idle wake, and a `pane_send` answer visible to the original sender.
+- [x] Observe live busy delivery and a return `pane_send` answer.
+- [ ] Observe an idle p2 wake and return answer while p2 is working a claimed Board card.
 
 ## Verdict
 
-Open. The live busy and idle exchange, including the return answer, has not been observed in this verification run. The passing worker tests use a simulated GUI and cannot satisfy #MJG6's Done means. An isolated two-pane scripted-provider drive must be built and run, or a verifier must perform the equivalent live run, before closure.
+Open. The live busy-path reply passed. The idle-path reply remains unverified because p2 was still reported busy on the second send, despite a completed-turn indicator after 20 seconds. The synthetic recipient was not a claimed Board card. Keep #MJG6 open and #R5TC in needs-verification until a true idle card-working recipient wakes and replies.

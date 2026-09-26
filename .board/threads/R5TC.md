@@ -47,3 +47,7 @@ mentioned in #NPCD · 2026-09-25 · agent
 <!-- relay:entry 20260926T044150Z-q8 author=codex kind=evidence -->
 ### Codex · 2026-09-26 04:41 UTC
 Independent targeted recheck: `python3 -m unittest tests.test_panes` passed 17 tests in 0.053 s. This is worker coverage with FakePane; the required live two-pane busy/idle delivery and reply remains unverified. No implementation changes made.
+
+<!-- relay:entry 20260926T052220Z-a3 author=codex kind=evidence -->
+### Codex · 20260926T052220Z
+Live Xvfb two-pane scripted-provider probe: p1→p2 busy delivery returned `delivered`; p2 saw BUSY-PING at its next step and sent BUSY-REPLY to p1, which displayed it. Second p1→p2 send after 20 seconds and p2 completed-turn checkmark still returned `busy: true`; no idle wake or IDLE-REPLY observed. Recipient was synthetic CARD-WORK-BUSY, not a claimed Board card. Targeted unittest: 17 passed. #MJG6 remains open; #R5TC remains needs-verification.
