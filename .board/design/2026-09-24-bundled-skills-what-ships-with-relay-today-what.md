@@ -8,7 +8,7 @@ waiting_on: owner
 rank: zzzzzzzzzzzzzzzzzzzzr
 created: '2026-09-24'
 source: 'Claude Fable guest session in Relay, 2026-09-24, split out of #9HS0'
-links: {commits: [b74afc4f68e6, c1a9585ff165], evidence: [reports/Bundled skills for Relay.md], github: null, plans: [], related: [9HS0, 1QKM, XHXX, HS7V, MEPR, GSK7, MSJ0, 95VZ, 9FX8, JVEJ, 4YKJ]}
+links: {commits: [b74afc4f68e6, c1a9585ff165, a9870d95e14b], evidence: [reports/Bundled skills for Relay.md], github: null, plans: [], related: [9HS0, 1QKM, XHXX, HS7V, MEPR, GSK7, MSJ0, 95VZ, 9FX8, JVEJ, 4YKJ]}
 ---
 # Bundled skills: what ships with Relay today, what the starter tasks need, and what the skill catalogue shows an agent
 
