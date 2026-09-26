@@ -27,17 +27,31 @@ def _relay_wrap_message(message):
     return wrapped
 
 
-def _relay_bind_redraw(session):
-    """Ctrl+X Ctrl+P repaints the prompt where the cursor is, as Relay's Bash integration binds it
-    for Readline: the pane erases the prompt row, prints the agent's lines, then sends these keys.
-    prompt_toolkit would otherwise redraw over what it believes is still its prompt."""
+def _relay_bind_redraw(session, shell=None):
+    """Two key chords the pane sends around the lines it prints at the prompt (#83YV).
+
+    Ctrl+X Ctrl+Y: Relay is about to print over the prompt row. An attached jupyter console
+    (`shell`) holds other clients' output — the agent's py_run_cell cells — from now on, instead
+    of writing it into the middle of the agent's block.
+    Ctrl+X Ctrl+P: Relay is done. The prompt is repainted where the cursor is, as Relay's Bash
+    integration binds it for Readline; prompt_toolkit would otherwise redraw over what it believes
+    is still its prompt. Held output is written first, above the new prompt."""
     from prompt_toolkit.key_binding import KeyBindings, merge_key_bindings
 
     bindings = KeyBindings()
 
+    @bindings.add("c-x", "c-y")
+    def _hold(event):
+        if shell is not None:
+            shell._relay_hold = True
+
     @bindings.add("c-x", "c-p")
     def _redraw(event):
         event.app.renderer.reset()
+        if shell is not None and getattr(shell, "_relay_hold", False):
+            shell._relay_hold = False
+            from prompt_toolkit.application import run_in_terminal
+            run_in_terminal(shell.handle_iopub)
         event.app.invalidate()
 
     session.key_bindings = merge_key_bindings([b for b in (session.key_bindings, bindings) if b])
@@ -66,7 +80,7 @@ def _relay_patch_jupyter_console(config):
     def init_prompt_toolkit_cli(self):
         init_cli(self)
         self.pt_cli.message = _relay_wrap_message(self.pt_cli.message)
-        _relay_bind_redraw(self.pt_cli)
+        _relay_bind_redraw(self.pt_cli, self)
 
     def spy_on_replies(self):
         """The execute_reply's status is read inside the shell and dropped; the shell channel's
@@ -103,6 +117,33 @@ def _relay_patch_jupyter_console(config):
 
     Shell.init_prompt_toolkit_cli = init_prompt_toolkit_cli
     Shell.run_cell = patched_run_cell
+
+    async def handle_external_iopub(self, loop=None):
+        """jupyter console's own poll, except that it leaves the agent's output queued on the
+        socket while Relay holds the screen (Ctrl+X Ctrl+Y); Ctrl+X Ctrl+P writes it out."""
+        import asyncio
+        from jupyter_console.utils import ensure_async
+        while self.keep_running:
+            if not getattr(self, "_relay_hold", False) \
+                    and await ensure_async(self.client.iopub_channel.socket.poll(0)):
+                self.handle_iopub()
+            await asyncio.sleep(0.5)
+
+    Shell.handle_external_iopub = handle_external_iopub
+
+    def print_remote_prompt(self, ec=None):
+        """Another client's cell as one line, `[agent] In [2]: print(x + 1)`, on stdout like the
+        code and output jupyter console writes after it: its own version went through
+        prompt_toolkit, so the label landed after them, beside the next prompt. The bare call it
+        makes after another client's result ("add new prompt") is dropped — prompt_toolkit draws
+        the real prompt under the output."""
+        import sys
+        if ec is None:
+            return
+        sys.stdout.write(f"{self.other_output_prefix}In [{ec}]: ")
+        sys.stdout.flush()
+
+    Shell.print_remote_prompt = print_remote_prompt
 
     # Ctrl+C in the pty. An attached console has no kernel manager, so jupyter console refuses
     # ("Cannot interrupt kernels we didn't start"); the Jupyter protocol's own interrupt is an

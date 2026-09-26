@@ -277,8 +277,9 @@ class SharedKernelTest(Base):
         send({"type": "shutdown"})
 
 
-def run_in_pty(argv, steps, settle=4.0, env=None):
-    """Run argv in a pty; each step is (bytes to type, seconds to wait, callable or None)."""
+def run_in_pty(argv, steps, settle=4.0, env=None, snapshots=None):
+    """Run argv in a pty; each step is (bytes to type, seconds to wait, callable or None).
+    `snapshots`, a list, gets the output so far after each step."""
     pid, fd = pty.fork()
     if pid == 0:
         os.environ.update(env or {})
@@ -305,6 +306,8 @@ def run_in_pty(argv, steps, settle=4.0, env=None):
             if action is not None:
                 action()
             pump(seconds)
+            if snapshots is not None:
+                snapshots.append(out.decode("utf-8", "replace"))
     finally:
         try:
             os.kill(pid, 9)
@@ -370,6 +373,28 @@ class ConsoleRedrawTest(Base):
         text = run_in_pty(self.open_console()["argv"], [(b"x = 4", 1.0, None), (b"\x18\x10", 2.0, None)],
                           settle=30)
         assert_repainted(self, text)
+
+    def test_the_agents_cell_waits_for_the_redraw_while_relay_holds_the_screen(self):
+        """Ctrl+X Ctrl+Y (the pane opening its block) holds the agent's cell; Ctrl+X Ctrl+P (the
+        block closing) writes it, then the prompt — never into the middle of the agent's lines."""
+        answer = self.open_console()
+        tools = W.PluginTools(self.manager)
+        snapshots = []
+        run_in_pty(answer["argv"], [
+            (b"x = 41\r", 2.0, None),
+            (b"\x18\x19", 1.0, None),
+            (None, 3.0, lambda: tools.run("py_run_cell", {"code": "print(x + 1)", "intent": "add one"})),
+            (b"\x18\x10", 3.0, None),
+        ], settle=30, snapshots=snapshots)
+        strip = lambda text: re.sub(r"\x1b\[[0-9;?]*[A-Za-z]|\x1b\][^\x07]*\x07", "", text)
+        held, released = strip(snapshots[2]), strip(snapshots[3])
+        self.assertNotIn("42", held)
+        tail = released[len(held):]
+        # One line for the agent's cell, its output under it, and nothing dangling after.
+        self.assertRegex(tail, r"\[agent\] In \[2\]: print\(x \+ 1\)\r?\n42\r?\n")
+        self.assertEqual(1, tail.count("[agent]"))
+        # The prompt comes back after the held output.
+        self.assertGreater(snapshots[3].rfind("\x1b]133;A\x07"), snapshots[3].rfind("42"))
 
 
 @unittest.skipUnless(IPYTHON, "IPython is not installed in this Python")

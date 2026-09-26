@@ -966,8 +966,9 @@ void Pane::startTerminal(bool cleanShell, const ConsoleProgram &program) {
             m_lastPromptMark = kind;
             if (kind == 'D') m_lastMarkExitCode = exitCode;
             // A console's prompt is back (#83YV): what the agent said while a cell ran prints now,
-            // after the parser has finished the chunk that drew the prompt.
-            if (kind == 'B' && m_consoleProgram.isValid())
+            // after the parser has finished the chunk that drew the prompt. A or B: a prompt
+            // prompt_toolkit repaints by difference may carry only its A.
+            if ((kind == 'A' || kind == 'B') && m_consoleProgram.isValid())
                 QTimer::singleShot(0, this, [this] { flushInline(); });
             // Marks while a login owns the terminal come from the remote shell: they say exactly
             // when it is at its prompt, without waiting for the screen poll.
@@ -2110,6 +2111,9 @@ void Pane::printInline(const QString &text, Ink ink) {
             }
             // Erase the idle prompt line; closeInline() asks Readline to redraw it afterwards.
             out += "\r\x1b[2K";
+            // A console holds other clients' output (the agent's cells) until that redraw, so it
+            // lands under the block rather than inside it (ipython_startup.py, #83YV).
+            if (consoleAtPrompt()) sendShellInput(QStringLiteral("\x18\x19"));
             m_inlineOpen = true; m_atLineStart = true;
             m_wrap.reset();
             holdShellResize(true);
