@@ -46,7 +46,7 @@ if [[ ${RELAY_SKIP_DEPS:-0} != 1 ]]; then
   # python3-cryptography is a runtime dependency (remote access, Relay Free) whose tests run here.
   # curl and xz-utils fetch and unpack the pinned Zig release for libghostty-vt.
   $sudo apt-get install -y -q --no-install-recommends build-essential cmake ninja-build \
-    python3 python3-cryptography dpkg-dev file bash git ca-certificates curl xz-utils "${deps[@]}"
+    python3 python3-cryptography dpkg-dev file bash git ca-certificates curl xz-utils liblzma-dev "${deps[@]}"
 fi
 
 if [[ -n ${RELAY_BUILD_DIR:-} ]]; then
