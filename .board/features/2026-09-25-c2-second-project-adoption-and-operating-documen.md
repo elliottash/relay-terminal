@@ -10,7 +10,7 @@ rank: zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzi
 created: '2026-09-25'
 verify: {artifact: code, primary: script, also: [probe], human: none, effort: high}
 source: 'Approved #3MH4 implementation workstream, 2026-09-26'
-links: {plans: [], commits: [e5623581cf0a], evidence: [tests/test_parallel_project_adoption.py], related: [], github: null}
+links: {plans: [], commits: [e5623581cf0a, 9c97f2676ffd], evidence: [tests/test_parallel_project_adoption.py], related: [], github: null}
 ---
 # C2: Second-project adoption and operating documentation
 
