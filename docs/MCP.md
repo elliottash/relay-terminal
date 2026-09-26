@@ -110,5 +110,28 @@ gallery live in Warp's database; add those again by hand. The preview marks each
 `conflict` or `invalid`. Only `new` rows you name are written, and a conflict is never overwritten.
 Imported rows are `untrusted` unless `--trust` says otherwise.
 
-The Options › Security UI for these settings is card #3KB7's reserved rows. It is not built yet;
-the files and the two commands above are the interface for now.
+## Options › Security › MCP servers, and the `mcp-servers` skill
+
+Options › Security has an **MCP servers** block (card #9M96, the rows card #3KB7 reserved). It
+shows one row per server: its scope, command or URL, env/header names and state. The buttons are
+Trust/Untrust, Disable/Enable and Remove. A project server that is not enabled offers *Enable* and
+*Enable as trusted*, behind a confirmation that shows the command it would launch. *Add server…*
+takes a name, a command line or URL, and KEY=VALUE env or header lines. *Import…* shows the preview
+above with a checkbox per `new` row. The block does not write any file itself. It reads
+`mcp_config list --json` again when the global file or the project's `.mcp.json` changes, and each
+button runs the CLI below. The Add dialog passes values on stdin (`--secrets-stdin`), never in argv.
+No agent may press these buttons.
+
+```
+PYTHONPATH=backend python3 -m relay_core.mcp_config list --json [--workspace .]
+PYTHONPATH=backend python3 -m relay_core.mcp_config add <name> --command=CMD [--arg=A ...] [--trust T] [--secrets-stdin]
+PYTHONPATH=backend python3 -m relay_core.mcp_config add <name> --url=URL [--secrets-stdin]
+PYTHONPATH=backend python3 -m relay_core.mcp_config remove <name>
+PYTHONPATH=backend python3 -m relay_core.mcp_config enable|disable --global <name>
+PYTHONPATH=backend python3 -m relay_core.mcp_import --json [--add a,b] [--trust T]
+```
+
+`--secrets-stdin` reads `{"env": {...}, "headers": {...}}` as JSON. Pane agents get the bundled
+`mcp-servers` skill (`backend/relay_core/skills_bundled/mcp-servers/SKILL.md`). It walks a user
+through the same commands: preview before import, and trust or enable only on the user's explicit
+yes.

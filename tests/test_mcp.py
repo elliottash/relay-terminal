@@ -517,5 +517,97 @@ class ImportTests(Base):
         self.assertEqual(mcp_config.load().get("a").trust, "trusted")
 
 
+class OptionsCliTests(Base):
+    """The CLI surface the Options › Security block and the mcp-servers skill drive (card #9M96)."""
+
+    def cli(self, module, *args):
+        env = {**os.environ, "PYTHONPATH": str(REPO / "backend"), "RELAY_MCP_CONFIG": str(self.global_file),
+               "HOME": self.tmp.name}
+        return subprocess.run([sys.executable, "-m", module, *args], env=env, capture_output=True, text=True)
+
+    def listed(self, *extra):
+        out = self.cli("relay_core.mcp_config", "list", "--json", *extra)
+        self.assertEqual(out.returncode, 0, out.stderr)
+        return {row["name"]: row for row in json.loads(out.stdout)["servers"]}
+
+    def test_add_list_trust_disable_remove_round_trip(self):
+        out = self.cli("relay_core.mcp_config", "add", "gh", "--command", "gh-mcp", "--arg=--stdio",
+                       "--env", "GH_TOKEN=sekrit", "--trust", "trusted")
+        self.assertEqual(out.returncode, 0, out.stderr)
+        self.assertNotIn("sekrit", out.stdout)
+        self.cli("relay_core.mcp_config", "add", "docs", "--url", "https://docs.example/mcp",
+                 "--header", "Authorization=Bearer ${DOCS_TOKEN}")
+        rows = self.listed()
+        self.assertEqual(rows["gh"]["command"], "gh-mcp --stdio")
+        self.assertEqual(rows["gh"]["env"], ["GH_TOKEN"])
+        self.assertEqual(rows["gh"]["trust"], "trusted")
+        self.assertEqual(rows["docs"]["trust"], "untrusted", "added servers default to untrusted")
+        self.assertNotIn("sekrit", json.dumps(rows))
+        dup = self.cli("relay_core.mcp_config", "add", "gh", "--command", "x")
+        self.assertEqual(dup.returncode, 2)
+        self.assertIn("already exists", dup.stderr)
+        bad = self.cli("relay_core.mcp_config", "add", "bad name", "--command", "x")
+        self.assertEqual(bad.returncode, 2)
+        self.assertEqual(self.cli("relay_core.mcp_config", "trust", "docs", "trusted").returncode, 0)
+        self.assertEqual(self.listed()["docs"]["trust"], "trusted")
+        self.assertEqual(self.cli("relay_core.mcp_config", "disable", "--global", "gh").returncode, 0)
+        self.assertFalse(self.listed()["gh"]["enabled"])
+        self.assertIsNone(mcp_config.load().get("gh"), "a disabled server does not load")
+        self.assertEqual(self.cli("relay_core.mcp_config", "enable", "--global", "gh").returncode, 0)
+        self.assertTrue(self.listed()["gh"]["enabled"])
+        self.assertEqual(self.cli("relay_core.mcp_config", "remove", "gh").returncode, 0)
+        self.assertNotIn("gh", self.listed())
+        self.assertEqual(oct(self.global_file.stat().st_mode & 0o777), "0o600")
+
+    def test_list_json_shows_pending_project_servers(self):
+        self.write_project({"repo": stdio()})
+        rows = self.listed("--workspace", str(self.ws))
+        self.assertTrue(rows["repo"]["pending"])
+        self.assertFalse(rows["repo"]["enabled"])
+        self.assertIn("fixtures_mcp_server.py", rows["repo"]["command"], "the pane shows what enabling launches")
+
+    def test_secrets_on_stdin_stay_out_of_argv(self):
+        env = {**os.environ, "PYTHONPATH": str(REPO / "backend"), "RELAY_MCP_CONFIG": str(self.global_file)}
+        out = subprocess.run([sys.executable, "-m", "relay_core.mcp_config", "add", "gh", "--command", "gh-mcp",
+                              "--env", "PLAIN=1", "--secrets-stdin"], env=env, capture_output=True, text=True,
+                             input=json.dumps({"env": {"GH_TOKEN": "sekrit"}, "headers": {}}))
+        self.assertEqual(out.returncode, 0, out.stderr)
+        stored = mcp_config.server_map(json.loads(self.global_file.read_text()))["gh"]
+        self.assertEqual(stored["env"], {"PLAIN": "1", "GH_TOKEN": "sekrit"})
+
+    def test_import_json_preview_and_add(self):
+        claude = Path(self.tmp.name) / "claude.json"
+        claude.write_text(json.dumps({"mcpServers": {"a": {"command": "a-mcp", "env": {"TOK": "sekrit"}}}}))
+        out = self.cli("relay_core.mcp_import", "--claude-config", str(claude), "--json")
+        preview = json.loads(out.stdout)
+        self.assertEqual([(r["name"], r["status"], r["env"]) for r in preview["rows"]], [("a", "new", ["TOK"])])
+        self.assertEqual(preview["added"], [])
+        self.assertNotIn("sekrit", out.stdout)
+        self.assertFalse(self.global_file.exists())
+        out = self.cli("relay_core.mcp_import", "--claude-config", str(claude), "--json", "--add", "a")
+        self.assertEqual(json.loads(out.stdout)["added"], ["a"])
+        self.assertEqual(mcp_config.load().get("a").trust, "untrusted")
+
+
+class SkillTests(Base):
+    def test_bundled_mcp_servers_skill_loads_and_names_real_commands(self):
+        import re
+        from relay_core import skills
+        index = skills.SkillIndex.load([skills.bundled_dir()])
+        self.assertIn("mcp-servers", index.skills)
+        self.assertLessEqual(len(index.skills["mcp-servers"].description), skills.MAX_DESCRIPTION)
+        content = index.load_skill("mcp-servers")["content"]
+        # Every subcommand the skill tells an agent to run exists in the CLI it names.
+        for module, sub in re.findall(r"relay_core\.(mcp_config|mcp_import)\s+(\w+)?", content):
+            if module == "mcp_config" and sub:
+                out = self.cli("relay_core.mcp_config", sub, "--help")
+                self.assertEqual(out.returncode, 0, f"{sub}: {out.stderr}")
+        self.assertIn("--secrets-stdin", content)
+
+    def cli(self, module, *args):
+        env = {**os.environ, "PYTHONPATH": str(REPO / "backend"), "RELAY_MCP_CONFIG": str(self.global_file)}
+        return subprocess.run([sys.executable, "-m", module, *args], env=env, capture_output=True, text=True)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -1,0 +1,10 @@
+.............................                                            [100%]
+29 passed in 5.37s
+
+ctest -R ^mcpsettings$ on a private export of tip + the landed hunks:
+build=0
+100% tests passed, 0 tests failed out of 1
+
+Total Test time (real) =   0.04 sec
+
+[exited with code 0]

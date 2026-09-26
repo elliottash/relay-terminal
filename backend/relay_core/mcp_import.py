@@ -5,6 +5,7 @@
     PYTHONPATH=backend python3 -m relay_core.mcp_import --add github,fs  # add those rows
     PYTHONPATH=backend python3 -m relay_core.mcp_import --all --trust trusted
     PYTHONPATH=backend python3 -m relay_core.mcp_import --interactive    # ask row by row
+    PYTHONPATH=backend python3 -m relay_core.mcp_import --json [--add a,b]  # the same, as JSON
 
 Sources, each read-only:
 
@@ -180,6 +181,18 @@ def apply(rows: list[Row], chosen: set[str], trust: str) -> list[str]:
     return added
 
 
+def _print_json(rows: list[Row], problems: list[str], added: list[str]) -> None:
+    """The preview as the Options pane reads it (card #9M96): env and header *names* only."""
+    def keys(field: str, row: Row) -> list[str]:
+        value = row.entry.get(field) if isinstance(row.entry, dict) else None
+        return sorted(value) if isinstance(value, dict) else []
+    print(json.dumps({"rows": [{"name": r.name, "source": r.source, "status": r.status, "detail": r.detail,
+                                "where": r.where(), "env": keys("env", r), "headers": keys("headers", r)}
+                               for r in rows],
+                      "problems": problems, "added": added,
+                      "global_path": str(mcp_config.global_path())}))
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="relay_core.mcp_import",
                                      description="Preview and import MCP servers from Claude Code, Codex and Warp.")
@@ -192,6 +205,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--claude-config", type=Path)
     parser.add_argument("--codex-config", type=Path)
     parser.add_argument("--warp-config", type=Path)
+    parser.add_argument("--json", action="store_true",
+                        help="print the preview (and what was added) as JSON; the Options pane reads it")
     args = parser.parse_args(argv)
     try:
         rows, problems = collect(workspace=args.workspace, claude=args.claude_config,
@@ -199,9 +214,10 @@ def main(argv: list[str] | None = None) -> int:
     except mcp_config.ConfigError as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 2
-    print(preview(rows))
-    for line in problems:
-        print(f"problem: {line}", file=sys.stderr)
+    if not args.json:
+        print(preview(rows))
+        for line in problems:
+            print(f"problem: {line}", file=sys.stderr)
     fresh = [r for r in rows if r.status == "new"]
     if args.all:
         chosen = {r.name for r in fresh}
@@ -217,6 +233,9 @@ def main(argv: list[str] | None = None) -> int:
             if answer.strip().lower() in ("y", "yes"):
                 chosen.add(row.name)
     else:
+        if args.json:
+            _print_json(rows, problems, [])
+            return 0
         if fresh:
             print(f"\nNothing written. Add rows with --add NAME[,NAME], --all or --interactive "
                   f"(to {mcp_config.global_path()}).")
@@ -226,6 +245,9 @@ def main(argv: list[str] | None = None) -> int:
     except (mcp_config.ConfigError, OSError) as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 2
+    if args.json:
+        _print_json(rows, problems, added)
+        return 0
     print(f"\nAdded {len(added)} server(s) as {args.trust}: {', '.join(added) or 'none'} "
           f"({mcp_config.global_path()}).")
     return 0

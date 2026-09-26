@@ -21,6 +21,9 @@ Nothing here logs or returns a server's `env` or `headers` values: they are wher
 
     PYTHONPATH=backend python3 -m relay_core.mcp_config list --workspace .
     PYTHONPATH=backend python3 -m relay_core.mcp_config enable <server> --workspace . [--trust trusted]
+    PYTHONPATH=backend python3 -m relay_core.mcp_config add <server> --command npx --arg=-y --arg=pkg
+    PYTHONPATH=backend python3 -m relay_core.mcp_config add <server> --url https://host/mcp
+    PYTHONPATH=backend python3 -m relay_core.mcp_config remove|trust|enable --global|disable --global ...
 """
 from __future__ import annotations
 
@@ -342,8 +345,33 @@ def set_trust(name: str, trust: str, workspace: str | Path | None = None) -> str
     return spec.origin
 
 
-def _print_list(workspace: str | None) -> int:
+def _print_list(workspace: str | None, as_json: bool = False) -> int:
     config = load(workspace)
+    if as_json:
+        # Card #9M96: the Options pane reads this; keep it the same redacted shape as the table.
+        rows = []
+        for spec in config.servers:
+            rows.append({**spec.summary(), "enabled": True, "source": spec.source})
+        ppath = project_path(workspace or ".")
+        try:
+            project = server_map(read_json(ppath)) if config.pending else {}
+        except ConfigError:
+            project = {}
+        for name in config.pending:
+            # What enabling it would launch, so the pane can show it before anyone says yes.
+            try:
+                shown = parse_server(name, project.get(name), origin="project", source=str(ppath)).summary()
+            except ConfigError:
+                shown = {"name": name, "origin": "project", "transport": "", "command": "", "url": "",
+                         "env": [], "headers": []}
+            rows.append({**shown, "trust": "", "enabled": False, "pending": True, "source": str(ppath)})
+        rows += [{"name": name, "origin": "global", "transport": "", "command": "", "url": "",
+                  "env": [], "headers": [], "trust": "", "enabled": False, "pending": False,
+                  "source": str(global_path())} for name in config.disabled]
+        print(json.dumps({"servers": rows, "problems": config.problems,
+                          "global_path": str(global_path()),
+                          "project_path": str(project_path(workspace)) if workspace else ""}))
+        return 0
     for spec in config.servers:
         row = spec.summary()
         where = row["command"] or row["url"]
@@ -360,22 +388,125 @@ def _print_list(workspace: str | None) -> int:
     return 0
 
 
+def add_global(name: str, entry: dict) -> ServerSpec:
+    """Validate `entry` and write it into the global file; refuses to overwrite. (#9M96)"""
+    spec = parse_server(name, entry, origin="global", source=str(global_path()))
+
+    def mutate(document: dict) -> None:
+        servers = _servers_of(document)
+        if name in servers:
+            raise ConfigError(f"{global_path()}: server {name!r} already exists "
+                              f"(remove it first, or `trust {name}` to change its trust).")
+        servers[name] = entry
+
+    update_global(mutate)
+    return spec
+
+
+def remove_global(name: str) -> None:
+    def mutate(document: dict) -> None:
+        servers = _servers_of(document)
+        if name not in servers:
+            raise ConfigError(f"{global_path()} has no server {name!r}.")
+        del servers[name]
+
+    update_global(mutate)
+
+
+def set_enabled(name: str, enabled: bool) -> None:
+    """Flip a global server's `enabled` flag (disabled servers stay configured but never load)."""
+    def mutate(document: dict) -> None:
+        servers = _servers_of(document)
+        if name not in servers:
+            raise ConfigError(f"{global_path()} has no server {name!r}.")
+        if enabled:
+            servers[name].pop("enabled", None)
+        else:
+            servers[name]["enabled"] = False
+
+    update_global(mutate)
+
+
+def _kv_pairs(items: list[str], what: str) -> dict:
+    """CLI `KEY=VALUE` pairs into the dict the schema wants."""
+    out: dict[str, str] = {}
+    for item in items:
+        key, sep, value = item.partition("=")
+        if not sep or not key.strip():
+            raise ConfigError(f"--{what} wants KEY=VALUE, got {item!r}.")
+        out[key.strip()] = value
+    return out
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="relay_core.mcp_config", description=__doc__.split("\n\n")[0])
     sub = parser.add_subparsers(dest="cmd", required=True)
     for cmd in ("list", "enable", "disable", "trust"):
         p = sub.add_parser(cmd)
         p.add_argument("--workspace", default=None)
-        if cmd != "list":
+        if cmd == "list":
+            p.add_argument("--json", action="store_true", help="machine-readable rows (the Options pane reads this)")
+        else:
             p.add_argument("server")
+        if cmd in ("enable", "disable"):
+            p.add_argument("--global", dest="is_global", action="store_true",
+                           help="switch a global server on or off instead of a project one")
         if cmd in ("enable", "trust"):
             p.add_argument("--trust" if cmd == "enable" else "level", choices=TRUST_LEVELS,
                            default=UNTRUSTED if cmd == "enable" else None)
+    add = sub.add_parser("add", help="add a global server")
+    add.add_argument("server")
+    where = add.add_mutually_exclusive_group(required=True)
+    where.add_argument("--command", help="stdio: the executable to launch")
+    where.add_argument("--url", help="streamable HTTP endpoint")
+    add.add_argument("--arg", action="append", default=[], help="one argument, as --arg=VALUE (repeatable)")
+    add.add_argument("--env", action="append", default=[], help="KEY=VALUE for the server (repeatable)")
+    add.add_argument("--header", action="append", default=[], help="KEY=VALUE HTTP header (repeatable)")
+    add.add_argument("--trust", choices=TRUST_LEVELS, default=UNTRUSTED)
+    add.add_argument("--timeout", type=float, default=None)
+    add.add_argument("--secrets-stdin", action="store_true",
+                     help='read {"env": {...}, "headers": {...}} as JSON on stdin, so values stay out of argv')
+    remove = sub.add_parser("remove", help="remove a global server")
+    remove.add_argument("server")
     args = parser.parse_args(argv)
     try:
         if args.cmd == "list":
-            return _print_list(args.workspace)
-        if args.cmd == "enable":
+            return _print_list(args.workspace, args.json)
+        if args.cmd == "add":
+            entry: dict = {"command": args.command} if args.command else {"url": args.url}
+            if args.arg:
+                entry["args"] = args.arg
+            if args.env:
+                entry["env"] = _kv_pairs(args.env, "env")
+            if args.header:
+                entry["headers"] = _kv_pairs(args.header, "header")
+            if args.secrets_stdin:
+                try:
+                    secrets = json.loads(sys.stdin.read() or "{}")
+                except ValueError as exc:
+                    raise ConfigError(f"--secrets-stdin: not JSON ({exc.msg}).") from None
+                if not isinstance(secrets, dict):
+                    raise ConfigError("--secrets-stdin wants a JSON object.")
+                for key in ("env", "headers"):
+                    if secrets.get(key):
+                        if not isinstance(secrets[key], dict):
+                            raise ConfigError(f"--secrets-stdin: {key} must be an object.")
+                        entry[key] = {**entry.get(key, {}), **secrets[key]}
+            if args.timeout is not None:
+                entry["timeout"] = args.timeout
+            entry["trust"] = args.trust
+            spec = add_global(args.server, entry)
+            print(f"Added {args.server} ({spec.transport}, {spec.trust}) to {global_path()}.")
+        elif args.cmd == "remove":
+            remove_global(args.server)
+            print(f"Removed {args.server} from {global_path()}.")
+        elif args.cmd == "enable" and args.is_global:
+            set_enabled(args.server, True)
+            print(f"Enabled global server {args.server}.")
+        elif args.cmd == "disable" and args.is_global:
+            set_enabled(args.server, False)
+            print(f"Disabled global server {args.server}.")
+        elif args.cmd == "enable":
             workspace = args.workspace or "."
             entry = server_map(read_json(project_path(workspace))).get(args.server)
             if entry is not None:
