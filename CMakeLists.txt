@@ -873,8 +873,10 @@ if(BUILD_TESTING)
     set_tests_properties(modelspane PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
     # The agent's side of Options and Actions (#FEJQ, §30): the catalog, the command executor, the
     # change log and Undo. No window: the catalogs are the same structs the settings pane takes.
+    # relay-jobstab: its catalog carries the #WK7C per-job `roles.<role>` rows, whose writers are
+    # `relay::rolestore` (defined there) — the assertions in the test are the rolestore keys.
     add_executable(relay-appcommands-tests tests/appcommands_test.cpp)
-    target_link_libraries(relay-appcommands-tests PRIVATE relay-appcommands ${RELAY_QT}::Test)
+    target_link_libraries(relay-appcommands-tests PRIVATE relay-appcommands relay-jobstab ${RELAY_QT}::Test)
     add_test(NAME appcommands COMMAND relay-appcommands-tests)
     set_tests_properties(appcommands PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
     add_executable(relay-reminders-tests tests/reminders_test.cpp)

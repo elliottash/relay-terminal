@@ -180,7 +180,7 @@ private Q_SLOTS:
                                                   QStringLiteral("local"), QStringLiteral("fixed")}));
         QCOMPARE(jobsUnder(tab.list(), QStringLiteral("main")),
                  (QStringList{QStringLiteral("agent turns"), QStringLiteral("subagents"),
-                              QStringLiteral("helper agent")}));
+                              QStringLiteral("system-pane agent")}));
         QCOMPARE(jobsUnder(tab.list(), QStringLiteral("flash")),
                  (QStringList{QStringLiteral("terminal driving"), QStringLiteral("/flash panes"),
                               QStringLiteral("summaries"), QStringLiteral("suggestions")}));
@@ -206,7 +206,7 @@ private Q_SLOTS:
         }
     }
 
-    // ----- "runs on": the column that did not exist ----------------------------------------------
+    // ----- "live (this pane)": the worker's report, informational only ----------------------------
 
     void runsOnNamesTheModelTheWorkerResolvedWithItsLevel() {
         Served served;
@@ -338,6 +338,113 @@ private Q_SLOTS:
         QVERIFY(tab.selectRole(QStringLiteral("suggestions")));
         QVERIFY(!tab.clearOverride());
         QCOMPARE(served.resends, 0);
+    }
+
+    // ----- the rules-first framing (#WBFM): the tab is an editor, and says which cell is not one --
+
+    // Owner, 2026-09-25: "agent jobs is NOT pane specific. it should be for setting rules". The
+    // columns say which is which: the editor is the rule column, and the worker's report is a
+    // dimmed cell named for what it is — one pane's answer, not the setting.
+    void theColumnsSayWhatIsARuleAndWhatIsOnlyAReport() {
+        Served served;
+        JobsTab tab;
+        tab.setData(dataFor(&served));
+        QCOMPARE(tab.list()->headerItem()->text(0), QStringLiteral("job"));
+        QCOMPARE(tab.list()->headerItem()->text(1), QStringLiteral("what it does"));
+        QCOMPARE(tab.list()->headerItem()->text(2), QStringLiteral("live (this pane)"));
+        QCOMPARE(tab.list()->headerItem()->text(3), QStringLiteral("rule"));
+        // The report cell is greyed like an unset rule, so it cannot read as a setting.
+        QCOMPARE(rowFor(tab.list(), QStringLiteral("summaries"))->foreground(2),
+                 tab.list()->palette().brush(QPalette::Disabled, QPalette::Text));
+    }
+
+    void agentTurnsPresentPaneFollowingAsTheDesignItIsNotADeadOverride() {
+        Served served;
+        JobsTab tab;
+        tab.setData(dataFor(&served));
+        QTreeWidgetItem *row = rowFor(tab.list(), QStringLiteral("main"));
+        QVERIFY(row != nullptr);
+        QCOMPARE(row->text(3), QStringLiteral("not settable · each agent pane's active model"));
+    }
+
+    // ----- the options catalog's roles.<job> rows (#WK7C) -----------------------------------------
+
+    // One source of truth: a pin written from the catalog's text row lands on exactly the keys
+    // the picker writes, minus the effort — the table is where effort is chosen.
+    void anOptionsRowPinWritesTheSameKeysThePickerWrites() {
+        QString why;
+        QVERIFY(rolestore::applyRoleValue(QStringLiteral("summaries"), QStringLiteral("kimi|kimi-k3"), &why));
+        QCOMPARE(why, QString());
+        QCOMPARE(setting(QStringLiteral("summaries"), QStringLiteral("preset")), QStringLiteral("kimi"));
+        QCOMPARE(setting(QStringLiteral("summaries"), QStringLiteral("model")), QStringLiteral("kimi-k3"));
+        QVERIFY(!QSettings().contains(rolestore::roleSetting(QStringLiteral("summaries"),
+                                                             QStringLiteral("effort"))));
+        QCOMPARE(rolestore::roleValue(QStringLiteral("summaries")), QStringLiteral("kimi|kimi-k3"));
+    }
+
+    // A bare word is a preset on its own — that provider's default model — and it reads back as
+    // the same one word, not with the picker's bar.
+    void aBarePresetPinMeansThatProvidersDefaultModel() {
+        QString why;
+        QVERIFY(rolestore::applyRoleValue(QStringLiteral("summaries"), QStringLiteral("kimi"), &why));
+        QCOMPARE(setting(QStringLiteral("summaries"), QStringLiteral("preset")), QStringLiteral("kimi"));
+        QCOMPARE(setting(QStringLiteral("summaries"), QStringLiteral("model")), QString());
+        QCOMPARE(rolestore::roleValue(QStringLiteral("summaries")), QStringLiteral("kimi"));
+    }
+
+    // The tier follow the retired dialog could pin, back as an agent-writable rule: it clears the
+    // endpoint (a tier and an endpoint are exclusive, protocol 13.7) and a pin clears it back.
+    void anOptionsRowTierFollowPinsTheTierAndClearsTheEndpointBothWays() {
+        QVERIFY(rolestore::setOverride(QStringLiteral("summaries"), QStringLiteral("kimi|kimi-k3"),
+                                       QStringLiteral("low")));
+        QString why;
+        QVERIFY(rolestore::applyRoleValue(QStringLiteral("summaries"), QStringLiteral("tier:high"), &why));
+        QCOMPARE(setting(QStringLiteral("summaries"), QStringLiteral("tier")), QStringLiteral("high"));
+        for (const char *field : {"preset", "model", "effort"})
+            QVERIFY2(!QSettings().contains(rolestore::roleSetting(QStringLiteral("summaries"),
+                                                                  QLatin1String(field))), field);
+        QCOMPARE(rolestore::roleValue(QStringLiteral("summaries")), QStringLiteral("tier:high"));
+        QVERIFY(rolestore::applyRoleValue(QStringLiteral("summaries"), QStringLiteral("kimi|kimi-k3"), &why));
+        QVERIFY(!QSettings().contains(rolestore::roleSetting(QStringLiteral("summaries"),
+                                                             QStringLiteral("tier"))));
+    }
+
+    // Empty is the whole rule back to its tier, ranked list included — the picker's clear, again.
+    void anOptionsRowClearFollowsTheTierAgain() {
+        QVERIFY(rolestore::setOverride(QStringLiteral("summaries"), QStringLiteral("kimi|kimi-k3"),
+                                       QStringLiteral("low")));
+        QString why;
+        QVERIFY(rolestore::applyRoleValue(QStringLiteral("summaries"), QString(), &why));
+        QCOMPARE(rolestore::roleValue(QStringLiteral("summaries")), QString());
+        QVERIFY(!rolestore::rankedOverrideSet(QStringLiteral("summaries")));
+    }
+
+    // A ranked list is the table's own to edit: it reads as the word, and a write of that word is
+    // refused with a why, so an agent is told where to go instead of silently replacing the list.
+    void anOptionsRowRankedListIsTheTablesOwnToEdit() {
+        rolestore::setRankedOverride(QStringLiteral("planning"), {
+            {QStringLiteral("kimi|kimi-k3"), QStringLiteral("high"), 1},
+            {QStringLiteral("glm-coding|glm-5.3"), QStringLiteral("max"), 2}});
+        QCOMPARE(rolestore::roleValue(QStringLiteral("planning")), QStringLiteral("ranked"));
+        QString why;
+        QVERIFY(!rolestore::roleValueValid(QStringLiteral("planning"), QStringLiteral("ranked"), &why));
+        QVERIFY(!why.isEmpty());
+        QVERIFY(!rolestore::applyRoleValue(QStringLiteral("planning"), QStringLiteral("ranked"), &why));
+        QVERIFY(rolestore::rankedOverrideSet(QStringLiteral("planning")));   // untouched
+    }
+
+    // The same refusals the picker enforces, asked of text: not a model, a tier that does not
+    // exist, and a guest harness handed a side call.
+    void anOptionsRowRefusesWhatThePickerRefuses() {
+        QString why;
+        QVERIFY(!rolestore::applyRoleValue(QStringLiteral("summaries"), QStringLiteral("not a model"), &why));
+        QVERIFY(!why.isEmpty());
+        QVERIFY(!rolestore::applyRoleValue(QStringLiteral("summaries"), QStringLiteral("tier:imaginary"), &why));
+        QVERIFY(!why.isEmpty());
+        QVERIFY(!rolestore::applyRoleValue(QStringLiteral("summaries"), QStringLiteral("guest:claude|opus"), &why));
+        QVERIFY(why.contains(QStringLiteral("would skip it")));
+        QVERIFY(!QSettings().contains(rolestore::roleSetting(QStringLiteral("summaries"),
+                                                             QStringLiteral("preset"))));
     }
 
     // Every write reaches the served pane's worker at once, which is what makes the column live.

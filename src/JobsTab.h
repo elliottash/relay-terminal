@@ -23,17 +23,22 @@
 // So this tab is one row per job a person can reason about, **grouped by the tier it follows**, in
 // lower-case words, with four columns:
 //
-//     job              what it does                        runs on              override
+//     job              what it does                        live (this pane)     rule
 //     ─ main ────────────────────────────────────────────  kimi-k3 · high
-//       agent turns    the conversation in this pane       kimi-k3 · high       this pane's model
+//       agent turns    the conversation in this pane       kimi-k3 · high       not settable
 //       subagents      agents the main agent starts        kimi-k3 · high       follows main
-//       helper agent   options, actions, sessions…         kimi-k3 · high       glm-5.3 · high  ×
+//       system-pane    options, actions, sessions…         kimi-k3 · high       glm-5.3 · high  ×
 //     ─ high ────────────────────────────────────────────  gpt-6-astra · xhigh
 //       plan mode      …
 //
-// **"runs on" is the point.** It is the worker's own answer (`model_roles.roles[<role>]`, protocol
-// 13), by model name and level, refreshed every time the served pane's worker reports. Nothing in
-// Relay showed a person where a summary went before this column.
+// **It is a rules editor, not a report.** Owner, 2026-09-25: "agent jobs is NOT pane specific. it
+// should be for setting rules" (card #WBFM). What the `rule` column writes applies to every pane
+// (`roles/<role>/...` in `relay::rolestore` -- the same keys an agent's `roles.<role>` option
+// writes, #WK7C), and the dimmed `live (this pane)` column only reports what the served pane's
+// worker last resolved (`model_roles.roles[<role>]`, protocol 13): kept so a rule can be checked
+// against what came back, greyed so it cannot read as a setting. The `agent turns` row follows
+// each pane's own active model by design, so its rule cell says "not settable" instead of showing
+// a dead override.
 //
 // **An override is a model or ranked model list.** The three ranked jobs show their list and
 // controls inline when selected; other jobs use the filter list on Enter. Delete clears a row
@@ -78,8 +83,9 @@ namespace relay {
 //   roles/<role>/preset    a provider of this job's own; its presence is what "overridden" means
 //   roles/<role>/model     a model of that provider; empty = that provider's default model
 //   roles/<role>/effort    the level, in the model's own word; absent = the model's own default
-//   roles/<role>/tier      written by the retired dialog only: the tier the job follows instead of
-//                          its built-in one. Never written now; read, shown and cleared.
+//   roles/<role>/tier      the tier the job follows instead of its built-in one. Written by the
+//                          retired dialog (read, shown, cleared) and again by the options
+//                          catalog's `tier:<tier>` rule (#WK7C); exclusive with an endpoint.
 //   tiers/<tier>/<field>   the one-entry-per-tier keys the five ordered lists replaced. Read by
 //                          `Pane::tiersObject` on an install that has stored no list yet.
 namespace rolestore {
@@ -112,6 +118,17 @@ bool isGuestKey(const QString &key);
 // a setting that is ignored is worse than one that was never accepted. Clearing removes all four
 // keys above, so a job goes back to its built-in tier whatever it had been put on.
 bool setOverride(const QString &role, const QString &key, const QString &effort, QString *why = nullptr);
+
+// ----- the options catalog's per-job rows (#WK7C) ----------------------------------------------
+// `roles.<role>` rows (protocol §30) are a second door onto the same keys, so an agent with
+// permission and the job rules table edit one source of truth. The row's value encodes the rule:
+// empty follows the job's tier, `tier:<tier>` is a tier follow, a `preset|model` key is a pin
+// (written without an effort of its own — the table is where effort is chosen — and clearing any
+// ranked list first, as `setOverride` does). A ranked list reads as "ranked" and only the table
+// edits it, so `roleValueValid` refuses that word with the why.
+QString roleValue(const QString &role);
+bool roleValueValid(const QString &role, const QString &value, QString *why = nullptr);   // no write
+bool applyRoleValue(const QString &role, const QString &value, QString *why = nullptr);   // writes
 }  // namespace rolestore
 
 class JobsTab final : public QWidget {

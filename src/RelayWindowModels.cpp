@@ -789,10 +789,58 @@ relay::SettingsSection RelayWindow::modelsSection(bool inModelsPane) {
         // above this one, the agent workspace is the pane's own directory, the Warp import is a
         // row of its own at the bottom of the providers, and the consent sentence is in the key
         // box where a key is actually typed. Design 5.8 has the reasoning.
-        models.rows << buttonRow(QStringLiteral("agent.modelRoles"), QStringLiteral("per-job models"),
-                                 QStringLiteral("What each job — plan mode, subagents, summaries, chores — runs on "
-                                                "right now, and a model of its own for one: the models pane's jobs tab"),
-                                 QStringLiteral("jobs…"), [this] { runAction(QStringLiteral("agent.modelRoles")); });
+        // ----- 3b. per-job rules (#WK7C) ----------------------------------------------------------
+        // An agent with permission sets a job's model the way it sets any other option: one row
+        // per settable job, ids `roles.<role>` (protocol §30), writing the same rolestore keys
+        // the job rules table writes — one source of truth, so a job's rule no longer needs the
+        // table to change it. The value encodes the rule: empty follows the job's tier,
+        // `tier:<tier>` is a tier follow, a `preset|model` key is a pin; "ranked" reads what a
+        // ranked list is while staying the table's own to edit. Collapsed by default — Options ›
+        // Models is not the rich view, and the table row below stays the door to it.
+        {
+            relay::SettingRow head = headingRow(QStringLiteral("per-job models"));
+            head.id = QStringLiteral("heading:roles");
+            head.collapsible = true;
+            head.collapsedByDefault = true;
+            head.tooltip = QStringLiteral("Each job's model rule, the way an agent sets it. The rules apply to "
+                                          "every pane; the models pane's job rules tab shows what each pane's "
+                                          "worker last resolved.");
+            models.rows << head;
+        }
+        for (const relay::JobsTab::Job &job : relay::JobsTab::jobs()) {
+            // Agent turns are not a rule — each pane runs on its own active model — and the table
+            // says so; a text cell here would read as a setting that never applies.
+            if (!job.settable) continue;
+            const QString follows = job.tier == QStringLiteral("fixed")
+                ? QStringLiteral("automatic — relay picks it")
+                : QStringLiteral("follows %1").arg(job.tier);
+            relay::SettingRow row;
+            row.id = QStringLiteral("roles.%1").arg(job.role);
+            row.label = job.name;
+            row.kind = relay::SettingRow::Kind::Text;
+            row.detail = QStringLiteral("%1. Empty %2; tier:<tier> is a tier follow; a preset|model key pins it.")
+                             .arg(job.what, follows);
+            row.placeholder = follows;
+            row.text = relay::rolestore::roleValue(job.role);
+            for (const QString &tier : relay::models::curation::tierIds())
+                row.completions << QStringLiteral("tier:%1").arg(tier);
+            for (const relay::models::Entry &entry : relay::models::shown(catalog))
+                row.completions << entry.key;
+            row.validator = [role = job.role](const QString &value) {
+                return relay::rolestore::roleValueValid(role, value);
+            };
+            row.onText = [pane, role = job.role](const QString &value) {
+                if (!relay::rolestore::applyRoleValue(role, value)) return;
+                // The same live update a job rules table edit makes: the served pane's worker is
+                // told now, and its next `model_roles` repaints every view of the rules.
+                if (pane) pane->rolesChanged();
+            };
+            models.rows << row;
+        }
+        models.rows << buttonRow(QStringLiteral("agent.modelRoles"), QStringLiteral("the job rules table"),
+                                 QStringLiteral("What each job runs on right now and why — the live report, ranked "
+                                                "lists, per-job effort — in the models pane's job rules tab"),
+                                 QStringLiteral("job rules…"), [this] { runAction(QStringLiteral("agent.modelRoles")); });
         // Keep one source for the controls, but arrange the Models pane's provider page around
         // the account the key pays for. The saved provider order still applies within each group.
         const QList<relay::SettingRow> original = models.rows;

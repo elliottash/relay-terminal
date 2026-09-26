@@ -152,6 +152,13 @@ struct SettingRow {
     // no agent may press anything on this row. relay::AppCommands lists these in the action
     // catalog under a `row:<section>/<id>[#n]` key, because a button is an action, not a value.
     QList<int> agentSafeButtons;
+
+    // A text row's gate for agent writes (#WK7C): `app_option_set` runs this before `onText` and
+    // answers `invalid_value` when it returns false, so a row whose values come from elsewhere —
+    // the per-job `roles.<job>` rows, whose pins must satisfy the same rule the model picker
+    // enforces — can refuse what it cannot store. The Options pane itself ignores it: its own
+    // fields validate in their own way, and a completer's offers are hints, never the truth.
+    std::function<bool(const QString &text)> validator;
 };
 
 struct SettingsSection {

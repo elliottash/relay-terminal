@@ -1249,6 +1249,11 @@ Keys never cross the pipe: a role resolves its key through the keystore (environ
 desktop keyring) for the preset matching its endpoint, and reuses the main agent's in-memory key when it
 lands on the main preset. Invalid values → `error`, nothing changed.
 
+The GUI has two editors for these same rules and no third store: the models pane's job rules tab (card
+#WBFM) and the options catalog's `roles.<job>` rows (30.2.1, card #WK7C). Both write the GUI-side
+rolestore that `Pane::rolesObject` serializes here — one source of truth — and both send
+`set_agent_options` so the served pane's worker re-resolves at once.
+
 `configure` also accepts `agent_role` (default `"main"`): the role this pane's **own** agent runs, used by
 panes that default to the Flash agent.
 
@@ -7267,6 +7272,7 @@ An option row:
 | `kind` | `toggle` \| `choice` \| `text` \| `number` \| `button` \| `buttons` \| `info` \| `heading` |
 | `value` | the current value — a bool, a string, a number. **Omitted entirely for a secret row**, and for the kinds that hold none. |
 | `choices` | `choice` only: `[{value, label}]`. These are the values `app_option_set` accepts. |
+| `offers` | `text` only, and only when the row offers completions: a flat list of strings. Offers are hints, not gates — `app_option_set` accepts any string the row's own validation takes, and the offer list is never exhaustive (`roles.<job>` below offers the tiers and the provider catalog, and any `preset\|model` pin is valid). |
 | `min`, `max` | `number` only, and only when the row is really bounded (`maximum > minimum`; a row written with the two equal is unbounded) |
 | `settable` | whether an agent may write it: every value row except a secret (owner decision 1), `false` on `button`, `buttons`, `info` and `heading`. The worker takes it to mean settable **and** a value kind **and** not secret, whatever the GUI marked. |
 | `secret` | the keyring holds it (an API key, a token). Its `value` is never sent and `settable` is `false`. |
@@ -7284,6 +7290,35 @@ number cannot hold a credential, and the rule over every kind catches innocent r
 `button`, `buttons`, `info` and `heading` rows are listed although nothing can be set on them,
 because the agent's other job is to *find* things: one that cannot see the Test-key button, or the
 heading a row sits under, cannot say where a setting is or open the pane at it.
+
+#### 30.2.1 The per-job model rows: `roles.<job>`
+
+Options › Models carries one text row per job Relay runs — `roles.planning`, `roles.subagent`,
+`roles.switchboard` (system-pane agents), `roles.summaries`, … — collapsed under a `per-job models`
+heading (card #WK7C). They are the agent's door onto the same rule the models pane's job rules tab
+edits (card #WBFM): both write the GUI-side rolestore, which `Pane::rolesObject` serializes into the
+`roles` field of `configure` and `set_agent_options` (13.2), so a change applies to every pane and the
+served pane's worker is told at once. The row's value encodes the rule:
+
+| Value | Meaning |
+|---|---|
+| *(empty)* | the job follows its own tier again; any per-job effort and ranked list go too |
+| `tier:<tier>` | the job follows that tier's list instead (13.7's tier ids; exclusive with a pin, both directions) |
+| `preset\|model` | a pin, the same key a model box offers — e.g. `kimi\|kimi-k3`, `glm-coding\|glm-5.3` |
+| one bare word | a preset on its own: that provider's default model |
+| `ranked` | read-only: the job has a ranked candidate list, which only the job rules tab edits (a write of this word is refused with `invalid_value`, and the row's `detail` says where to edit it) |
+
+A pin written from text carries no effort of its own (effort is chosen on the jobs tab) and clears any
+ranked list first, exactly as a pin made in the table does. The rows refuse what the table's picker
+refuses — an unknown pin, a tier id that does not exist, and a guest harness handed a side call
+(`invalid_value`) — and are subject to `writes_disabled` like every other row. The offers list is the
+tiers followed by the provider catalog's entry keys. There is deliberately **no `roles.main`**: agent
+turns follow each pane's own active model (13.2 rejects `main`), which the jobs tab presents as
+`not settable · each agent pane's active model` rather than as an override.
+
+A `tier:<tier>` or pin on the roles row changes the GUI-side rolestore only; the served pane's worker
+picks it up through the `set_agent_options` the row's writer sends, and other panes at their next
+start — the same lifecycle a jobs-tab edit has always had.
 
 An action row: `key` (the `ActionItem` key, what `app_action_run` names), `section`, `label`,
 `detail`, and `agent_safe` — opt-in per action (owner decision 2), the line being "undoable in one

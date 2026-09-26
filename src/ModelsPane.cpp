@@ -164,7 +164,7 @@ ModelsPane::ModelsPane(std::function<QList<SettingsSection>()> sections, QWidget
     m_tabs->setFocusPolicy(Qt::StrongFocus);
     const QStringList labels = {QStringLiteral("Sources"), QStringLiteral("Enabled"),
                                 QStringLiteral("Pick order"), QStringLiteral("Effort"),
-                                QStringLiteral("Agent jobs")};
+                                QStringLiteral("Job rules")};
     const QStringList ids = tabIds();
     for (int i = 0; i < ids.size(); ++i) {
         const QString &id = ids.at(i);
@@ -175,7 +175,7 @@ ModelsPane::ModelsPane(std::function<QList<SettingsSection>()> sections, QWidget
     m_tabs->setTabToolTip(1, QStringLiteral("Choose which models are enabled"));
     m_tabs->setTabToolTip(2, QStringLiteral("Set the model pick order, fallbacks, ties, and box cutoff"));
     m_tabs->setTabToolTip(3, QStringLiteral("Set reasoning effort for each model"));
-    m_tabs->setTabToolTip(4, QStringLiteral("Choose what Planning, Subagents, and system-pane agents run on"));
+    m_tabs->setTabToolTip(4, QStringLiteral("Set each job's model rule; the rules apply to every pane"));
     layout->addWidget(m_tabs);
     relay::paneTabs::registerTabs(this, m_tabs);
 
@@ -459,7 +459,7 @@ void ModelsPane::resizeEvent(QResizeEvent *event) {
     m_tabs->setTabText(1, QStringLiteral("Enabled"));
     m_tabs->setTabText(2, narrow ? QStringLiteral("Order") : QStringLiteral("Pick order"));
     m_tabs->setTabText(3, QStringLiteral("Effort"));
-    m_tabs->setTabText(4, narrow ? QStringLiteral("Roles") : QStringLiteral("Agent jobs"));
+    m_tabs->setTabText(4, narrow ? QStringLiteral("Rules") : QStringLiteral("Job rules"));
     updateConsoleHeight();
 }
 

@@ -158,28 +158,47 @@ bool isGuestKey(const QString &key) {
     return preset.startsWith(QStringLiteral("guest:"));
 }
 
-bool setOverride(const QString &role, const QString &key, const QString &effort, QString *why) {
-    if (why) why->clear();
-    QSettings settings;
-    if (key.isEmpty()) {
-        // Back to the built-in tier, whatever the job had been put on: the endpoint, its model,
-        // its level and the tier the retired dialog could pin.
-        for (const char *field : {"preset", "model", "effort", "tier", "candidates"})
-            settings.remove(roleSetting(role, QLatin1String(field)));
-        return true;
-    }
+// What a pin may be, asked the same way by the table's own picker and by `app_option_set` (#WK7C):
+// one rule for both, so the agent surface can never accept a key the picker would refuse.
+static bool keyAccepts(const QString &role, const QString &key, QString *why) {
+    // Either "preset|model" (the picker's keys) or one bare word: a preset on its own, meaning
+    // that provider's default model.
     QString preset, model;
-    if (!models::Catalog::splitKey(key, &preset, &model) || preset.isEmpty()) {
+    if (!key.contains(QLatin1Char('|')))
+        preset = key;
+    else if (!models::Catalog::splitKey(key, &preset, &model) || preset.isEmpty())
+        preset = QString();
+    if (preset.isEmpty() || preset.contains(QLatin1Char(' '))) {
         if (why) *why = QStringLiteral("that is not a model this machine knows about.");
         return false;
     }
-    if (background(role) && isGuestKey(key)) {
+    if (background(role) && preset.startsWith(QStringLiteral("guest:"))) {
         if (why)
             *why = QStringLiteral("%1 is a side call into a conversation that is already running, and a "
                                   "guest harness is a whole agent of its own, so the worker would skip it "
                                   "and run the job somewhere else.").arg(modelrows::roleLabel(role));
         return false;
     }
+    return true;
+}
+
+bool setOverride(const QString &role, const QString &key, const QString &effort, QString *why) {
+    if (why) why->clear();
+    QSettings settings;
+    if (key.isEmpty()) {
+        // Back to the built-in tier, whatever the job had been put on: the endpoint, its model,
+        // its level, the ranked list and the tier a tier-follow rule had pinned.
+        for (const char *field : {"preset", "model", "effort", "tier", "candidates"})
+            settings.remove(roleSetting(role, QLatin1String(field)));
+        return true;
+    }
+    if (!keyAccepts(role, key, why)) return false;
+    // A preset on its own (that provider's default model) is one word: "kimi", not "kimi|" — the
+    // picker always sends "preset|model", a text write (#WK7C) sends either. splitKey refuses a
+    // trailing bar, so the bare case never goes through it.
+    QString preset = key, model;
+    if (key.contains(QLatin1Char('|')))
+        models::Catalog::splitKey(key, &preset, &model);
     settings.setValue(roleSetting(role, QStringLiteral("preset")), preset);
     settings.remove(roleSetting(role, QStringLiteral("candidates")));
     if (model.isEmpty()) settings.remove(roleSetting(role, QStringLiteral("model")));
@@ -189,6 +208,61 @@ bool setOverride(const QString &role, const QString &key, const QString &effort,
     if (effort.isEmpty()) settings.remove(roleSetting(role, QStringLiteral("effort")));
     else settings.setValue(roleSetting(role, QStringLiteral("effort")), effort);
     return true;
+}
+
+// ===== the options catalog's per-job rows (#WK7C) ==============================================
+//
+// `roles.<role>` rows (protocol §30) are a second door onto these keys: an agent with permission
+// sets a job's rule with `app_option_set`, the job rules table over the same rolestore — one
+// source of truth. The row's value encodes the rule the same way both ways: empty follows the
+// job's tier, `tier:<tier>` is a tier follow, a `preset|model` key is a pin. A ranked list is the
+// table's own to edit: it reads as `ranked` here and a write of that word is refused with the why.
+
+QString roleValue(const QString &role) {
+    if (rankedOverrideSet(role)) return QStringLiteral("ranked");
+    const QString stored = overrideTier(role);
+    if (!stored.isEmpty()) return QStringLiteral("tier:%1").arg(stored);
+    // A preset-only pin reads back as one word ("kimi"), never with the bar the picker's keys have.
+    const QString key = overrideKey(role);
+    return key.endsWith(QLatin1Char('|')) ? key.left(key.size() - 1) : key;
+}
+
+// The check `app_option_set` runs through the row's validator before it writes — and the write
+// runs it again, so nothing can land that the job rules picker would have refused.
+bool roleValueValid(const QString &role, const QString &value, QString *why) {
+    if (why) why->clear();
+    if (value.isEmpty()) return true;   // the clear: the job follows its tier again
+    if (value == QStringLiteral("ranked") || value.startsWith(QStringLiteral("ranked:"))) {
+        if (why)
+            *why = QStringLiteral("a ranked list is edited in the models pane's job rules table, not as text.");
+        return false;
+    }
+    if (value.startsWith(QStringLiteral("tier:"))) {
+        const QString tier = value.mid(QStringLiteral("tier:").size());
+        if (!models::curation::tierIds().contains(tier)) {
+            if (why) *why = QStringLiteral("%1 is not one of the tiers.").arg(tier);
+            return false;
+        }
+        return true;
+    }
+    return keyAccepts(role, value, why);
+}
+
+bool applyRoleValue(const QString &role, const QString &value, QString *why) {
+    if (!roleValueValid(role, value, why)) return false;
+    if (value.startsWith(QStringLiteral("tier:"))) {
+        // The tier follow the retired dialog could pin, back as an agent-writable rule: the job
+        // takes that tier's list instead of its own. A tier and an endpoint are exclusive
+        // (protocol 13.7 refuses the pair), so the endpoint and its ranked list go first.
+        QSettings settings;
+        for (const char *field : {"preset", "model", "effort", "candidates"})
+            settings.remove(roleSetting(role, QLatin1String(field)));
+        settings.setValue(roleSetting(role, QStringLiteral("tier")), value.mid(QStringLiteral("tier:").size()));
+        return true;
+    }
+    // A pin written from text carries no effort of its own (the table is where effort is chosen);
+    // `setOverride` clears whatever was set, ranked lists included.
+    return setOverride(role, value, QString(), why);
 }
 
 }  // namespace rolestore
@@ -291,11 +365,15 @@ JobsTab::JobsTab(QWidget *parent) : QWidget(parent) {
     layout->setContentsMargins(0, 0, 0, 0);
     layout->setSpacing(6);
 
+    // A rules editor first: what is set here applies to every pane. The “live (this pane)” column
+    // is only a report — the served pane's worker's own answer — kept so a rule can be checked
+    // against reality, and dimmed so it cannot read as a setting (card #WBFM).
     m_blurb = new QLabel(QStringLiteral(
         "Every job relay does has a model. A job follows the tier it is grouped under — change that "
         "tier's list on priorities and every job under it moves — until you give the job a model of "
-        "its own. Planning, subagents and helper can have ranked lists. “runs on” is what this "
-        "pane's worker says it is using right now."));
+        "its own. Planning, subagents and the system-pane agent can have ranked lists. The rules "
+        "apply to every pane; “live (this pane)” only reports what this pane's worker last "
+        "resolved."));
     m_blurb->setObjectName(QStringLiteral("transcriptHeader"));
     m_blurb->setWordWrap(true);
     layout->addWidget(m_blurb);
@@ -303,7 +381,7 @@ JobsTab::JobsTab(QWidget *parent) : QWidget(parent) {
     m_list = new QTreeWidget;
     m_list->setObjectName(QStringLiteral("jobsList"));
     m_list->setHeaderLabels({QStringLiteral("job"), QStringLiteral("what it does"),
-                             QStringLiteral("runs on"), QStringLiteral("override")});
+                             QStringLiteral("live (this pane)"), QStringLiteral("rule")});
     m_list->setRootIsDecorated(false);
     m_list->setUniformRowHeights(false);
     m_list->setAllColumnsShowFocus(true);
@@ -311,7 +389,7 @@ JobsTab::JobsTab(QWidget *parent) : QWidget(parent) {
     m_list->setEditTriggers(QAbstractItemView::NoEditTriggers);
     // "what it does" takes the slack and the other three keep a width: the column this tab exists
     // for must not be the one that goes off the edge when the pane is narrow, and the first Xvfb
-    // run had "runs on" and the override behind a horizontal scrollbar with Options open beside it.
+    // run had "live" and the rule behind a horizontal scrollbar with Options open beside it.
     m_list->setColumnWidth(ColJob, 130);
     m_list->setColumnWidth(ColRuns, 165);
     m_list->setColumnWidth(ColOverride, 300);
@@ -426,10 +504,13 @@ void JobsTab::updateColumns() {
     m_list->header()->setSectionResizeMode(ColRuns, compact ? QHeaderView::Stretch : QHeaderView::Interactive);
     m_compactPanel->setVisible(compact);
     m_blurb->setText(compact
-        ? QStringLiteral("Each job follows its tier until given its own model or list. “runs on” shows the latest worker report.")
+        ? QStringLiteral("Each job follows its tier until given its own model or list. The rules apply "
+                         "everywhere; “live (this pane)” is one pane's latest worker report.")
         : QStringLiteral("Every job relay does has a model. A job follows the tier it is grouped under — change that "
                          "tier's list on priorities and every job under it moves — until you give the job a model of "
-                         "its own. Planning, subagents and helper can have ranked lists. “runs on” shows the latest worker report."));
+                         "its own. Planning, subagents and the system-pane agent can have ranked lists. The rules "
+                         "apply to every pane; “live (this pane)” only reports what this pane's worker last "
+                         "resolved."));
     if (compact) {
         const int room = m_list->viewport()->width();
         m_list->setColumnWidth(ColJob, qBound(130, room * 45 / 100, 200));
@@ -455,7 +536,7 @@ void JobsTab::updateCompactDetails() {
         || rolestore::rankedOverrideSet(job->role);
     m_compactDetails->setText(QStringLiteral("%1 — %2\n%3: %4")
         .arg(job->name, job->what,
-             !job->settable ? QStringLiteral("pane route")
+             !job->settable ? QStringLiteral("not a rule")
              : custom ? QStringLiteral("custom route") : QStringLiteral("inherited route"),
              overrideText(job->role)));
     m_compactChoose->setText(rolestore::supportsRanked(job->role)
@@ -606,6 +687,8 @@ void JobsTab::rebuild() {
         QFont bold = group->font(ColJob);
         bold.setBold(true);
         group->setFont(ColJob, bold);
+        // A tier heading's live cell is the same report a job row's is, so it greys the same way.
+        group->setForeground(ColRuns, m_list->palette().brush(QPalette::Disabled, QPalette::Text));
         group->setFlags(Qt::NoItemFlags);
 
         for (const Job *job : members) {
@@ -620,14 +703,17 @@ void JobsTab::rebuild() {
                 || !rolestore::overrideTier(job->role).isEmpty()
                 || rolestore::rankedOverrideSet(job->role);
             item->setText(ColOverride, QStringLiteral("%1 · %2")
-                .arg(!job->settable ? QStringLiteral("pane")
+                .arg(!job->settable ? QStringLiteral("not settable")
                      : custom ? QStringLiteral("custom") : QStringLiteral("inherited"),
                      overrideText(job->role)));
+            // The live cell reports what this pane's worker last resolved — informational, so it
+            // takes the dim brush an unset rule takes; the rule column beside it is the editor.
+            item->setForeground(ColRuns, m_list->palette().brush(QPalette::Disabled, QPalette::Text));
 
             const QJsonObject resolved = m_data.roles.value(job->role).toObject();
             QStringList tip{job->what,
-                            QStringLiteral("runs on: %1").arg(item->text(ColRuns)),
-                            QStringLiteral("override: %1").arg(overrideText(job->role))};
+                            QStringLiteral("live (this pane): %1").arg(item->text(ColRuns)),
+                            QStringLiteral("rule (applies to every pane): %1").arg(overrideText(job->role))};
             if (runs.isEmpty())
                 tip << QStringLiteral("Nothing is resolved yet: no worker report has arrived.");
             if (!str(resolved, "note").isEmpty()) tip << str(resolved, "note");
@@ -749,7 +835,7 @@ void JobsTab::updateRankedPanel() {
     const bool custom = !entries.isEmpty();
     m_rankedStatus->setText(custom
         ? QStringLiteral("%1 — custom route. Top models run first; tied models are chosen at random."
-                         " The worker's current choice stays in ‘runs on’ above.").arg(job->name)
+                         " The worker's current choice stays in ‘live (this pane)’ above.").arg(job->name)
         : QStringLiteral("%1 — inherits %2. Add a model to make a custom ranked route.")
               .arg(job->name, rolestore::overrideTier(role).isEmpty()
                    ? job->tier : rolestore::overrideTier(role)));
@@ -965,8 +1051,8 @@ void JobsTab::applyOverride(const QString &role, const QString &key, const QStri
         return;
     }
     m_picking.clear();
-    // The worker is told at once, and its next `model_roles` repaints "runs on" — this tab never
-    // guesses what a change resolves to, it shows what came back.
+    // The worker is told at once, and its next `model_roles` repaints "live (this pane)" — this
+    // tab never guesses what a change resolves to, it shows what came back.
     if (m_data.rolesChanged) m_data.rolesChanged();
     rebuild();
     selectRole(role);

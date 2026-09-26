@@ -6,6 +6,7 @@
 // whole channel is exercised without a window: the values live in a plain struct, and a test can
 // see exactly what a writer wrote and what the result said about it.
 #include "AppCommands.h"
+#include "JobsTab.h"      // relay::rolestore — the per-job rows write it (#WK7C)
 #include "Notifications.h"
 #include "SettingsPane.h"
 
@@ -17,6 +18,7 @@
 #include <QJsonObject>
 #include <QMap>
 #include <QRegularExpression>
+#include <QSettings>
 #include <QTest>
 
 using relay::ActionItem;
@@ -46,6 +48,9 @@ struct State {
     // person typing in the target pane and `paneBusy` its agent mid-turn, the two things only the
     // pane itself can know.
     QStringList sent, prefilled, renamed;
+    // `roles.switchboard` (#WK7C) writes the real rolestore, so the test can assert the keys; this
+    // records the live refresh a write owes the served pane (RelayWindowModels.cpp sends it).
+    QStringList resends;
     QMap<QString, QString> names;
     bool composerBusy = false, paneBusy = false;
 };
@@ -138,6 +143,25 @@ QList<SettingsSection> catalog(State *state) {
         row.label = QStringLiteral("Pair a phone");
         row.buttonText = QStringLiteral("Pair…");
         row.run = [state] { state->ran << QStringLiteral("pair"); };
+        models.rows << row;
+    }
+    {
+        // #WK7C: the per-job row, exactly as RelayWindowModels.cpp builds it — id `roles.<role>`,
+        // value through the rolestore the job rules table writes. The keys are the assertion.
+        SettingRow row;
+        row.kind = SettingRow::Text;
+        row.id = QStringLiteral("roles.switchboard");
+        row.label = QStringLiteral("system-pane agent");
+        row.text = relay::rolestore::roleValue(QStringLiteral("switchboard"));
+        for (const QString &tier : relay::models::curation::tierIds())
+            row.completions << QStringLiteral("tier:%1").arg(tier);
+        row.validator = [](const QString &value) {
+            return relay::rolestore::roleValueValid(QStringLiteral("switchboard"), value);
+        };
+        row.onText = [state](const QString &value) {
+            if (!relay::rolestore::applyRoleValue(QStringLiteral("switchboard"), value)) return;
+            state->resends << QStringLiteral("rolesChanged");
+        };
         models.rows << row;
     }
     sections << models;
@@ -1151,6 +1175,104 @@ private Q_SLOTS:
                      .value(QStringLiteral("error")).toString(),
                  QStringLiteral("not_agent_safe"));
         QCOMPARE(state.ran.size(), 2);
+    }
+
+    // ----- set_option: the per-job roles rows (#WK7C) ----------------------------------------------
+    //
+    // "an agent lists and clears a job's model override through the app tools" — the card's
+    // verify block, as code. The rows write the same rolestore the job rules table writes, so a
+    // pin here lands on `roles/<role>/{preset,model}`, the notification carries the way back, and
+    // nothing about the tier lists is disturbed.
+
+    void anAgentPinsAJobModelThroughTheOptionsCatalog() {
+        QSettings().clear();
+        const QJsonObject set = run({{QStringLiteral("id"), QStringLiteral("r1")},
+                                     {QStringLiteral("command"), QStringLiteral("set_option")},
+                                     {QStringLiteral("row"), QStringLiteral("roles.switchboard")},
+                                     {QStringLiteral("value"), QStringLiteral("kimi|kimi-k3")}});
+        QVERIFY(set.value(QStringLiteral("ok")).toBool());
+        QCOMPARE(set.value(QStringLiteral("previous")).toString(), QString());
+        QCOMPARE(set.value(QStringLiteral("value")).toString(), QStringLiteral("kimi|kimi-k3"));
+        QCOMPARE(QSettings().value(QStringLiteral("roles/switchboard/preset")).toString(),
+                 QStringLiteral("kimi"));
+        QCOMPARE(QSettings().value(QStringLiteral("roles/switchboard/model")).toString(),
+                 QStringLiteral("kimi-k3"));
+        QCOMPARE(state.resends, QStringList{QStringLiteral("rolesChanged")});
+        QCOMPARE(relay::rolestore::roleValue(QStringLiteral("switchboard")),
+                 QStringLiteral("kimi|kimi-k3"));
+
+        // The notification is the card's second half, and undo takes the pin off again.
+        const auto notes = relay::NotificationCenter::instance().entries();
+        QCOMPARE(notes.first().title, QStringLiteral("Agent changed system-pane agent"));
+        QCOMPARE(notes.first().actionLabel, QStringLiteral("Undo"));
+        const QString changeId = set.value(QStringLiteral("change_id")).toString();
+        const QJsonObject undone = run({{QStringLiteral("id"), QStringLiteral("r2")},
+                                        {QStringLiteral("command"), QStringLiteral("undo")},
+                                        {QStringLiteral("change_id"), changeId}});
+        QVERIFY(undone.value(QStringLiteral("ok")).toBool());
+        QCOMPARE(relay::rolestore::roleValue(QStringLiteral("switchboard")), QString());
+        QVERIFY(!QSettings().contains(QStringLiteral("roles/switchboard/preset")));
+    }
+
+    void anAgentClearsAJobModelThroughTheOptionsCatalog() {
+        QSettings().clear();
+        QVERIFY(relay::rolestore::applyRoleValue(QStringLiteral("switchboard"),
+                                                 QStringLiteral("kimi|kimi-k3")));
+        const QJsonObject cleared = run({{QStringLiteral("id"), QStringLiteral("r1")},
+                                         {QStringLiteral("command"), QStringLiteral("set_option")},
+                                         {QStringLiteral("row"), QStringLiteral("roles.switchboard")},
+                                         {QStringLiteral("value"), QString()}});
+        QVERIFY(cleared.value(QStringLiteral("ok")).toBool());
+        QCOMPARE(cleared.value(QStringLiteral("previous")).toString(), QStringLiteral("kimi|kimi-k3"));
+        QCOMPARE(cleared.value(QStringLiteral("value")).toString(), QString());
+        QVERIFY(!QSettings().contains(QStringLiteral("roles/switchboard/preset")));
+        QVERIFY(!QSettings().contains(QStringLiteral("roles/switchboard/model")));
+        QCOMPARE(state.resends, QStringList{QStringLiteral("rolesChanged")});
+    }
+
+    // The catalog carries the row as text with the offers, not as a secret and not as a door that
+    // opens a dialog — and what the picker would refuse, `set_option` refuses too.
+    void theRolesRowIsListedAsTextAndRefusesWhatThePickerRefuses() {
+        QSettings().clear();
+        const QJsonObject block = app.catalog(QStringLiteral("tab-7"));
+        const QJsonObject row = rowOf(block, QStringLiteral("options"), QStringLiteral("roles.switchboard"));
+        QVERIFY(!row.isEmpty());
+        QCOMPARE(row.value(QStringLiteral("kind")).toString(), QStringLiteral("text"));
+        QVERIFY(!row.value(QStringLiteral("secret")).toBool());
+        QVERIFY(row.value(QStringLiteral("offers")).toArray().contains(
+            QStringLiteral("tier:high")));
+
+        const QJsonObject tier = run({{QStringLiteral("id"), QStringLiteral("t1")},
+                                      {QStringLiteral("command"), QStringLiteral("set_option")},
+                                      {QStringLiteral("row"), QStringLiteral("roles.switchboard")},
+                                      {QStringLiteral("value"), QStringLiteral("tier:high")}});
+        QVERIFY(tier.value(QStringLiteral("ok")).toBool());
+        QCOMPARE(QSettings().value(QStringLiteral("roles/switchboard/tier")).toString(),
+                 QStringLiteral("high"));
+
+        const QJsonObject bad = run({{QStringLiteral("id"), QStringLiteral("t2")},
+                                     {QStringLiteral("command"), QStringLiteral("set_option")},
+                                     {QStringLiteral("row"), QStringLiteral("roles.switchboard")},
+                                     {QStringLiteral("value"), QStringLiteral("tier:imaginary")}});
+        QCOMPARE(bad.value(QStringLiteral("error")).toString(), QStringLiteral("invalid_value"));
+
+        const QJsonObject ranked = run({{QStringLiteral("id"), QStringLiteral("t3")},
+                                        {QStringLiteral("command"), QStringLiteral("set_option")},
+                                        {QStringLiteral("row"), QStringLiteral("roles.switchboard")},
+                                        {QStringLiteral("value"), QStringLiteral("ranked")}});
+        QCOMPARE(ranked.value(QStringLiteral("error")).toString(), QStringLiteral("invalid_value"));
+    }
+
+    // §30.4 unchanged: writes off stops the row like any other, and never the way back.
+    void theRolesRowStopsWhenWritesAreOff() {
+        QSettings().clear();
+        writes = false;
+        const QJsonObject refused = run({{QStringLiteral("id"), QStringLiteral("r1")},
+                                         {QStringLiteral("command"), QStringLiteral("set_option")},
+                                         {QStringLiteral("row"), QStringLiteral("roles.switchboard")},
+                                         {QStringLiteral("value"), QStringLiteral("kimi|kimi-k3")}});
+        QCOMPARE(refused.value(QStringLiteral("error")).toString(), QStringLiteral("writes_disabled"));
+        QVERIFY(!QSettings().contains(QStringLiteral("roles/switchboard/preset")));
     }
 
     // ----- undo and the row marker (§30.6) ------------------------------------------------------

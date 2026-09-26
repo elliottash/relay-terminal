@@ -214,7 +214,7 @@ private Q_SLOTS:
         ModelsPane pane(providerSections());
         QCOMPARE(tabLabels(pane.tabBar()), (QStringList{QStringLiteral("Sources"), QStringLiteral("Enabled"),
                                                    QStringLiteral("Pick order"), QStringLiteral("Effort"),
-                                                   QStringLiteral("Agent jobs")}));
+                                                   QStringLiteral("Job rules")}));
         QCOMPARE(tabs(pane.tabBar()), (QStringList{QStringLiteral("providers"), QStringLiteral("available"),
                                                       QStringLiteral("priorities"), QStringLiteral("effort"),
                                                       QStringLiteral("jobs")}));
@@ -287,7 +287,7 @@ private Q_SLOTS:
         QVERIFY(pane.width() <= 420);
         QCOMPARE(tabLabels(pane.tabBar()), (QStringList{QStringLiteral("Sources"), QStringLiteral("Enabled"),
                                                    QStringLiteral("Order"), QStringLiteral("Effort"),
-                                                   QStringLiteral("Roles")}));
+                                                   QStringLiteral("Rules")}));
         QVERIFY(pane.tabBar()->tabRect(4).right() <= pane.tabBar()->width());
         const QString evidence = qEnvironmentVariable("RELAY_N4PW_EVIDENCE");
         if (!evidence.isEmpty()) QDir().mkpath(evidence);

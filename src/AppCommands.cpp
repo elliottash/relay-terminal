@@ -510,6 +510,14 @@ QJsonObject AppCommands::catalog(const QString &tab) const {
                                                     ? row.optionLabels.at(i) : row.options.at(i)}});
                 entry.insert(QStringLiteral("choices"), choices);
             }
+            // A text row's completions are offers, not the whole truth (#WK7C: the per-job
+            // `roles.<role>` rows accept any pin; the offers are the tiers and the catalog) — so
+            // they ride along as a flat list and never gate the write.
+            if (row.kind == SettingRow::Text && !row.completions.isEmpty()) {
+                QJsonArray offers;
+                for (const QString &offer : row.completions) offers.append(offer);
+                entry.insert(QStringLiteral("offers"), offers);
+            }
             if (row.kind == SettingRow::Number && row.maximum > row.minimum) {
                 entry.insert(QStringLiteral("min"), row.minimum);
                 entry.insert(QStringLiteral("max"), row.maximum);
@@ -720,6 +728,10 @@ bool AppCommands::writeRow(const SettingRow &row, const QJsonValue &value, QStri
         const QString text = value.toString();
         for (const QChar &character : text)
             if (character.category() == QChar::Other_Control) return refuse(QStringLiteral("invalid_value"));
+        // The row's own gate, before the write: text rows take free text, and some of it would
+        // not store (a `roles.<job>` pin the model picker would refuse, #WK7C). Refusing here
+        // answers `invalid_value` instead of reporting success for a write that lands nowhere.
+        if (row.validator && !row.validator(text)) return refuse(QStringLiteral("invalid_value"));
         if (!row.onText) return refuse(QStringLiteral("failed"));
         row.onText(text);
         break;
