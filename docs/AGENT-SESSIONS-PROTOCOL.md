@@ -9318,14 +9318,16 @@ get the long-call transport deadline.
 ### 36.5 `workspace_activate {console: true}`: the console pane (#83YV)
 
 A console pane — the palette's "New Python console" — starts no shell. At its worker's `ready`
-it sends `workspace_activate {plugin_id: "relay.python", workspace_id: <pane token>, console:
+it sends `workspace_activate {plugin_id: "relay.python", console:
 true}`; `console: true` starts the runtime now instead of at its first cell, and the answer the
 pane runs is `workspace_console {id, workspace_id, plugin_id, argv, program, label, shared,
 connection_file?, startup, note, runtime}` (`console_command` in
 `backend/relay_core/workspace_plugins.py`): `argv` is the manifest's `console.program` with the
 connection file substituted — `jupyter console --existing <file> --config=ipython_startup.py`
-on the shared kernel, else `ipython`, else `python3`; `program` is what to call it (`ipython`
-for both Python forms); `label` is the pane's header chip ("Python · ipython"). A pane with no
+on the shared kernel, else `ipython`, else `python3`; `program` names the pty program
+(`jupyter-console` or `ipython`); `label` is the pane's header chip ("Python · ipython").
+The activation uses the pane worker's default workspace id (`pane`), which is also the id the
+router and the agent's `py_*` tools read. A pane with no
 answer yet, or a refused ask (the ordinary `error` event), starts a shell and says why — a
 console pane is never a dead surface.
 
@@ -9335,4 +9337,8 @@ keeps it, so a kernel restart does not strand a running `jupyter console`, and t
 `ipython_startup.py` emits the OSC 133 A/B/C/D marks in the pty, so pane history tracks cells
 exactly as it tracks shell commands. Routing inside a console pane is the foreground REPL of
 36.2 — the pane still sends the real command line as `foreground_program`, and names the
-program `ipython` for the chip, completion and the REPL delivery rules.
+program `ipython` for completion and the REPL delivery rules. Its static completion table comes
+from the plugin manifest in the `completions` field of `workspace_console`. `relay.stata` uses the
+same handshake without a kernel: the answer resolves `stata`, `stata-mp` or `stata-se` and runs
+the manifest's `stata -q` program in the pty. A missing Stata binary produces an error and a
+shell fallback.

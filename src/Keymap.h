@@ -263,6 +263,13 @@ private:
         add("pane.splitDown", "pane", "New shell below", {});
         add("pane.splitLeft", "pane", "New shell to the left", {});
         add("pane.splitUp", "pane", "New shell above", {});
+        // The Python console of card #83YV: the new pane asks its worker to activate relay.python
+        // (protocol 36, `workspace_activate {console: true}`) and runs the argv of the
+        // `workspace_console` answer — `jupyter console --existing` on the shared kernel — in its
+        // pty, with the header chip reading "Python · ipython" while it runs.
+        add("pane.newPythonConsole", "pane", "New Python console (IPython on the workspace kernel)",
+            {});
+        add("pane.newStataConsole", "pane", "New Stata console", {});
         // The default splits land on the host when the focused pane is on one (#XQ8F), so a split
         // that stays here needs its own action, and ssh.splitSameHost is now only the right-hand
         // case of what the defaults do.

@@ -255,6 +255,13 @@ void RelayWindow::runActionNow(const QString &id, Pane *target) {
         else if (id == QStringLiteral("pane.splitDown")) { splitOnHost(relay::panes::Direction::Down); hintPlacement(QStringLiteral("↓")); }
         else if (id == QStringLiteral("pane.splitLeft")) { splitOnHost(relay::panes::Direction::Left); hintPlacement(QStringLiteral("←")); }
         else if (id == QStringLiteral("pane.splitUp")) { splitOnHost(relay::panes::Direction::Up); hintPlacement(QStringLiteral("↑")); }
+        // The Python console (#83YV): a local pane — its kernel lives in the new pane's own
+        // worker, so it is never split onto a host — that asks that worker for the console
+        // program instead of starting a shell. splitToward carries the plugin id in the pane's
+        // spec, and the pane does the rest: the ask, the argv in its pty, the header chip, the
+        // shell it falls back to when the kernel cannot start.
+        else if (id == QStringLiteral("pane.newPythonConsole")) splitToward(relay::panes::Direction::Right, false, QStringLiteral("relay.python"));
+        else if (id == QStringLiteral("pane.newStataConsole")) splitToward(relay::panes::Direction::Right, false, QStringLiteral("relay.stata"));
         // The split that stays on this machine when the focused pane is on a host (#XQ8F).
         else if (id == QStringLiteral("pane.splitLocal")) splitToward(relay::panes::Direction::Right, true);
         // The pane chrome's one ⊞ button (#803C): a pane on the right at once, and no arrow window —
@@ -989,6 +996,9 @@ Pane *RelayWindow::createPane(const QJsonObject &spec) {
             w->setActiveLeaf(guard);
             if (action == QStringLiteral("splitRight")) w->runAction(QStringLiteral("pane.splitRight"));
             else if (action == QStringLiteral("splitDown")) w->runAction(QStringLiteral("pane.splitDown"));
+            // #83YV: the menu's "New Python console" goes through the same action the palette runs.
+            else if (action == QStringLiteral("newPythonConsole")) w->runAction(QStringLiteral("pane.newPythonConsole"));
+            else if (action == QStringLiteral("newStataConsole")) w->runAction(QStringLiteral("pane.newStataConsole"));
             else if (action == QStringLiteral("splitSameHost")) w->runAction(QStringLiteral("ssh.splitSameHost"));
             else if (action == QStringLiteral("splitLocal")) w->runAction(QStringLiteral("pane.splitLocal"));
             else if (action == QStringLiteral("equalize")) w->runAction(QStringLiteral("pane.equalize"));

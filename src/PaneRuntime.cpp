@@ -275,6 +275,21 @@ bool Pane::handleObservabilityEvent(const QString &type, const QJsonObject &even
                 status(QStringLiteral("Turn details: ") + event.value(QStringLiteral("text")).toString());
                 return true;
             }
+            // The console ask failed (#83YV): the plugin refused (no kernel, console disabled,
+            // python missing) or the workspace could not activate. The pane still needs a live
+            // surface, so it falls back to the shell and says why. The ask is rearmed: the banner
+            // action can try again once the cause is fixed.
+            if (id.startsWith(QStringLiteral("console-")) && !m_consolePluginRequest.isEmpty() && !m_backend) {
+                m_consoleAskSent = false;
+                status(QStringLiteral("%1 console: %2 Started a shell instead. Use \"Restart shell\" to retry.")
+                           .arg(consoleName(m_consolePluginRequest), event.value(QStringLiteral("text")).toString()));
+                try {
+                    startTerminal(m_cleanShell);
+                } catch (const std::exception &) {
+                    // The failed startTerminal already showed its banner.
+                }
+                return true;
+            }
             // A fold asked for a call the worker no longer has ("Unknown turn_id (only the last 50
             // turns are kept)"): the fold says so, in one row, rather than staying empty (#TK9C).
             if (handleFoldError(id, event.value(QStringLiteral("text")).toString())) return true;
@@ -669,9 +684,13 @@ void Pane::connectWorker() {
         });
     }
 
-void Pane::startTerminal(bool cleanShell) {
+void Pane::startTerminal(bool cleanShell, const ConsoleProgram &program) {
         m_terminalRecords.resetGeneration();
         m_terminalStream.clear();
+        // A console program names the pane while it runs (#83YV): the header chip, the routing
+        // kind and the completion table all read this from here until the program exits.
+        m_consoleProgram = program;
+        updateHeader();
         // Set before the backend starts its shell so the child inherits these values.
         qputenv("RELAY_RUNTIME_DIR", m_runtime.path().toUtf8());
         qputenv("RELAY_SESSION_TOKEN", m_token.toUtf8());
@@ -934,6 +953,25 @@ void Pane::startTerminal(bool cleanShell) {
                 .filePath(QStringLiteral("tmp"));
         if (QDir().mkpath(scratchTmp))   // a TMPDIR that is not there would break mktemp in the shell
             shellEnvironment << QStringLiteral("TMPDIR=") + scratchTmp;
+        if (program.isValid()) {
+            // A console program takes the pty the shell would have (#83YV). argv and any extra
+            // environment come whole from the worker's `workspace_console` answer — `jupyter
+            // console --existing <file>` attached to the kernel that worker just started — and
+            // none of the shell machinery below applies. No integration bash: the bundled IPython
+            // startup file emits the OSC 133 marks itself. No local holder: the console owns its
+            // pty, and a restart reattaches through the connection file named in the argv, which
+            // the worker keeps. No memory unit wrapping: the kernel it talks to lives in the
+            // worker, not in this pty.
+            QStringList environment = shellEnvironment;
+            for (const QString &entry : program.env)
+                if (!entry.isEmpty()) environment << entry;
+            if (!m_backend->startProgram(program.argv.first(), program.argv.mid(1), m_cwd, environment))
+                throw std::runtime_error(QStringLiteral("The console program could not be started: %1.")
+                                             .arg(program.argv.join(QLatin1Char(' '))).toStdString());
+            m_oomKills = -1;
+            registerWithBridge();
+            return;
+        }
         // The local half of #87HB: with persistent local panes on, the pane's shell runs inside
         // the same holder a remote pane's does - a tmux session named after the pane's stable
         // scrollback id on Relay's own socket, so quitting or crashing Relay leaves the shell and
@@ -1010,6 +1048,86 @@ void Pane::startTerminal(bool cleanShell) {
         // before the backend existed, and the sidecar routes a claude by the pid ancestry that
         // leads back to this shell (26.5).
         registerWithBridge();
+    }
+
+void Pane::askForConsoleProgram() {
+        if (m_consolePluginRequest.isEmpty() || m_closing) return;
+        if (m_consoleAskSent) return;
+        m_consoleAskSent = true;
+        status(QStringLiteral("Starting the %1 console…").arg(consoleName(m_consolePluginRequest)));
+        // Protocol 36 (#83YV, #C0Q8): `console: true` makes the worker start the plugin's kernel
+        // now and answer `workspace_console` with the argv a pane should run to attach to it.
+        // plugin_id names the kernel plugin. Each terminal pane owns its worker, so its default
+        // workspace is the one the agent and router also use. `workspace` is its folder: a worker with no
+        // configured workspace refuses a task-plugin activation, and the pane's own folder is the
+        // honest answer to "where". The id prefix is what handleObservabilityEvent's `error` arm
+        // matches to fall back to a shell.
+        send(QJsonObject{{QStringLiteral("type"), QStringLiteral("workspace_activate")},
+                         {QStringLiteral("id"), QStringLiteral("console-") + m_token},
+                         {QStringLiteral("plugin_id"), m_consolePluginRequest},
+                         {QStringLiteral("workspace"), m_workspace},
+                         {QStringLiteral("console"), true}});
+        // A worker that never answers must not leave the pane a blank surface forever: past this,
+        // the pane becomes a shell (and the ask is rearmed, so `Restart console` tries again).
+        QTimer::singleShot(30000, this, [this] {
+            if (m_closing || m_backend || m_consolePluginRequest.isEmpty() || m_consoleProgram.isValid()) return;
+            status(QStringLiteral("%1 console: no answer from the workspace worker; started a shell instead. Use \"Restart shell\" to retry.")
+                       .arg(consoleName(m_consolePluginRequest)));
+            try {
+                startTerminal(m_cleanShell);
+            } catch (const std::exception &) {
+                // A shell that cannot start either leaves the pane dead; the banner from the
+                // failed startTerminal call is all the pane can say.
+            }
+        });
+    }
+
+void Pane::onWorkspaceConsole(const QJsonObject &event) {
+        if (m_closing || m_consolePluginRequest.isEmpty() || m_backend) return;
+        ConsoleProgram program;
+        for (const QJsonValue &value : event.value(QStringLiteral("argv")).toArray())
+            if (!value.toString().isEmpty()) program.argv << value.toString();
+        program.kind = event.value(QStringLiteral("program")).toString();
+        program.label = event.value(QStringLiteral("label")).toString();
+        for (const QJsonValue &entry : event.value(QStringLiteral("completions")).toArray()) {
+            const QJsonObject row = entry.toObject();
+            const QString word = row.value(QStringLiteral("text")).toString();
+            if (word.isEmpty()) continue;
+            program.completions << word;
+            program.completionLabels << row.value(QStringLiteral("description")).toString(word);
+        }
+        for (const QJsonValue &value : event.value(QStringLiteral("env")).toArray())
+            if (!value.toString().isEmpty()) program.env << value.toString();
+        if (!program.isValid()) {
+            // The plugin answered without a program (python missing, console disabled): keep the
+            // pane alive as a shell and say what the worker said, if anything.
+            const QString note = event.value(QStringLiteral("note")).toString();
+            status(note.isEmpty() ? QStringLiteral("%1 console unavailable; started a shell.")
+                                  : QStringLiteral("%1").arg(note));
+            try {
+                startTerminal(m_cleanShell);
+            } catch (const std::exception &) {
+            }
+            return;
+        }
+        try {
+            startTerminal(m_cleanShell, program);
+            const QString note = event.value(QStringLiteral("note")).toString();
+            if (!note.isEmpty()) status(note);
+        } catch (const std::exception &error) {
+            status(QStringLiteral("The console program could not be started (%1); started a shell instead.").arg(QString::fromUtf8(error.what())));
+            try {
+                startTerminal(m_cleanShell);
+            } catch (const std::exception &) {
+            }
+        }
+    }
+
+QString Pane::consoleName(const QString &pluginId) {
+        // "relay.python" -> "Python"; anything else keeps its last segment, capitalised.
+        QString name = pluginId.section(QLatin1Char('.'), -1);
+        if (!name.isEmpty()) name[0] = name[0].toUpper();
+        return name;
     }
 
 void Pane::requestRoute(bool submit, const QString &overrideMode) {
@@ -1244,7 +1362,8 @@ void Pane::requestRoute(bool submit, const QString &overrideMode) {
         } else m_previewId = id;
         QJsonObject route{{"type", "route"}, {"id", id}, {"text", m_editor->toPlainText()}, {"mode", mode},
                           {"known_commands", m_knownCommands}, {"path", m_shellPath}, {"cwd", m_cwd}};
-        const QStringList foreground = foregroundArgv();
+        const QStringList foreground = m_consoleProgram.isValid()
+            ? QStringList{m_consoleProgram.kind} : foregroundArgv();
         if (!foreground.isEmpty())
             route.insert(QStringLiteral("foreground_program"), QJsonArray::fromStringList(foreground));
         // At a login the local PATH and aliases describe the wrong machine: the router only

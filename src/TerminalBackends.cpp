@@ -118,6 +118,11 @@ QList<TerminalMenuItem> terminalContextMenu(const TerminalMenuState &state)
     separate();
     add("splitRight", QStringLiteral("New pane to the right"));
     add("splitDown", QStringLiteral("New pane below"));
+    // The Python console of card #83YV, beside the shell entries it grew out of: the new pane asks
+    // its worker to activate relay.python and runs the `workspace_console` argv — `jupyter console
+    // --existing` on the shared kernel, else plain IPython — in its pty.
+    add("newPythonConsole", QStringLiteral("New Python console"));
+    add("newStataConsole", QStringLiteral("New Stata console"));
     // The same ssh command line again, beside this one; with connection sharing, no second login.
     // That is where a split from a remote pane lands by default now (#XQ8F), so this one names the
     // host and the one below names the machine.

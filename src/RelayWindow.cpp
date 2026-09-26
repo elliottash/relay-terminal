@@ -417,8 +417,15 @@ QList<RelayWindow::PaletteItem> RelayWindow::rootItems() {
         // so they can be run from here or bound (issue #78BN).
         items << actionItem(panes, QStringLiteral("New shell"),
                             QStringLiteral("Then ← ↑ ↓ within two seconds places it on that side"), QStringLiteral("pane.splitRight"));
-        for (const auto &planned : {std::pair{QStringLiteral("New Python console"), QStringLiteral("#83YV")},
-                                    std::pair{QStringLiteral("New card"), QStringLiteral("#Y2BA")}}) {
+        // Card #83YV: IPython in a pane of its own, attached to the workspace kernel the composer
+        // and the agent share. The new pane asks its worker to activate relay.python and runs the
+        // `workspace_console` argv in its pty — "Python · ipython" on the header while it runs.
+        items << actionItem(panes, QStringLiteral("New Python console"),
+                            QStringLiteral("IPython on the workspace kernel, shared with the agent"), QStringLiteral("pane.newPythonConsole"));
+        items << actionItem(panes, QStringLiteral("New Stata console"),
+                            QStringLiteral("Stata in a terminal pane, when installed"), QStringLiteral("pane.newStataConsole"));
+        {
+            const auto planned = std::pair{QStringLiteral("New card"), QStringLiteral("#Y2BA")};
             PaletteItem item;
             item.key = QStringLiteral("planned:") + planned.second;
             item.section = panes;

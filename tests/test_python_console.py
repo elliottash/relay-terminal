@@ -100,6 +100,14 @@ class ConsoleCommandTest(unittest.TestCase):
         manifest = PluginRegistry().record(None, "relay.python").manifest
         self.assertEqual(PROGRAM, manifest.console.program)
         self.assertTrue((manifest.root / manifest.console.startup).is_file())
+        self.assertIn("print", [row["text"] for row in W.console_completions(manifest)])
+
+    def test_stata_console_resolves_an_installed_alternative(self):
+        manifest = PluginRegistry().record(None, "relay.stata").manifest
+        answer = W.stata_console_command(manifest.console, which=which_of(**{"stata-mp": "/bin/stata-mp"}))
+        self.assertEqual(["/bin/stata-mp", "-q"], answer["argv"])
+        self.assertEqual("stata-mp", answer["program"])
+        self.assertEqual([], W.stata_console_command(manifest.console, which=which_of())["argv"])
 
 
 class Base(unittest.TestCase):
@@ -145,6 +153,16 @@ class ActivationTest(Base):
         with self.assertRaisesRegex(ValueError, "true or false"):
             self.manager.dispatch({"type": "workspace_activate", "plugin_id": "relay.python", "console": "yes"},
                                   str(self.ws))
+
+    def test_stata_console_answers_with_a_program_or_an_explanation(self):
+        self.manager.registry.which = which_of(**{"stata-se": "/bin/stata-se"})
+        with mock.patch.object(W, "stata_console_command", return_value={"argv": ["/bin/stata-se", "-q"],
+                              "program": "stata-se", "label": "Stata · stata-se", "shared": False, "note": ""}):
+            self.manager.dispatch({"type": "workspace_activate", "id": "s1", "plugin_id": "relay.stata",
+                                   "console": True}, str(self.ws))
+        answer = self.wait_for("workspace_console", "s1")
+        self.assertEqual(["/bin/stata-se", "-q"], answer["argv"])
+        self.assertEqual("relay.stata", self.manager.get().plugin_id)
 
     def test_without_jupyter_the_answer_is_a_repl_of_its_own_on_the_stdlib_kernel(self):
         with mock.patch.object(py_kernel, "jupyter_available", return_value=False):

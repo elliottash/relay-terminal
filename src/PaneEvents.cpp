@@ -63,6 +63,10 @@ void Pane::handle(const QJsonObject &event) {
         if (type == QStringLiteral("job_output")) { openJobOutput(event); return; }
         if (handleProgramEvent(type, event)) return;    // the agent typing into this pane's program
         if (type == QStringLiteral("terminal_command")) { handleTerminalCommand(event); return; }   // protocol 22
+        // The console handshake of #83YV: this pane asked for a console program in
+        // `workspace_activate {console: true}`; the argv in this answer — `jupyter console
+        // --existing <file>` on the kernel the worker just started — is what runs in the pty.
+        if (type == QStringLiteral("workspace_console")) { onWorkspaceConsole(event); return; }
         if (handleRequestsEvent(type, event)) return;   // request ledger UI
         if (handleObservabilityEvent(type, event)) return;
         if (handleSessionEvent(type, event)) return;
@@ -89,6 +93,11 @@ void Pane::handle(const QJsonObject &event) {
             // not at this pane's first configure, which a guest ranked first defers to its first prompt.
             send({{"type", "memory_import"}, {"enabled", QSettings().value(QStringLiteral("memory/import_guests"), true).toBool()}});
             refreshAliases();   // the palette and `/name` need the list before anything is typed
+            // A console pane held its pty empty for this moment (#83YV): the worker is up, so it
+            // can be asked for the console program now. It cannot go earlier — `send` drops
+            // writes while the worker is NotRunning — and it does not wait for `configure`,
+            // which a pane without stored keys never sends.
+            askForConsoleProgram();
         } else if (type == QStringLiteral("route")) {
             const QString id = event.value(QStringLiteral("id")).toString();
             if (takeRemoteRoute(id, event)) return;

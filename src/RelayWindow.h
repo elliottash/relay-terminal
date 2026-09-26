@@ -6287,6 +6287,10 @@ private:
             if (const QJsonObject picks = pane->modePicks(); !picks.isEmpty())
                 leaf.insert(QStringLiteral("mode_picks"), picks);
             if (!pane->sessionIdForLayout().isEmpty()) leaf.insert(QStringLiteral("session_id"), pane->sessionIdForLayout());
+            // A console pane names its plugin (#83YV): restoring it asks the pane's worker for
+            // the console program again (the kernel's connection file is replayed by the worker),
+            // so the pane comes back as a console, not as the shell it would otherwise start.
+            if (!pane->consolePlugin().isEmpty()) leaf.insert(QStringLiteral("console_plugin"), pane->consolePlugin());
             // The guest session a guest preset is running right now (#PCJY): a restored pane whose
             // conversation could not be resumed still names the session to resume its guest on.
             if (const QString guestSession = pane->guestSessionForLayout(); !guestSession.isEmpty())
@@ -6958,12 +6962,18 @@ private:
 
     // A new pane on `direction`'s side of the focused one. `offerPlacement` opens the short window
     // in which Left, Up or Down re-dock it (issue #78BN); only the one-key "new pane" uses it.
-    void splitToward(relay::panes::Direction direction, bool offerPlacement = false) {
+    // `consolePlugin` (#83YV) makes the pane a console pane: instead of a shell it asks its own
+    // worker for that plugin's console program (`workspace_activate {console: true}`, protocol 36)
+    // and runs the argv of the `workspace_console` answer in its pty. It rides in the spec — the
+    // same field a saved layout replays — so nothing here needs to know what a console is.
+    void splitToward(relay::panes::Direction direction, bool offerPlacement = false,
+                     const QString &consolePlugin = QString()) {
         QWidget *anchor = m_activeLeaf;
         if (!anchor) return;
         Pane *pane = nullptr;
         const QString workspace = m_active ? m_active->workspace() : m_manager->workspace();
         QJsonObject spec{{"cwd", leafCwd(anchor)}, {"workspace", workspace}};
+        if (!consolePlugin.isEmpty()) spec.insert(QStringLiteral("console_plugin"), consolePlugin);
         try { pane = createPane(spec); }
         catch (const std::exception &error) { QMessageBox::critical(this, QStringLiteral("Relay"), QString::fromUtf8(error.what())); return; }
         insertBeside(anchor, pane, relay::panes::orientationFor(direction), relay::panes::towardStart(direction));

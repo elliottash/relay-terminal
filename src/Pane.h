@@ -541,6 +541,18 @@ public:
     // signature that names it; the scheduling helpers live further down, with the queue.
     enum class QueueResource { Agent, Terminal };
 
+    // The program a console pane runs in its pty instead of a shell (#83YV). argv comes whole from
+    // the worker's `workspace_console` answer — `jupyter console --existing <file>` attached to the
+    // kernel the worker just started, or a plain `ipython`/`python3` when Jupyter is absent — env
+    // is KEY=VALUE entries appended to the pane's usual terminal environment, `kind` is what the
+    // pane calls the program for routing and completion ("ipython"), and `label` is the header chip
+    // while it runs ("Python · ipython").
+    struct ConsoleProgram {
+        QStringList argv, env, completions, completionLabels;
+        QString kind, label;
+        bool isValid() const { return !argv.isEmpty(); }
+    };
+
     struct QueueEntry {
         quint64 id = 0; bool agent = false, fix = false, watch = false;
         bool boardTask = false;   // keep its header chip until this queued task starts
@@ -704,7 +716,16 @@ public:
         const QString restoredLocalLogin = restoreSpec.value(QStringLiteral("local_login")).toString();
         if (!restoredLocalLogin.isEmpty() && restoredLocalLogin.size() <= 4096)
             m_localLoginRestore = restoredLocalLogin;
-        startTerminal(cleanShell);
+        // A console-program pane (#83YV) starts no shell: its pty is held for the program the
+        // worker is about to name — `workspace_activate {console: true}` on `ready`, the argv in
+        // the `workspace_console` answer a moment later. Starting a shell first would flash a
+        // prompt the console replaces seconds later, and every shell-integration hook would run
+        // against a program that is not a shell. askForConsoleProgram() carries the fallback:
+        // an error or a worker that never answers leaves the pane a plain shell, never a dead
+        // surface.
+        m_consolePluginRequest = restoreSpec.value(QStringLiteral("console_plugin")).toString();
+        if (m_consolePluginRequest.isEmpty()) startTerminal(cleanShell);
+        else status(QStringLiteral("Starting the %1 console…").arg(consoleName(m_consolePluginRequest)));
         connect(&m_poll, &QTimer::timeout, this, [this] { pollShell(); });
         connect(&m_secretPoll, &QTimer::timeout, this, [this] { checkPasswordPrompt(); checkOomKills(); });
         // Both timers watch a shell: the line discipline, the foreground process, a password
@@ -2966,7 +2987,8 @@ public:
             return;
         }
         const bool programAvailable = !m_secretMode &&
-            (relay::input::lineEditorWaiting(inputState()) || relay::input::lineRequested(inputState()));
+            (m_consoleProgram.isValid() || relay::input::lineEditorWaiting(inputState())
+             || relay::input::lineRequested(inputState()));
         const QString next = relay::input::cycledMode(m_modeValue, detectedRoute(), programAvailable);
         setMode(next);
         toast(next == QStringLiteral("agent") ? QStringLiteral("Input: Agent · ! runs one line in the terminal")
@@ -3013,6 +3035,12 @@ public:
         return line;
     }
     QString foregroundProgramName() const {
+        // A console pane names the console it was handed, not the launcher script the pty runs
+        // (#83YV): the argv is `jupyter console --existing …`, but for routing, completion, the
+        // REPL rules and the PROGRAM chip it is "ipython", exactly as a bare `ipython` would be.
+        if (m_consoleProgram.isValid() && !m_consoleProgram.kind.isEmpty())
+            return m_consoleProgram.kind == QStringLiteral("jupyter-console")
+                ? QStringLiteral("ipython") : m_consoleProgram.kind;
         const QString line = foregroundCommandLine();
         return line.isEmpty() ? QString() : QFileInfo(line.section(' ', 0, 0)).fileName();
     }
@@ -4363,6 +4391,10 @@ public:
             {QStringLiteral("zoomReset"), QStringLiteral("terminal.zoomReset")},
             {QStringLiteral("splitRight"), QStringLiteral("pane.splitRight")},
             {QStringLiteral("splitDown"), QStringLiteral("pane.splitDown")},
+            // #83YV's console sits beside the shell entries in the same menu; it has no chord of
+            // its own, so the menu shows none rather than stealing one.
+            {QStringLiteral("newPythonConsole"), QString()},
+            {QStringLiteral("newStataConsole"), QString()},
             {QStringLiteral("splitSameHost"), QStringLiteral("ssh.splitSameHost")},
             {QStringLiteral("equalize"), QStringLiteral("pane.equalize")},
             {QStringLiteral("close"), QStringLiteral("pane.close")},
@@ -4406,7 +4438,7 @@ public:
             if (!m_backend || !m_backend->zoom(step)) status(QStringLiteral("This engine cannot change its font size."));
             return;
         }
-        if (onWindowAction) onWindowAction(id);   // splitRight, splitDown, splitSameHost, equalize, close
+        if (onWindowAction) onWindowAction(id);   // splitRight, splitDown, newPythonConsole, splitSameHost, equalize, close
     }
 
     // "Save output as…": the scrollback and the visible screen as plain text.
@@ -4512,9 +4544,18 @@ public:
     bool hasShell() const { return m_hasShell; }
     QString consoleKind() const {
         if (!hasShell()) return {};
+        // A console program that is running names the pane, not the shell it replaced (#83YV):
+        // "Python · ipython" for a jupyter console attached to the kernel.
+        if (m_consoleProgram.isValid())
+            return m_consoleProgram.label.isEmpty() ? QStringLiteral("Console") : m_consoleProgram.label;
         const QString host = m_login.active ? loginHost() : relay::panestatus::remoteHost(remoteCommandLine());
         return host.isEmpty() ? QStringLiteral("Shell") : QStringLiteral("Shell · %1").arg(host);
     }
+
+    // The plugin this pane was made a console of (#83YV), empty for a shell pane. A saved layout
+    // replays it as `console_plugin` in the pane spec, and the new pane asks for its console
+    // program again rather than coming back as a plain shell.
+    QString consolePlugin() const { return m_consolePluginRequest; }
     // The `context` block of `configure` (protocol 33), or `{}` when there is no context — and a
     // `configure` with no block behaves exactly as one sent before this existed.
     QJsonObject contextBlock() const {
@@ -10861,7 +10902,16 @@ private:
 
     void connectWorker();
 
-    void startTerminal(bool cleanShell);
+    void startTerminal(bool cleanShell, const ConsoleProgram &program = ConsoleProgram());
+
+    // The console-pane handshake of #83YV (protocol 36). askForConsoleProgram sends
+    // `workspace_activate {console: true}` for m_consolePluginRequest to this pane's own worker;
+    // onWorkspaceConsole runs the argv of the answer in the pty via startTerminal(). The ask is
+    // id-prefixed `console-`, so the worker's `error` reply can fall the pane back to a shell.
+    void askForConsoleProgram();
+    void onWorkspaceConsole(const QJsonObject &event);
+    // "relay.python" -> "Python": the pane's status line while it waits for the answer.
+    static QString consoleName(const QString &pluginId);
 
     void send(const QJsonObject &object) {
         // A console writes to its tab's worker through the window (#AGNT step 5): one process,
@@ -10890,13 +10940,16 @@ private:
             typeIntoLogin(m_editor->toPlainText());
             return true;
         }
-        if (relay::input::targetFor(inputState(), mode) != relay::input::LineTarget::Program) return false;
+        // Auto needs the worker's language verdict. Explicit Program/Terminal goes to the pty.
+        if (m_consoleProgram.isValid() && (mode == QStringLiteral("agent") || mode == QStringLiteral("auto"))) return false;
+        if (!m_consoleProgram.isValid()
+            && relay::input::targetFor(inputState(), mode) != relay::input::LineTarget::Program) return false;
         const QString text = routedText ? *routedText : m_editor->toPlainText();
         const QString program = foregroundProgramName();
         const QString name = program.toLower();
         const bool repl = name.startsWith(QStringLiteral("python")) || name == QStringLiteral("ipython")
             || name == QStringLiteral("node") || name == QStringLiteral("psql") || name == QStringLiteral("sqlite3")
-            || name == QStringLiteral("stata");
+            || name.startsWith(QStringLiteral("stata"));
         if (text.contains('\n') && !repl) {
             if (mode != QStringLiteral("program")) return false;   // Auto/Terminal: the old rules
             status(QStringLiteral("%1 takes one line at a time").arg(program.isEmpty() ? QStringLiteral("The program") : program));
@@ -11090,10 +11143,16 @@ public:
         m_shellResizeHeld = false;   // the new terminal starts unheld
         if (m_native) setNative(false, false);
         try {
-            startTerminal(m_cleanShell);
+            // A console pane restarts its console (#83YV): the stored argv still names the
+            // kernel's connection file, which the worker keeps across kernel restarts, so the
+            // fresh `jupyter console --existing` reattaches. Nothing stored yet means the ask is
+            // still in flight — ask again rather than start a shell over it.
+            if (m_consoleProgram.isValid()) startTerminal(m_cleanShell, m_consoleProgram);
+            else if (!m_consolePluginRequest.isEmpty()) { m_consoleAskSent = false; askForConsoleProgram(); }
+            else startTerminal(m_cleanShell);
             relay::theme::polishWindow(this);
             focusInput();
-            toast(QStringLiteral("Shell restarted"));
+            toast(m_consoleProgram.isValid() ? QStringLiteral("Console restarted") : QStringLiteral("Shell restarted"));
         } catch (const std::exception &error) {
             showBanner(QString::fromUtf8(error.what()), QStringLiteral("Try again"), [this] { restartShell(); });
         }
@@ -15511,9 +15570,21 @@ fi
         if (cursor.hasSelection()) return false;
         if (m_login.active) { completeRemote(); return true; }
         const QString line = cursor.block().text();
-        const relay::Completion completion = m_modeValue == QStringLiteral("program")
+        relay::Completion completion = (m_modeValue == QStringLiteral("program") || m_consoleProgram.isValid())
             ? relay::completeProgram(foregroundProgramName(), line, cursor.positionInBlock())
             : relay::completeAt(line, cursor.positionInBlock(), m_cwd, knownCommandNames());
+        if (m_consoleProgram.isValid() && !m_consoleProgram.completions.isEmpty()) {
+            completion.inserts.clear(); completion.labels.clear(); completion.common.clear();
+            const QString prefix = line.mid(completion.start, cursor.positionInBlock() - completion.start);
+            for (int i = 0; i < m_consoleProgram.completions.size(); ++i) {
+                const QString &word = m_consoleProgram.completions.at(i);
+                if (!word.startsWith(prefix)) continue;
+                completion.inserts << word;
+                completion.labels << m_consoleProgram.completionLabels.value(i, word);
+                if (completion.common.isEmpty()) completion.common = word;
+                else while (!word.startsWith(completion.common)) completion.common.chop(1);
+            }
+        }
         if (completion.inserts.isEmpty()) return true;   // nothing matches: swallow the Tab
         const QString typed = line.mid(completion.start, completion.length);
         if (completion.inserts.size() == 1) {
@@ -17352,6 +17423,14 @@ private:
     // shell ends; m_backendOwned keeps the object alive until it can be destroyed safely.
     std::unique_ptr<relay::TerminalBackend> m_backendOwned;
     relay::TerminalBackend *m_backend = nullptr;
+    // The console-program half of #83YV. m_consolePluginRequest is set from the pane's spec for
+    // a pane born as a console ("New Python console"); the pane asks its worker to activate that
+    // plugin with `console: true` and runs the argv of the `workspace_console` answer in the pty.
+    // m_consoleProgram is that answer once it runs — empty again the moment it exits, so the
+    // chips, routing and completion all fall back to whatever the pty runs next.
+    QString m_consolePluginRequest;
+    ConsoleProgram m_consoleProgram;
+    bool m_consoleAskSent = false;   // one ask per worker lifetime; restartShell() clears it
     QString m_engineCore;
     QWidget *m_terminal = nullptr, *m_terminalHost = nullptr;
     // setTranscriptHiddenUntilUsed: the card page's console asks, and the first byte answers.

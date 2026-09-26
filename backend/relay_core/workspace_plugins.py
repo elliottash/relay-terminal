@@ -33,6 +33,7 @@ Codex through `relay_board`, gated by the same object.
 """
 from __future__ import annotations
 
+import json
 import os
 import queue
 import shutil
@@ -193,6 +194,29 @@ def console_command(console, package_root, connection_file: str | None, which=sh
                     "(pip install ipython)."}
 
 
+def stata_console_command(console, which=shutil.which) -> dict:
+    """Resolve the trusted Stata manifest to an installed console binary (#83YV)."""
+    program = list(console.program) if console is not None else []
+    for name in ("stata", "stata-mp", "stata-se"):
+        binary = which(name)
+        if binary and program:
+            return {"argv": [binary, *program[1:]], "program": name,
+                    "label": "Stata · " + name, "shared": False, "note": ""}
+    return {"argv": [], "program": "stata", "label": "Stata", "shared": False,
+            "note": "Stata is not installed or its console binary is not on PATH."}
+
+
+def console_completions(manifest) -> list[dict]:
+    """The manifest's validated static table, carried with the console answer."""
+    completion = getattr(manifest, "completion", None)
+    if completion is None or completion.kind != "static" or not completion.table:
+        return []
+    try:
+        return json.loads((manifest.root / completion.table).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return []
+
+
 class KernelRuntime:
     """One `KernelSession` for one workspace. Human lines run on a FIFO thread of their own, so a
     burst of `kernel_run` messages keeps its order without blocking the worker's loop."""
@@ -208,6 +232,7 @@ class KernelRuntime:
         self.emit = emit
         self.plugin_id = getattr(manifest, "id", None)
         self.console = getattr(manifest, "console", None)
+        self.manifest = manifest
         self.package_root = getattr(manifest, "root", None)
         env = runtime_env(manifest.runner.env if manifest.runner else ())
         if session_factory is not None:
@@ -289,6 +314,7 @@ class KernelRuntime:
         info = self.info()
         return {"workspace_id": self.workspace_id, "plugin_id": self.plugin_id,
                 **console_command(self.console, self.package_root, info.get("connection_file")),
+                "completions": console_completions(self.manifest),
                 "runtime": {"kind": self.kind, **info}}
 
     def _serve(self) -> None:
@@ -726,16 +752,25 @@ class WorkspaceManager:
             console = request.get("console", False)
             if not isinstance(console, bool):
                 raise ValueError("console must be true or false.")
-            if console and getattr(self.runtimes.get(request.get("plugin_id")), "kind", None) != "kernel":
+            if console and request.get("plugin_id") != "relay.stata" \
+                    and getattr(self.runtimes.get(request.get("plugin_id")), "kind", None) != "kernel":
                 # Refused before activating, so a refusal changes nothing.
                 raise ValueError("console: true needs a kernel plugin (relay.python).")
             result = self.activate(folder, request.get("plugin_id"), workspace_id, request.get("path"))
             if console:
-                runtime = self.kernel(workspace_id)
+                runtime = self.kernel(workspace_id) if request.get("plugin_id") != "relay.stata" else None
                 result["console"] = {"state": "starting"}
             self.emit({"event": "workspace_state", "id": request_id, **result})
             if console:
-                runtime.submit_console(request_id)
+                if runtime is not None:
+                    runtime.submit_console(request_id)
+                else:
+                    space = self.get(workspace_id)
+                    record = self.registry.record(space.directory, "relay.stata")
+                    self.emit({"event": "workspace_console", "id": request_id,
+                               "workspace_id": workspace_id, "plugin_id": "relay.stata",
+                               **stata_console_command(record.manifest.console),
+                               "completions": console_completions(record.manifest)})
         elif kind == "workspace_deactivate":
             self.emit({"event": "workspace_state", "id": request_id, **self.deactivate(workspace_id)})
         elif kind == "workspace_state":
