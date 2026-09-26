@@ -200,21 +200,32 @@ def repo_identity(repo, *, state_root, repo_id=None, target=None) -> dict:
               "target": target, "identity_source": "explicit"}
     if repo_id is None:
         try:
-            from relay_core import trees  # noqa: WPS433 — A1, may not exist yet
-            found = None
-            resolve = getattr(trees, "resolve_project", None)
-            if resolve is not None:
-                found = resolve(repo, state_root=state_root)
-            if not found:
-                found = trees.register_repo(repo, state_root=state_root)
-            record["id"] = str(found["id"])
+            from relay_core import trees  # noqa: WPS433 — A1; absent only during development
+        except ImportError:
+            trees = None
+        if trees is None:
+            # Development-only: a stable hash of the common dir until A1's registry exists.
+            record["id"] = hashlib.sha256(str(common).encode("utf-8")).hexdigest()[:16]
+            record["identity_source"] = "fallback-hash: no trees module"
+        else:
+            # The registry is the identity. A failure here is reported, never papered over
+            # with a second id: that would fork the queue after a relocation or corruption.
+            try:
+                found = None
+                resolve = getattr(trees, "resolve_project", None)
+                if resolve is not None:
+                    found = resolve(repo, state_root=state_root)
+                if not found:
+                    found = trees.register_repo(repo, state_root=state_root)
+                record["id"] = str(found["id"])
+            except QueueError:
+                raise
+            except Exception as exc:  # noqa: BLE001 — surfaced as a refusal with its cause
+                raise Refused("repository identity unavailable from relay_core.trees for %s: "
+                              "%s: %s" % (repo, exc.__class__.__name__, exc)) from exc
             record["identity_source"] = "trees"
             if target is None and found.get("target"):
                 record["target"] = str(found["target"])
-        except Exception as exc:  # noqa: BLE001 — the fallback must not depend on A1's state
-            record["id"] = hashlib.sha256(str(common).encode("utf-8")).hexdigest()[:16]
-            record["identity_source"] = "fallback-hash: %s" % (
-                exc.__class__.__name__ if not isinstance(exc, ImportError) else "no trees module")
     if record["target"] is None:
         record["target"] = "main"
     if "/" in record["id"] or record["id"] in ("", ".", ".."):
@@ -519,9 +530,15 @@ class Queue:
         with self._publisher_lock():
             return self._recover_locked()
 
-    def process_one(self, verifier, *, reconcile=None, max_attempts=5) -> dict | None:
+    def process_one(self, verifier, *, reconcile=None, max_attempts=5,
+                    accepted_policy_hash=None) -> dict | None:
         """Prepare, verify and publish the oldest pickable job. Returns its final record, or
-        None when the queue is empty. Holds the publisher lock throughout."""
+        None when the queue is empty. Holds the publisher lock throughout.
+
+        A job found already `ready` is published from its recorded verification only when
+        `accepted_policy_hash` names the policy that verification was bound to and the target
+        has not moved; otherwise it is rebuilt and verified again, because the policy in force
+        may have changed since the pass was recorded."""
         if verifier is None or not callable(verifier):
             raise Refused("a verifier is required: the queue never publishes unverified work")
         with self._publisher_lock():
@@ -535,7 +552,7 @@ class Queue:
                 return None
             job_id = job["id"]
             for _attempt in range(max_attempts):
-                outcome = self._attempt(job_id, verifier, reconcile)
+                outcome = self._attempt(job_id, verifier, reconcile, accepted_policy_hash)
                 if outcome != "retry":
                     break
             else:
@@ -778,7 +795,7 @@ class Queue:
 
     # ----------------------------------------------------------------- one attempt
 
-    def _attempt(self, job_id, verifier, reconcile) -> str:
+    def _attempt(self, job_id, verifier, reconcile, accepted_policy_hash=None) -> str:
         """One prepare/verify/publish pass. Returns "done" or "retry" (the target moved under a
         verified candidate: everything is rebuilt against the new tip)."""
         attached = self.target_attached()
@@ -795,8 +812,11 @@ class Queue:
                 return "done"
         tip = self._tip()
 
-        # A verified candidate against this very tip can go straight to publication.
-        if job["status"] == "ready" and job["target_sha"] == tip and job["candidate_sha"]:
+        # A verified candidate against this very tip, under the policy the caller says is in
+        # force, can go straight to publication. Anything else is verified again.
+        if (job["status"] == "ready" and job["target_sha"] == tip and job["candidate_sha"]
+                and accepted_policy_hash is not None
+                and job["policy_hash"] == str(accepted_policy_hash)):
             if self._verified_row(job) is not None:
                 return self._publish(job_id, tip)
 
@@ -871,6 +891,12 @@ class Queue:
         ok = bool(result["ok"])
         verified = bool(result.get("verified", ok))
         reason = result.get("reason")
+        tampered = self._workspace_drift(path, candidate)
+        if tampered:
+            # A pass over different bytes is not a pass over this commit.
+            ok, verified = False, False
+            reason = "verifier changed the candidate workspace (%s); the result cannot be " \
+                     "bound to %s" % (tampered, candidate[:12])
         with self._tx() as conn:
             conn.execute(
                 "INSERT INTO verifications(job_id, candidate_sha, candidate_tree, target_sha,"
@@ -887,6 +913,34 @@ class Queue:
                 return "done"
             self._set(conn, job_id, status="ready", policy_hash=policy, reason=None)
         return self._publish(job_id, tip)
+
+    def _workspace_drift(self, path, candidate) -> str:
+        """What differs between the service worktree and `candidate` after the verifier ran:
+        "" when HEAD and every tracked file are still exactly the candidate."""
+        head = git(path, "rev-parse", "--verify", "--quiet", "HEAD", check=False).stdout.strip()
+        if head != candidate:
+            return "HEAD is %s" % (head[:12] or "missing")
+        changed = git(path, "status", "--porcelain", "--untracked-files=no", "--ignored=no",
+                      check=False).stdout.splitlines()
+        if changed:
+            paths = sorted(line[3:] for line in changed)
+            return "tracked files modified: %s" % ", ".join(paths[:10])
+        return ""
+
+    def dispose_workspace(self) -> dict:
+        """Remove the service worktree (one per repository, rebuilt on demand). Refs, logs,
+        receipts and the database stay. For a caller that wants no source checkout retained
+        between jobs."""
+        wt = self.service_dir / "candidate"
+        removed = False
+        if wt.exists():
+            proc = git(self.repo, "worktree", "remove", "--force", str(wt), check=False)
+            if proc.returncode != 0:
+                import shutil
+                shutil.rmtree(wt, ignore_errors=True)
+            git(self.repo, "worktree", "prune")
+            removed = True
+        return {"path": str(wt), "removed": removed}
 
     def _verified_row(self, job):
         with self._tx() as conn:

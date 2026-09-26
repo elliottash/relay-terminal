@@ -595,14 +595,81 @@ class QueueCase(unittest.TestCase):
         verifier = Recorder()
         with self.assertRaises(landq.InjectedCrash):
             q.process_one(verifier)
-        # Put the job back to `ready` by hand (B1's split verify/publish phases do this) and
-        # confirm the bound verification is reused only because the target did not move.
+        # Put the job back to `ready` by hand (B1's split verify/publish phases do this): the
+        # bound verification is reused only when the caller names the policy in force and it
+        # matches, and the target did not move.
         with q._tx() as conn:
             q._set(conn, job["id"], status="ready")
         q.faults.clear()
-        done = q.process_one(verifier)
+        done = q.process_one(verifier, accepted_policy_hash="policy-1")
         self.assertEqual(done["status"], "landed")
         self.assertEqual(len(verifier.calls), 1)
+
+    def test_ready_job_is_reverified_unless_the_policy_matches(self):
+        for accepted in (None, "policy-2"):
+            with self.subTest(accepted=accepted):
+                repo = make_repo(self.root / ("ready-%s" % accepted))
+                base = tip(repo)
+                q = Queue(repo, state_root=self.state, repo_id="ready-%s" % accepted)
+                sha = plumb_commit(repo, base, {"a.txt": "x\n"})
+                job = q.submit(sha, request_id="r1")
+                q.faults.add("before_update_ref")
+                verifier = Recorder()
+                with self.assertRaises(landq.InjectedCrash):
+                    q.process_one(verifier)
+                with q._tx() as conn:
+                    q._set(conn, job["id"], status="ready")
+                q.faults.clear()
+                done = q.process_one(verifier, accepted_policy_hash=accepted)
+                self.assertEqual(done["status"], "landed")
+                self.assertEqual(len(verifier.calls), 2, "the old pass was not trusted")
+                self.assertEqual(tip(repo), sha)
+
+    def test_verifier_that_alters_the_candidate_does_not_count(self):
+        q = self.queue()
+        sha = plumb_commit(self.repo, self.base, {"a.txt": "x\n"})
+        job = q.submit(sha, request_id="r1")
+
+        def patch_then_pass(j, candidate, path):
+            (Path(path) / "a.txt").write_text("fixed by the gate\n")
+
+        done = q.process_one(Recorder(on_call=patch_then_pass))
+        self.assertEqual(done["status"], "failed", done)
+        self.assertIn("a.txt", done["reason"])
+        self.assertIn("cannot be bound", done["reason"])
+        self.assertEqual(tip(self.repo), self.base)
+        rows = q.verifications(job["id"])
+        self.assertEqual([(r["ok"], r["verified"]) for r in rows], [(False, False)])
+
+        def move_head(j, candidate, path):
+            run_git(path, "checkout", "-q", "--detach", self.base)
+
+        q.submit(sha, request_id="r2")
+        done = q.process_one(Recorder(on_call=move_head))
+        self.assertEqual(done["status"], "failed")
+        self.assertIn("HEAD is", done["reason"])
+        # Untracked build output is not drift.
+        q.submit(sha, request_id="r3")
+        done = q.process_one(Recorder(on_call=lambda j, c, p: (Path(p) / "build.o").write_text("o")))
+        self.assertEqual(done["status"], "landed")
+
+    def test_dispose_workspace_keeps_everything_durable(self):
+        q = self.queue()
+        sha = plumb_commit(self.repo, self.base, {"a.txt": "x\n"})
+        job = q.submit(sha, request_id="r1")
+        q.process_one(Recorder())
+        wt = q.service_dir / "candidate"
+        self.assertTrue(wt.exists())
+        self.assertTrue(q.dispose_workspace()["removed"])
+        self.assertFalse(wt.exists())
+        self.assertNotIn(str(wt), git_out(self.repo, "worktree", "list"))
+        self.assertIsNotNone(q.receipt(job["id"]))
+        self.assertEqual(git_out(self.repo, "rev-parse", "refs/landq/jobs/%s/candidate" % job["id"]),
+                         sha)
+        # The next job rebuilds it.
+        q.submit(plumb_commit(self.repo, sha, {"a.txt": "y\n"}), request_id="r2")
+        self.assertEqual(q.process_one(Recorder())["status"], "landed")
+        self.assertFalse(q.dispose_workspace()["removed"] is None)
 
     # ------------------------------------------------------------ competing processes
 
@@ -702,11 +769,26 @@ class QueueCase(unittest.TestCase):
         a = Queue(self.repo, state_root=self.state)
         b = Queue(self.repo, state_root=self.state)
         self.assertEqual(a.repo_id, b.repo_id)
-        self.assertEqual(len(a.repo_id), 16)
         self.assertEqual(a.target, "main")
         self.assertTrue(a.identity["identity_source"] in ("trees", ) or
                         a.identity["identity_source"].startswith("fallback-hash"))
         import types
+        # A registry that exists but fails is a refusal, never a second identity.
+        broken = types.SimpleNamespace(
+            resolve_project=lambda path, state_root=None: None,
+            register_repo=lambda path, state_root=None: (_ for _ in ()).throw(
+                RuntimeError("registry locked")))
+        saved = sys.modules.get("relay_core.trees")
+        sys.modules["relay_core.trees"] = broken
+        try:
+            with self.assertRaises(landq.Refused) as ctx:
+                Queue(self.repo, state_root=self.state)
+        finally:
+            if saved is None:
+                del sys.modules["relay_core.trees"]
+            else:
+                sys.modules["relay_core.trees"] = saved
+        self.assertIn("registry locked", str(ctx.exception))
         fake = types.SimpleNamespace(
             resolve_project=lambda path, state_root=None: None,
             register_repo=lambda path, state_root=None: {"id": "R1", "target": "trunk"})
