@@ -2095,6 +2095,9 @@ def attach(agent, provider: HarnessProvider) -> None:
             data["guest_session"] = held.session_id
             if held.account:
                 data["guest_account"] = held.account
+            if held.guest_context:
+                data["guest_context"] = dict(held.guest_context)
+                data["guest_context_model"] = held.config.model
         cursors = getattr(agent, "_guest_cursors", None)
         if cursors:
             # Where each guest this pane ran got to (#Q8TM), so a switch back after a Relay
@@ -2244,6 +2247,22 @@ def session_account(data) -> str:
     return value if guest_accounts.valid_id(value) else ""
 
 
+def saved_guest_context(data: dict, provider: HarnessProvider) -> dict:
+    """Use a saved meter reading only for the guest session and model that measured it."""
+    if (session_guest(data) != (provider.guest_id, provider.session_id)
+            or session_account(data) != provider.account
+            or data.get("guest_context_model") != provider.config.model):
+        return {}
+    reading = data.get("guest_context")
+    if not isinstance(reading, dict):
+        return {}
+    window, used = reading.get("window"), reading.get("used_tokens")
+    if (type(window) is not int or window <= 0 or type(used) is not int or used < 0):
+        return {}
+    return {"window": window, "used_tokens": used,
+            "percent": round(min(100.0, 100.0 * used / window), 1)}
+
+
 def resume_session(agent, data, emit) -> None:
     """A Relay `resume`/`load_state` landed on a conversation that ran on a guest (29.3).
 
@@ -2259,11 +2278,14 @@ def resume_session(agent, data, emit) -> None:
         # them resumes its own session rather than handing the whole conversation over again.
         agent._guest_cursors = cursors
     provider = agent_provider(agent)
+    if provider is not None:
+        provider.guest_context = {}
     # The session lives in its account's directory, so only a harness on that account can open it.
     if not guest_id or provider is None or provider.guest_id != guest_id \
             or provider.account != session_account(data):
         return
     if session == provider.session_id:
+        provider.guest_context = saved_guest_context(data, provider)
         return
     # A *new* harness, not `start()` on the one the pane holds: a harness is one process for one
     # guest session, and both adapters refuse a second start ("already started"). The old one is
@@ -2293,5 +2315,6 @@ def resume_session(agent, data, emit) -> None:
     if started.model:
         provider.config.model = started.model
         agent.config.model = started.model
+    provider.guest_context = saved_guest_context(data, provider)
     emit({"event": "status",
           "text": f"{guest.spec(guest_id).name} resumed its own session {provider.session_id}."})

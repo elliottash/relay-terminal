@@ -1033,6 +1033,10 @@ class AgentWiringTests(unittest.TestCase):
         data = agent.session_data()
         self.assertEqual((data["guest"], data["guest_session"]), ("claude", "guest-sess-7"))
         self.assertEqual(ghp.session_guest(data), ("claude", "guest-sess-7"))
+        provider.guest_context = {"window": 200000, "used_tokens": 25000, "percent": 12.5}
+        data = agent.session_data()
+        self.assertEqual(data["guest_context"], provider.guest_context)
+        self.assertEqual(data["guest_context_model"], provider.config.model)
         # And a pane that is not on a guest says nothing about one.
         ghp.detach(agent)
         self.assertEqual(ghp.configured_fields(agent), {})
@@ -1139,6 +1143,32 @@ class AgentWiringTests(unittest.TestCase):
             ghp.resume_session(agent, {"guest": "claude", "guest_session": "older-session"},
                                events.append)
             ghp.resume_session(agent, {}, events.append)
+
+    def test_resume_restores_only_the_matching_guest_context(self):
+        for guest_id in ("claude", "codex"):
+            with self.subTest(guest=guest_id), tempfile.TemporaryDirectory() as cwd:
+                harness = FakeHarness([], guest=guest_id)
+                harness.start(cwd=cwd)
+                config = ProviderConfig(f"harness://{guest_id}", "model-a", "", {}, 32768)
+                provider = ghp.HarnessProvider(config, harness, guest_id)
+                events = []
+                agent = Agent(config, cwd, events.append, provider=provider, track_requests=False)
+                ghp.attach(agent, provider)
+                provider.guest_context = {"window": 200000, "used_tokens": 25000, "percent": 12.5}
+                saved = agent.session_data()
+                provider.session_id = "fresh-session"
+                replacement = FakeHarness([], guest=guest_id, session_id=saved["guest_session"])
+                with mock.patch.object(ghp, "make_harness", return_value=replacement):
+                    ghp.resume_session(agent, saved, events.append)
+                self.assertEqual(agent.context_event()["guest_context"], provider.guest_context)
+                self.assertEqual(provider.guest_context["used_tokens"], 25000)
+                provider.guest_context = {"window": 100, "used_tokens": 1}
+                for changed in ({"guest_context_model": "other-model"},
+                                {"guest": "codex" if guest_id == "claude" else "claude"},
+                                {"guest_context": {"window": 0, "used_tokens": 2}},
+                                {"guest_context": {"window": 100, "used_tokens": -1}}):
+                    ghp.resume_session(agent, {**saved, **changed}, events.append)
+                    self.assertEqual(provider.guest_context, {})
 
     def test_a_guest_that_will_not_resume_leaves_the_pane_as_it_was(self):
         temp = tempfile.TemporaryDirectory()
