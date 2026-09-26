@@ -195,6 +195,10 @@ QString sortId(Sort sort)
         return QStringLiteral("priority");
     case Sort::PriorityLow:
         return QStringLiteral("priority-low");
+    case Sort::RecentlyViewed:
+        return QStringLiteral("viewed");
+    case Sort::OldestViewed:
+        return QStringLiteral("viewed-oldest");
     case Sort::Manual:
         break;
     }
@@ -219,6 +223,10 @@ Sort sortFromId(const QString &id)
         return Sort::PriorityHigh;
     if (id == QStringLiteral("priority-low"))
         return Sort::PriorityLow;
+    if (id == QStringLiteral("viewed"))
+        return Sort::RecentlyViewed;
+    if (id == QStringLiteral("viewed-oldest"))
+        return Sort::OldestViewed;
     return Sort::Manual;
 }
 
@@ -241,6 +249,10 @@ QString sortTitle(Sort sort)
         return QStringLiteral("Priority high first");
     case Sort::PriorityLow:
         return QStringLiteral("Priority low first");
+    case Sort::RecentlyViewed:
+        return QStringLiteral("Recently viewed");
+    case Sort::OldestViewed:
+        return QStringLiteral("Least recently viewed");
     case Sort::Manual:
         break;
     }
@@ -271,6 +283,8 @@ QString columnTitle(SortColumn column)
         return QStringLiteral("Created");
     case SortColumn::Updated:
         return QStringLiteral("Updated");
+    case SortColumn::Viewed:
+        return QStringLiteral("Viewed");
     }
     return QString();
 }
@@ -294,6 +308,10 @@ Sort nextColumnSort(SortColumn column, Sort current)
         if (current == Sort::RecentlyUpdated)
             return Sort::OldestUpdated;
         return current == Sort::OldestUpdated ? Sort::Manual : Sort::RecentlyUpdated;
+    case SortColumn::Viewed:
+        if (current == Sort::RecentlyViewed)
+            return Sort::OldestViewed;
+        return current == Sort::OldestViewed ? Sort::Manual : Sort::RecentlyViewed;
     }
     return Sort::Manual;
 }
@@ -313,6 +331,9 @@ int sortColumnIndex(Sort sort)
     case Sort::RecentlyUpdated:
     case Sort::OldestUpdated:
         return 3;
+    case Sort::RecentlyViewed:
+    case Sort::OldestViewed:
+        return 4;
     case Sort::Manual:
         break;
     }
@@ -322,7 +343,7 @@ int sortColumnIndex(Sort sort)
 bool sortAscending(Sort sort)
 {
     return sort == Sort::OldestFirst || sort == Sort::OldestUpdated || sort == Sort::TitleAsc
-           || sort == Sort::PriorityLow;
+           || sort == Sort::PriorityLow || sort == Sort::OldestViewed;
 }
 
 QString dateCell(const QString &stamp)
@@ -1514,8 +1535,30 @@ void Model::upsert(const QJsonArray &cards)
 
 void Model::upsert(const Card &card)
 {
-    if (!card.id.isEmpty())
-        m_cards.insert(card.id, card);
+    if (card.id.isEmpty())
+        return;
+    auto it = m_cards.insert(card.id, card);
+    it->viewed = m_viewed.value(card.id.toUpper());
+}
+
+void Model::setViewedStamps(const QHash<QString, QString> &stamps)
+{
+    m_viewed.clear();
+    for (auto it = stamps.constBegin(); it != stamps.constEnd(); ++it)
+        m_viewed.insert(it.key().toUpper(), it.value());
+    for (Card &card : m_cards)
+        card.viewed = m_viewed.value(card.id.toUpper());
+}
+
+void Model::setViewed(const QString &id, const QString &stamp)
+{
+    const QString key = id.toUpper();
+    if (key.isEmpty())
+        return;
+    m_viewed.insert(key, stamp);
+    auto it = m_cards.find(key);
+    if (it != m_cards.end())
+        it->viewed = stamp;
 }
 
 void Model::remove(const QStringList &ids)
@@ -1575,6 +1618,15 @@ int sortCompare(const Card &a, const Card &b, Sort sort)
         if (a.priority == b.priority)
             return a.overdue == b.overdue ? 0 : (a.overdue ? -1 : 1);
         return (a.priority > b.priority) == (sort == Sort::PriorityHigh) ? -1 : 1;
+    }
+    if (sort == Sort::RecentlyViewed || sort == Sort::OldestViewed) {
+        // A card never opened here has nothing to say, so it waits at the far end under both
+        // directions (#FKSN): the viewed ones are what the sort is for.
+        if (a.viewed == b.viewed)
+            return 0;
+        if (a.viewed.isEmpty() || b.viewed.isEmpty())
+            return a.viewed.isEmpty() ? 1 : -1;
+        return (a.viewed < b.viewed) == (sort == Sort::OldestViewed) ? -1 : 1;
     }
     if (sort == Sort::TitleAsc || sort == Sort::TitleDesc) {
         const int byTitle = QString::compare(a.title, b.title, Qt::CaseInsensitive);

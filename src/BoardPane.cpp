@@ -39,6 +39,7 @@
 #include <QPainter>
 #include <QPlainTextEdit>
 #include <QPainterPath>
+#include <QCryptographicHash>
 #include <QPointer>
 #include <QProcess>
 #include <QPushButton>
@@ -280,6 +281,14 @@ bool dateColumnsFit(const QFont &font, int width)
     return width >= keep;
 }
 
+// Whether a row can carry the Viewed column (#FKSN) as well, rightmost after Updated. It is the
+// first of the right-hand columns a narrowing pane gives up — before the Stage and the two dates —
+// so adding it never takes Created or Updated off a pane that had room for them.
+bool viewedColumnFits(const QFont &font, int width)
+{
+    return dateColumnsFit(font, width - dateColumnWidth(font) - kDateGap);
+}
+
 // The Stage column of a flat list (#ESDF): the widest stage name in the badges' font, so every
 // row's stage lines up and the header's STAGE sits over the same cell.
 int stageColumnWidth(const QFont &font)
@@ -299,9 +308,11 @@ bool stageColumnFits(const QFont &font, int width)
 // do not fit are already gone (board::fitBadges) and the title is elided into what is left, so a
 // narrow pane loses decoration before it loses meaning.
 struct CardShape {
-    QRect priorityRect, idRect, idCopyRect, titleRect, createdRect, updatedRect, stageRect;
-    QString title, created, updated, stage;   // `stage` is empty but in a flat list (#ESDF)
+    QRect priorityRect, idRect, idCopyRect, titleRect, createdRect, updatedRect, viewedRect,
+        stageRect;
+    QString title, created, updated, viewed, stage;   // `stage` is empty but in a flat list (#ESDF)
     bool dates = false;                 // the two date columns are on this row
+    bool viewedColumn = false;          // and the Viewed one after them (#FKSN)
     QList<QPair<board::Badge, QRect>> badges;
     // (#G2C7) While the text filter is on: the runs its terms make in the title, and the
     // matched line from the card's text as one small line of its own under the row.
@@ -346,6 +357,15 @@ CardShape cardShape(const board::Card &card, bool showStatus, const QString &sta
     // decoration before it loses meaning.
     shape.dates = dateColumnsFit(font, width);
     int contentRight = width - kRowPadX;
+    shape.viewedColumn = shape.dates && viewedColumnFits(font, width);
+    int stageWidth = width;   // what stageColumnFits measures: the row less the Viewed column
+    if (shape.viewedColumn) {
+        const int column = dateColumnWidth(font);
+        shape.viewedRect = QRect(contentRight - column, 0, column, shape.height);
+        shape.viewed = board::dateCell(card.viewed);
+        contentRight = shape.viewedRect.left() - kDateGap;
+        stageWidth -= column + kDateGap;
+    }
     if (shape.dates) {
         const int column = dateColumnWidth(font);
         shape.updatedRect = QRect(contentRight - column, 0, column, shape.height);
@@ -358,7 +378,7 @@ CardShape cardShape(const board::Card &card, bool showStatus, const QString &sta
     // The Stage column, left of the dates, when the list is flat (#ESDF) and the row is wide
     // enough; otherwise the stage rides the badges as the status one.
     if (!stage.isEmpty()) {
-        if (stageColumnFits(font, width)) {
+        if (stageColumnFits(font, stageWidth)) {
             const int column = stageColumnWidth(font);
             shape.stageRect = QRect(contentRight - column, 0, column, shape.height);
             shape.stage = QFontMetrics(stagePillFont(font)).elidedText(stage, Qt::ElideRight,
@@ -987,6 +1007,9 @@ private:
             painter->drawText(shape.updatedRect.translated(origin),
                               Qt::AlignLeft | Qt::AlignVCenter, shape.updated);
         }
+        if (shape.viewedColumn)
+            painter->drawText(shape.viewedRect.translated(origin),
+                              Qt::AlignLeft | Qt::AlignVCenter, shape.viewed);
         if (!shape.stage.isEmpty()) {
             // The Stage as a pill (#MXMG): mono small caps like the id and the engraved
             // headers, wearing the stage's ink (stageInk) over an unlit edge. cardShape
@@ -1108,7 +1131,7 @@ private:
 // column", then the flag column #VKFV): four cells — ⚑, Card, Created, Updated — each one a sort
 // of the cards *inside* every section, with the arrow on the one that is on. A cell is placed
 // with the same measurements the row delegate draws its columns with, so a label sits exactly
-// over the cells it names; the two date cells and their labels go together when the pane is too
+// over the cells it names; the date cells and their labels go when the pane is too
 // narrow to carry them. The ⚑ is the one cell too narrow for an arrow: the accent colour alone
 // says the priority sort is on.
 class ColumnHeader final : public QWidget {
@@ -1120,7 +1143,8 @@ public:
         m_layout->setSpacing(kDateGap);
         const QList<board::SortColumn> columns{board::SortColumn::Priority, board::SortColumn::Card,
                                                board::SortColumn::Created,
-                                               board::SortColumn::Updated};
+                                               board::SortColumn::Updated,
+                                               board::SortColumn::Viewed};
         for (const board::SortColumn column : columns) {
             auto *cell = new QToolButton(this);
             cell->setObjectName(column == board::SortColumn::Priority
@@ -1129,7 +1153,9 @@ public:
                                     ? QStringLiteral("boardHeaderCard")
                                 : column == board::SortColumn::Created
                                     ? QStringLiteral("boardHeaderCreated")
-                                    : QStringLiteral("boardHeaderUpdated"));
+                                : column == board::SortColumn::Updated
+                                    ? QStringLiteral("boardHeaderUpdated")
+                                    : QStringLiteral("boardHeaderViewed"));
             cell->setToolButtonStyle(Qt::ToolButtonTextOnly);
             cell->setCursor(Qt::PointingHandCursor);
             cell->setFocusPolicy(Qt::NoFocus);      // the arrows stay with the list
@@ -1226,8 +1252,9 @@ private:
             frame + kRowPadX + kGlyphWidth + 4 + idColumnWidth(base) + idCopyWidth(base), 3,
                                      qMax(0, reserve - frame) + kRowPadX, 3);
         const bool dates = dateColumnsFit(base, rowWidth);
+        const bool viewed = dates && viewedColumnFits(base, rowWidth);
         const int column = dateColumnWidth(base);
-        for (int i = 0; i < 4; ++i) {
+        for (int i = 0; i < kColumns; ++i) {
             QToolButton *cell = m_cell[i];
             if (cell == nullptr)
                 continue;
@@ -1247,7 +1274,7 @@ private:
             const bool date = i >= int(board::SortColumn::Created);
             if (date)
                 cell->setFixedWidth(column);
-            cell->setVisible(!date || dates);
+            cell->setVisible(!date || (i == int(board::SortColumn::Viewed) ? viewed : dates));
         }
         if (m_stage) {
             QFont cellFont = monoFont(base, 0.85);
@@ -1262,7 +1289,7 @@ private:
     void updateCells()
     {
         const int active = board::sortColumnIndex(m_sort);
-        for (int i = 0; i < 4; ++i) {
+        for (int i = 0; i < kColumns; ++i) {
             QToolButton *cell = m_cell[i];
             if (cell == nullptr)
                 continue;
@@ -1307,7 +1334,12 @@ private:
                                  ? QStringLiteral("the card's title")
                              : column == board::SortColumn::Created
                                  ? QStringLiteral("when the card was created")
-                                 : QStringLiteral("when the card last changed");
+                             : column == board::SortColumn::Updated
+                                 ? QStringLiteral("when the card last changed")
+                                 // Local on purpose (#FKSN): "what was I just reading" is this
+                                 // machine's question, so another machine keeps its own.
+                                 : QStringLiteral("when you last opened the card on this "
+                                                  "machine");
         if (board::sortColumnIndex(current) == int(column))
             return QStringLiteral("Sorted by %1 — %2. Click again for %3, or once more for the "
                                   "board's own order.")
@@ -1321,7 +1353,8 @@ private:
     }
 
     QHBoxLayout *m_layout = nullptr;
-    QToolButton *m_cell[4] = {nullptr, nullptr, nullptr, nullptr};
+    static constexpr int kColumns = int(board::SortColumn::Viewed) + 1;
+    QToolButton *m_cell[kColumns] = {};
     QToolButton *m_stage = nullptr;
     board::Grouping m_grouping = board::Grouping::Sections;
     QListWidget *m_list = nullptr;
@@ -4871,6 +4904,84 @@ void BoardView::placeToast()
     m_toast->raise();
 }
 
+// ------------------------------------------------------------------------- viewed (#FKSN)
+
+namespace {
+
+// How many cards a board remembers opening. The column answers "what was I just reading", so the
+// oldest stamps are dropped past this rather than letting the settings file grow for ever.
+constexpr int kViewedKept = 500;
+
+// One QSettings entry per board: its root folder — the one the worker named, else the project's
+// board folder, else the project itself, so two boards never share one — hashed, because a path's
+// slashes would read as settings groups.
+QString viewedSettingsKey(const QString &root, const QString &workspace)
+{
+    QString folder = root.isEmpty() ? projects::boardDirOf(workspace) : root;
+    if (folder.isEmpty())
+        folder = workspace;
+    const QByteArray hash = QCryptographicHash::hash(QDir::cleanPath(folder).toUtf8(),
+                                                     QCryptographicHash::Sha1);
+    return QStringLiteral("board/viewed/") + QString::fromLatin1(hash.toHex().left(16));
+}
+
+// The open views, so a card opened in a pane of its own (Ctrl+click, a `#ID` link) is stamped on
+// the list it was opened from too. QPointer: a closed pane drops out by itself.
+QList<QPointer<BoardView>> &viewedViews()
+{
+    static QList<QPointer<BoardView>> views;
+    return views;
+}
+
+}  // namespace
+
+void BoardView::loadViewedStamps()
+{
+    QHash<QString, QString> stamps;
+    const QVariantMap saved = QSettings().value(viewedSettingsKey(m_root, m_workspace)).toMap();
+    for (auto it = saved.constBegin(); it != saved.constEnd(); ++it)
+        stamps.insert(it.key(), it.value().toString());
+    m_model.setViewedStamps(stamps);
+    QList<QPointer<BoardView>> &views = viewedViews();
+    views.removeAll(nullptr);
+    if (!views.contains(this))
+        views.append(this);
+}
+
+void BoardView::stampViewed(const QString &id)
+{
+    if (id.isEmpty())
+        return;
+    const QString key = viewedSettingsKey(m_root, m_workspace);
+    const QString stamp = QDateTime::currentDateTimeUtc().toString(Qt::ISODateWithMs);
+    QSettings settings;
+    QVariantMap saved = settings.value(key).toMap();
+    saved.insert(id.toUpper(), stamp);
+    if (saved.size() > kViewedKept) {
+        QList<QPair<QString, QString>> byTime;   // stamp, id — oldest first once sorted
+        for (auto it = saved.constBegin(); it != saved.constEnd(); ++it)
+            byTime.append({it.value().toString(), it.key()});
+        std::sort(byTime.begin(), byTime.end());
+        for (int i = 0; i < byTime.size() - kViewedKept; ++i)
+            saved.remove(byTime.at(i).second);
+    }
+    settings.setValue(key, saved);
+    // Every open view of this board takes the stamp: the one the card opened in, and the list a
+    // Ctrl+click opened it from. Only a view sorted by it has rows to move; the rest repaint.
+    for (const QPointer<BoardView> &view : viewedViews()) {
+        if (view.isNull() || (view != this && !view->m_model.card(id)))
+            continue;
+        if (view != this && viewedSettingsKey(view->m_root, view->m_workspace) != key)
+            continue;
+        view->m_model.setViewed(id, stamp);
+        const board::Sort sort = view->m_model.sort();
+        if (sort == board::Sort::RecentlyViewed || sort == board::Sort::OldestViewed)
+            view->rebuild();
+        else if (view->m_list != nullptr)
+            view->m_list->viewport()->update();
+    }
+}
+
 // ------------------------------------------------------------------------- events
 
 void BoardView::handleEvent(const QJsonObject &event)
@@ -5121,6 +5232,7 @@ void BoardView::handleEvent(const QJsonObject &event)
         // `configured` and the turn events the console is sent, not from this block.
         m_config = event.value(QStringLiteral("config")).toObject();
         m_model.setConfig(m_config);
+        loadViewedStamps();   // before the rows, so every card arrives with its Viewed stamp
         m_model.reset(event.value(QStringLiteral("cards")).toArray());
         m_pendingDeletes.clear();
         const QJsonObject navigation = m_restoreNavigation;
@@ -6993,6 +7105,7 @@ void BoardView::openSelected()
         m_actionOnOpen.clear();
         return;
     }
+    stampViewed(m_selected);   // local only (#FKSN): nothing goes to the worker or the card file
     send({{QStringLiteral("type"), QStringLiteral("board_card_get")},
           {QStringLiteral("card"), m_selected}});
 }

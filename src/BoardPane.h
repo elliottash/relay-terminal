@@ -654,6 +654,11 @@ private:
     QString defaultCategory() const;
     bool sectionTakesNewCards(const QString &columnId) const;
     int rowHeight() const;
+    // The Viewed column's stamps (#FKSN): when this machine last opened each card's page, kept in
+    // QSettings per board root and never in the card file or sent to the worker. Loaded when the
+    // board's cards arrive; stamped by openSelected, into every open view of the same board.
+    void loadViewedStamps();
+    void stampViewed(const QString &id);
 
     QString m_workspace;
     // The `issues` directory the worker that owns this view is reading, learned from the `board`

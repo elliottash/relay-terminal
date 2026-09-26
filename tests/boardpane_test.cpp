@@ -24,6 +24,8 @@
 #include <QDir>
 #include <QScrollArea>
 #include <QScrollBar>
+#include <QSettings>
+#include <QStandardPaths>
 #include <QtTest>
 
 namespace {
@@ -76,6 +78,15 @@ class BoardPaneTests : public QObject {
     Q_OBJECT
 
 private slots:
+    // Opening a card stamps it in QSettings (#FKSN): a test's stamps go to a test file, never
+    // to the settings of the Relay on this machine.
+    void initTestCase()
+    {
+        QStandardPaths::setTestModeEnabled(true);
+        QCoreApplication::setOrganizationName(QStringLiteral("RelayTerminalTest"));
+        QCoreApplication::setApplicationName(QStringLiteral("boardpane-tests"));
+        QSettings().remove(QStringLiteral("board/viewed"));
+    }
     void longFindingsRemainReadableAndScrollable();
     void namedDriverUsesControlsAndRefusesUnavailableTargets();
     void cleanupOperationsHaveTranscriptNotes();

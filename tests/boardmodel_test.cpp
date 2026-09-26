@@ -38,6 +38,8 @@
 #include <QJsonObject>
 #include <QMessageBox>
 #include <QTimer>
+#include <QSettings>
+#include <QStandardPaths>
 #include <QtTest>
 
 using relay::board::Card;
@@ -357,6 +359,15 @@ class BoardModelTests : public QObject {
     Q_OBJECT
 
 private slots:
+    // Opening a card stamps it in QSettings (#FKSN): a test's stamps go to a test file, never
+    // to the settings of the Relay on this machine.
+    void initTestCase()
+    {
+        QStandardPaths::setTestModeEnabled(true);
+        QCoreApplication::setOrganizationName(QStringLiteral("RelayTerminalTest"));
+        QCoreApplication::setApplicationName(QStringLiteral("board-tests"));
+        QSettings().remove(QStringLiteral("board/viewed"));
+    }
     void categoryFoldersComeFromTheConfig();
     void sectionsAreTheConfiguredStatusesThenTheRest();
     void cardsLandInTheSectionOfTheirStatus();
@@ -364,6 +375,7 @@ private slots:
     void memoriesKeepTheirOwnStatuses();
     void rankOrdersASectionAndDoneIsNewestFirst();
     void timeSortsOrderEverySectionAlikeAndTheIdsRoundTrip();
+    void viewedSortsOrderByLastOpenedAndNeverOpenedGoLast();
     void theFilterLanguageMatchesEveryTerm();
     void theWorkerAnswersThePlainWordsOfTheFilter();
     void theFilterHidesEmptySectionsAndUnfoldsTheRest();
@@ -377,6 +389,7 @@ private slots:
     void theRowListIsHeadersThenCards();
     void aFlatListIsEveryShownCardInOneOrder();
     void theStageHeaderTogglesTheFlatListAndTheChoiceIsKept();
+    void theViewedHeaderSortsByLastOpenedAndTheStampsSurviveAReopen();
     void badgesSayWhatTheCardCarries();
     void metadataRowsSortAndFilterSnoozedCards();
     void aClaimedCardCarriesThePanesSession();
@@ -632,10 +645,51 @@ void BoardModelTests::timeSortsOrderEverySectionAlikeAndTheIdsRoundTrip()
                                           relay::board::Sort::RecentlyUpdated,
                                           relay::board::Sort::OldestUpdated,
                                           relay::board::Sort::TitleAsc,
-                                          relay::board::Sort::TitleDesc};
+                                          relay::board::Sort::TitleDesc,
+                                          relay::board::Sort::RecentlyViewed,
+                                          relay::board::Sort::OldestViewed};
     for (relay::board::Sort sort : sorts)
         QCOMPARE(relay::board::sortFromId(relay::board::sortId(sort)), sort);
     QCOMPARE(relay::board::sortFromId(QStringLiteral("nonsense")), relay::board::Sort::Manual);
+}
+
+// The Viewed column (#FKSN): the stamps are this machine's, handed to the model rather than read
+// from the worker's rows, and every card the worker sends later still carries its own.
+void BoardModelTests::viewedSortsOrderByLastOpenedAndNeverOpenedGoLast()
+{
+    using relay::board::Sort;
+    Model model;
+    model.setConfig(config());
+    // Stamps set before the rows arrive, the way the pane loads them from QSettings; the ids'
+    // case does not matter.
+    model.setViewedStamps({{QStringLiteral("aaa1"), QStringLiteral("2026-09-25T10:00:00Z")},
+                           {QStringLiteral("CCC3"), QStringLiteral("2026-09-25T12:00:00Z")}});
+    model.reset(rows({row("AAA1", "ready", "features", "a"), row("BBB2", "ready", "features", "b"),
+                      row("CCC3", "ready", "features", "c"), row("DDD4", "ready", "features", "d")}));
+    QCOMPARE(model.card(QStringLiteral("AAA1"))->viewed, QStringLiteral("2026-09-25T10:00:00Z"));
+    QVERIFY(model.card(QStringLiteral("BBB2"))->viewed.isEmpty());
+
+    const auto ids = [&model](Sort sort) {
+        model.setSort(sort);
+        QStringList out;
+        for (const Card &card : model.cards(QStringLiteral("ready")))
+            out << card.id;
+        return out;
+    };
+    // Never-opened cards wait at the far end both ways round, in the board's own rank.
+    QCOMPARE(ids(Sort::RecentlyViewed), (QStringList{"CCC3", "AAA1", "BBB2", "DDD4"}));
+    QCOMPARE(ids(Sort::OldestViewed), (QStringList{"AAA1", "CCC3", "BBB2", "DDD4"}));
+
+    // Opening a card moves it to the top, and a later upsert from the worker keeps the stamp.
+    model.setViewed(QStringLiteral("DDD4"), QStringLiteral("2026-09-25T13:00:00Z"));
+    QCOMPARE(ids(Sort::RecentlyViewed), (QStringList{"DDD4", "CCC3", "AAA1", "BBB2"}));
+    model.upsert(rows({row("DDD4", "ready", "features", "d changed")}));
+    QCOMPARE(model.card(QStringLiteral("DDD4"))->viewed, QStringLiteral("2026-09-25T13:00:00Z"));
+    QCOMPARE(ids(Sort::RecentlyViewed), (QStringList{"DDD4", "CCC3", "AAA1", "BBB2"}));
+
+    // Two cards opened in the same second fall back to the rank, so the order never wobbles.
+    model.setViewed(QStringLiteral("BBB2"), QStringLiteral("2026-09-25T13:00:00Z"));
+    QCOMPARE(ids(Sort::RecentlyViewed), (QStringList{"BBB2", "DDD4", "CCC3", "AAA1"}));
 }
 
 void BoardModelTests::theFilterLanguageMatchesEveryTerm()
@@ -1423,6 +1477,74 @@ void BoardModelTests::theViewSendsAMoveWhenACardIsDropped()
 // The Stage header is the grouping (#ESDF): a new pane opens flat and newest-updated first, a
 // click groups by stage with the board's own order, another click goes flat again, and the choice
 // rides the layout node.
+// The Viewed column (#FKSN): opening a card's page stamps it on this machine, the Viewed header
+// walks most-recent → least-recent → Manual, a card opened in another pane of the same board moves
+// on this list too, and a pane opened later — a restart — finds the stamps. Nothing about it goes
+// to the worker, which is the only thing that writes card files.
+void BoardModelTests::theViewedHeaderSortsByLastOpenedAndTheStampsSurviveAReopen()
+{
+    const QString workspace = QStringLiteral("/tmp/relay-viewed-test");
+    const auto board = opened({row("AAA1", "inbox", "features", "a"),
+                               row("BBB2", "inbox", "features", "b"),
+                               row("CCC3", "inbox", "features", "c")});
+    relay::BoardView view(workspace), other(workspace);
+    view.restoreGrouping(QStringLiteral("flat"));
+    QList<QJsonObject> sent;
+    view.onSend = [&sent](const QJsonObject &message) { sent << message; };
+    other.onSend = [&sent](const QJsonObject &message) { sent << message; };
+    view.handleEvent(board);
+    other.handleEvent(board);
+
+    auto *viewed = view.findChild<QToolButton *>(QStringLiteral("boardHeaderViewed"));
+    QVERIFY(viewed);
+    QCOMPARE(viewed->text(), QStringLiteral("VIEWED"));
+    viewed->click();
+    QCOMPARE(view.sortOrder(), QStringLiteral("viewed"));
+    QCOMPARE(viewed->text(), QStringLiteral("VIEWED ▼"));
+    QCOMPARE(sketch(view.rows()), (QStringList{"AAA1", "BBB2", "CCC3"}));   // none opened yet
+
+    view.openCard(QStringLiteral("CCC3"));
+    QTest::qWait(5);   // the stamp is to the millisecond; the next open must be later
+    other.openCard(QStringLiteral("BBB2"));   // another pane of this board (Ctrl+click, a link)
+    QCOMPARE(sketch(view.rows()), (QStringList{"BBB2", "CCC3", "AAA1"}));
+    // Evidence (RELAY_SHOT_DIR set writes it): the list sorted by Viewed, arrow on its header.
+    const QString shotDir = qEnvironmentVariable("RELAY_SHOT_DIR");
+    if (!shotDir.isEmpty()) {
+        view.closeDetail();
+        view.resize(1100, 360);
+        view.show();
+        QTest::qWait(50);
+        QVERIFY(view.grab().save(shotDir + QStringLiteral("/board-viewed-sort.png")));
+    }
+    viewed->click();
+    QCOMPARE(view.sortOrder(), QStringLiteral("viewed-oldest"));
+    QCOMPARE(sketch(view.rows()), (QStringList{"CCC3", "BBB2", "AAA1"}));   // unopened stay last
+    viewed->click();
+    QCOMPARE(view.sortOrder(), QStringLiteral("manual"));
+
+    // The worker heard only reads — the two page reads, and the signals a shown pane asks for —
+    // and no stamp: nothing that writes a card.
+    const QSet<QString> reads{QStringLiteral("board_card_get"), QStringLiteral("signals_list")};
+    for (const QJsonObject &message : sent) {
+        QVERIFY2(reads.contains(message.value(QStringLiteral("type")).toString()),
+                 qPrintable(message.value(QStringLiteral("type")).toString()));
+        QVERIFY(!QJsonDocument(message).toJson().contains("viewed"));
+    }
+
+    // A pane opened afterwards — Relay restarted with the same layout — has the stamps back.
+    relay::BoardView reopened(workspace);
+    reopened.restoreGrouping(QStringLiteral("flat"));
+    reopened.setSortOrder(QStringLiteral("viewed"));
+    reopened.handleEvent(board);
+    QCOMPARE(sketch(reopened.rows()), (QStringList{"BBB2", "CCC3", "AAA1"}));
+    // Another board keeps its own stamps.
+    relay::BoardView elsewhere(QStringLiteral("/tmp/relay-viewed-other"));
+    elsewhere.restoreGrouping(QStringLiteral("flat"));
+    elsewhere.setSortOrder(QStringLiteral("viewed"));
+    elsewhere.handleEvent(board);
+    QCOMPARE(sketch(elsewhere.rows()), (QStringList{"AAA1", "BBB2", "CCC3"}));
+}
+
 void BoardModelTests::theStageHeaderTogglesTheFlatListAndTheChoiceIsKept()
 {
     relay::BoardView view(QStringLiteral("/tmp/workspace"));
@@ -1746,6 +1868,18 @@ void BoardModelTests::theColumnsNameTheOrdersAClickGoesThrough()
     QCOMPARE(columnTitle(SortColumn::Card), QStringLiteral("Card"));
     QCOMPARE(columnTitle(SortColumn::Created), QStringLiteral("Created"));
     QCOMPARE(columnTitle(SortColumn::Updated), QStringLiteral("Updated"));
+    QCOMPARE(columnTitle(SortColumn::Viewed), QStringLiteral("Viewed"));
+    // The Viewed column's cycle (#FKSN): most recently opened first, then least, then Manual.
+    QCOMPARE(nextColumnSort(SortColumn::Viewed, Sort::Manual), Sort::RecentlyViewed);
+    QCOMPARE(nextColumnSort(SortColumn::Viewed, Sort::RecentlyViewed), Sort::OldestViewed);
+    QCOMPARE(nextColumnSort(SortColumn::Viewed, Sort::OldestViewed), Sort::Manual);
+    QCOMPARE(nextColumnSort(SortColumn::Viewed, Sort::NewestFirst), Sort::RecentlyViewed);
+    QCOMPARE(sortColumnIndex(Sort::RecentlyViewed), 4);
+    QCOMPARE(sortColumnIndex(Sort::OldestViewed), 4);
+    QVERIFY(sortAscending(Sort::OldestViewed));
+    QVERIFY(!sortAscending(Sort::RecentlyViewed));
+    QCOMPARE(sortId(Sort::RecentlyViewed), QStringLiteral("viewed"));
+    QCOMPARE(sortFromId(QStringLiteral("viewed-oldest")), Sort::OldestViewed);
 
     QCOMPARE(nextColumnSort(SortColumn::Created, Sort::Manual), Sort::NewestFirst);
     QCOMPARE(nextColumnSort(SortColumn::Created, Sort::NewestFirst), Sort::OldestFirst);

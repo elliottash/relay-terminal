@@ -9,6 +9,7 @@
 // sliced). `tabs()` survives only as the category folders a card can be filed into.
 #include <QDateTime>
 #include <QJsonArray>
+#include <QHash>
 #include <QJsonObject>
 #include <QList>
 #include <QMap>
@@ -59,6 +60,10 @@ struct Card {
     int priority = 0;
     bool isPrivate = false;
     bool unread = false;   // local, from QSettings; never in git
+    // When this machine last opened the card's page (#FKSN), as an ISO-8601 UTC stamp: local,
+    // from QSettings through `Model::setViewed`, never in the card file or the worker's rows.
+    // Empty for a card never opened here.
+    QString viewed;
     // A memory card's own record (#9FX8 Memories tab), from the row the worker builds for
     // `type: memory` cards only: `reviewed` is when the memory was last confirmed against its
     // `paths`, `pathsLastCommit` when those paths last moved in git, and `expired` the two
@@ -120,14 +125,14 @@ QString statusTitle(const QString &status);
 // order takes the manual reorder off (a rank nobody can see is a rank nobody can write), so what
 // is on screen and what a drag would say never disagree.
 enum class Sort { Manual, NewestFirst, OldestFirst, RecentlyUpdated, OldestUpdated, TitleAsc,
-                  TitleDesc, PriorityHigh, PriorityLow };
+                  TitleDesc, PriorityHigh, PriorityLow, RecentlyViewed, OldestViewed };
 // The id the pane's layout node keeps ("manual", "newest", "oldest", "updated", "updated-oldest",
-// "title", "title-desc") and back; an unknown id reads as Manual, so a saved pane survives a sort
+// "title", "title-desc", "viewed", "viewed-oldest") and back; an unknown id reads as Manual, so a saved pane survives a sort
 // being renamed away.
 QString sortId(Sort sort);
 Sort sortFromId(const QString &id);
 // "Manual", "Newest first", "Oldest first", "Recently updated", "Least recently updated",
-// "Title A→Z", "Title Z→A" — the word for what is on, in a notice or a tooltip.
+// "Title A→Z", "Title Z→A", "Recently viewed", "Least recently viewed" — the word for what is on, in a notice or a tooltip.
 QString sortTitle(Sort sort);
 
 // ---- grouping (#ESDF, owner 2026-09-21: "i think it would be better if that was one of the sort
@@ -146,10 +151,10 @@ Grouping groupingFromId(const QString &id);
 // ---- the list's columns (owner, 2026-09-19: "add a 'created' and 'updated' column") ----------
 //
 // The header row over the list, left to right: the priority flag, the card itself, then when it
-// was created and when it last changed. Each is a sort, and a click cycles that column's own
+// was created, when it last changed and when this machine last opened it (#FKSN). Each is a sort, and a click cycles that column's own
 // orders and then back to Manual, so the board's drag order is always one click away.
-enum class SortColumn { Priority, Card, Created, Updated };
-// "Card", "Created", "Updated" — the header's word for a column.
+enum class SortColumn { Priority, Card, Created, Updated, Viewed };
+// "Card", "Created", "Updated", "Viewed" — the header's word for a column.
 QString columnTitle(SortColumn column);
 // The order a click on this column's header puts the list in, given the sort that is on.
 Sort nextColumnSort(SortColumn column, Sort current);
@@ -435,6 +440,12 @@ public:
 
     // ---- cards
     const Card *card(const QString &id) const;
+    // When this machine last opened each card's page (#FKSN): id -> ISO-8601 stamp. The pane
+    // loads the map from QSettings and stamps a card as its page opens; every card the worker
+    // sends, now or later, carries its stamp in `Card::viewed`. Nothing here goes to the worker.
+    void setViewedStamps(const QHash<QString, QString> &stamps);
+    void setViewed(const QString &id, const QString &stamp);
+    QHash<QString, QString> viewedStamps() const { return m_viewed; }
     QList<Card> cards(const QString &columnId) const;   // filtered, ordered
     // The open cards a terminal pane has claimed (#0FBB): every card whose `session` is that
     // pane's token and that is not closed, most recently updated first. Closed cards keep the
@@ -540,6 +551,7 @@ private:
     QMap<QString, QString> m_columnTitles;       // column id -> the board's own name for it
     QStringList m_statusChoices;                 // every status a section may collect
     QMap<QString, Card> m_cards;                 // by id
+    QHash<QString, QString> m_viewed;            // id -> last opened here (#FKSN)
     QString m_filter;
     bool m_snoozedOnly = false;
     // The plain words of `m_filter`, and the worker's answer for them (#7M6E). The answer is
