@@ -104,7 +104,8 @@ What it refuses to do, and why:
 
 Exit codes: 0 fine, 1 usage or environment error, 2 `doctor` found something, 3 a merge
 conflict or a swap that could not be completed, 4 the commit is held for review (contested or
-stale hunks), 5 the exact tree does not build. On 3, 4 and 5 nothing was changed.
+stale hunks), 5 the exact tree does not build, 7 every verify build slot stayed busy past
+--wait-seconds. On 3, 4, 5 and 7 nothing was changed.
 """
 
 import argparse
@@ -912,6 +913,16 @@ def human_age(minutes):
     return "%dd%02dh" % (int(minutes) // 1440, (int(minutes) % 1440) // 60)
 
 
+def duration(seconds):
+    """'45s', '4m12s', '1h03m': a wait measured in seconds, for the slot-queue lines."""
+    seconds = int(seconds or 0)
+    if seconds < 60:
+        return "%ds" % seconds
+    if seconds < 3600:
+        return "%dm%02ds" % (seconds // 60, seconds % 60)
+    return "%dh%02dm" % (seconds // 3600, (seconds % 3600) // 60)
+
+
 def log_line(root, message):
     Path(root).mkdir(parents=True, exist_ok=True)
     with (Path(root) / "land.log").open("a", encoding="utf-8") as fh:
@@ -1510,22 +1521,19 @@ def relay_configure_args(log):
     return ["-DCMAKE_BUILD_TYPE=RelWithDebInfo"]
 
 
-def memory_for_slots():
-    """Bytes of memory a verify build may count on: the cgroup limit when one applies
-    (the same one scripts/relay-build caps its parallel jobs by), else MemAvailable,
-    else 2 GiB on platforms without /proc/meminfo."""
-    module = relay_build_module()
-    if module is not None:
-        try:
-            limit = module.memory_limit_bytes()
-            if limit:
-                return limit
-        except Exception:
-            pass
+def memory_for_slots(meminfo="/proc/meminfo"):
+    """Bytes of memory the slot pool may count on: the host's MemTotal, else 2 GiB on
+    platforms without /proc/meminfo.
+
+    The pool is shared by every session on the host, so it is sized after the host,
+    never after the calling pane's cgroup: an agent pane under an 8 GiB MemoryMax used
+    to size it to one slot for everyone (card #3MH4). The cgroup cap still bounds each
+    build's --parallel (build_jobs), which is where it belongs. MemTotal rather than
+    MemAvailable, so every caller computes the same pool at any moment."""
     try:
-        with open("/proc/meminfo", encoding="utf-8") as handle:
+        with open(meminfo, encoding="utf-8") as handle:
             for line in handle:
-                if line.startswith("MemAvailable:"):
+                if line.startswith("MemTotal:"):
                     return int(line.split()[1]) * 1024
     except (OSError, ValueError, IndexError):
         pass
@@ -1564,7 +1572,8 @@ def run_verify(repo, root, session, tree, args, log):
     tree is never read: that is the whole point, because it holds everyone's
     uncommitted code and proves nothing.
     """
-    with verify_slot(repo, root, log, session=session, tree=tree) as base:
+    with verify_slot(repo, root, log, session=session, tree=tree,
+                     wait_seconds=getattr(args, "wait_seconds", None)) as base:
         return _run_verify_in(repo, base, tree, args, log)
 
 
@@ -1604,11 +1613,12 @@ class verify_slot:
     it). Without fcntl (Windows) the first slot is used without a lock.
     """
 
-    def __init__(self, repo, root, log, session=None, tree=None):
+    def __init__(self, repo, root, log, session=None, tree=None, wait_seconds=None):
         self.base = Path(root) / "verify-slots"
         self.prefix = slot_prefix(repo)
         self.log = log
         self.session, self.tree = session, tree
+        self.wait_seconds = wait_seconds      # None waits for as long as it takes
         self.handle = None
 
     def _note_holder(self):
@@ -1643,13 +1653,56 @@ class verify_slot:
             self.handle, self.slot = handle, slot
             self._note_holder()
             return slot
-        slot = order[0]
-        self.log("verify: all %d build slot(s) busy; waiting for %s" % (len(slots), slot.name))
-        self.handle = open(str(slot) + ".lock", "a+")
-        fcntl.flock(self.handle, fcntl.LOCK_EX)
-        self.slot = slot
-        self._note_holder()
-        return slot
+        # All busy. Wait for whichever slot frees first, saying so at once on stderr --
+        # stdout may be a pipe that shows nothing until exit, and a silent wait reads as a
+        # hang (card #3MH4: a session was stopped three times while queued here).
+        started = time.time()
+        announced = None
+        while True:
+            for slot in order:
+                handle = open(str(slot) + ".lock", "a+")
+                try:
+                    fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                except OSError:
+                    handle.close()
+                    continue
+                self.handle, self.slot = handle, slot
+                self._note_holder()
+                self.say("verify: got build slot %s after %s"
+                         % (slot.name, duration(time.time() - started)))
+                return slot
+            waited = time.time() - started
+            if self.wait_seconds is not None and waited >= self.wait_seconds:
+                raise Fail("all %d verify build slot(s) stayed busy for %s (--wait-seconds %s): "
+                           "%s. Nothing was landed; run it again later."
+                           % (len(slots), duration(waited), self.wait_seconds,
+                              self.holders(slots)), code=7)
+            if announced is None or time.time() - announced >= 60:
+                self.say("verify: all %d build slot(s) busy, waited %s so far: %s"
+                         % (len(slots), duration(waited), self.holders(slots)))
+                announced = time.time()
+            time.sleep(1)
+
+    def say(self, message):
+        try:
+            sys.stderr.write(message + "\n")
+            sys.stderr.flush()
+        except OSError:
+            pass
+
+    @staticmethod
+    def holders(slots):
+        """'slot 0: session x (pid n, 4m12s)' for each slot, as its lock file names it."""
+        parts = []
+        for slot in slots:
+            held = read_slot_holder(str(slot) + ".lock")
+            if held is None:
+                parts.append("%s: freeing" % slot.name)
+                continue
+            session, pid, seconds = held
+            parts.append("%s: %s (pid %s%s)" % (slot.name, session or "?", pid,
+                                                 ", %s" % duration(seconds) if seconds else ""))
+        return "; ".join(parts)
 
     def __exit__(self, *exc):
         if self.handle is not None:
@@ -2306,7 +2359,8 @@ def cmd_try(args, log):
     verify = argparse.Namespace(verify_cmd=args.verify_cmd, verify_tests=args.tests,
                                 verify_target=target)
     binary = None
-    with verify_slot(repo, root, log, session=args.session, tree=tree) as base:
+    with verify_slot(repo, root, log, session=args.session, tree=tree,
+                     wait_seconds=args.wait_seconds) as base:
         step, output, tests_failed = _run_verify_in(repo, base, tree, verify, log)
         if step is None:
             say("src %s" % (base / "src"))
@@ -3444,7 +3498,8 @@ Everything else -- logs, compiler errors, the ctest tail -- goes to stderr.
   --print-binary         print ONLY the binary path on stdout; logs go to stderr.
 
 `try` exits 0 when it built (and tested), 1 on usage, 3 when the merge conflicts, 5 when the
-build (a py-compile, or --verify-cmd) fails, 6 when a --tests run fails. A failed try lands
+build (a py-compile, or --verify-cmd) fails, 6 when a --tests run fails, 7 when every verify
+slot stayed busy past --wait-seconds. A failed try lands
 nothing and touches nothing, and leaves the slot's tree in place for inspection.
 
   --verify-cmd "..."   run this instead (cwd = the materialised tree, VERIFY_BUILD in env).
@@ -3495,7 +3550,8 @@ them in the registry (`who` shows them); when the owner's stop wrote a cancelled
 
 exit codes: 0 fine, 1 usage or environment error, 2 doctor found something, 3 conflict or a
 swap that could not be completed, 4 held for review, 5 the exact tree does not build, 6 a
-`try --tests` run failed. Nothing was changed on 3, 4, 5 or 6.
+`try --tests` run failed, 7 every verify slot stayed busy past --wait-seconds. Nothing was
+changed on 3, 4, 5, 6 or 7.
 """.replace("{stale}", str(DEFAULT_STALE_MINUTES))
 
 
@@ -3569,6 +3625,10 @@ def build_parser():
     commit.add_argument("--verify-cmd", default=None, metavar="SHELL",
                         help="run this instead of the default cmake build, with cwd = the "
                              "materialised tree and VERIFY_BUILD in the environment")
+    commit.add_argument("--wait-seconds", type=int, default=None, metavar="N",
+                        help="give up with exit 7, landing nothing, when every verify build "
+                             "slot is still busy after N seconds (default: wait; the wait "
+                             "names each slot's holder on stderr once a minute)")
     commit.add_argument("--verify-tests", default=None, metavar="REGEX",
                         help="also build everything and run the ctest cases matching REGEX")
     commit.add_argument("--verify-target", default=os.environ.get("RELAY_LAND_VERIFY_TARGET",
@@ -3595,6 +3655,10 @@ def build_parser():
                          or "relay", metavar="T",
                          help="the cmake target to build (default relay, or "
                               "RELAY_LAND_VERIFY_TARGET)")
+    try_cmd.add_argument("--wait-seconds", type=int, default=None, metavar="N",
+                         help="give up with exit 7, landing nothing, when every verify build "
+                              "slot is still busy after N seconds (default: wait; the wait "
+                              "names each slot's holder on stderr once a minute)")
     try_cmd.add_argument("--verify-cmd", default=None, metavar="SHELL",
                          help="run this instead of the default cmake build, with cwd = the "
                               "materialised tree and VERIFY_BUILD in the environment")

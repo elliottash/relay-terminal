@@ -1460,6 +1460,70 @@ class VerifySlots(unittest.TestCase):
         self.assertEqual(self.slots(9, 40, env={"RELAY_LAND_VERIFY_SLOTS": "bogus"}), 3)
 
 
+class SlotPool(unittest.TestCase):
+    """Card #3MH4: the pool is sized after the host, and a wait for it is visible."""
+
+    def setUp(self):
+        self.module = land_module()
+        self.root = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, str(self.root), ignore_errors=True)
+        self.lines = []
+        self.module.verify_slot.say = lambda slot, message: self.lines.append(message)
+
+    def test_memory_is_the_hosts_total_not_the_panes_cgroup(self):
+        meminfo = self.root / "meminfo"
+        meminfo.write_text("MemTotal:       127598544 kB\nMemAvailable:    1000 kB\n",
+                           encoding="utf-8")
+        self.assertEqual(self.module.memory_for_slots(str(meminfo)), 127598544 * 1024)
+        self.assertEqual(self.module.memory_for_slots(str(self.root / "missing")), 2 * 1024 ** 3)
+
+    def pool(self, count):
+        os.environ["RELAY_LAND_VERIFY_SLOTS"] = str(count)
+        self.addCleanup(os.environ.pop, "RELAY_LAND_VERIFY_SLOTS", None)
+
+    def hold(self, index):
+        """Hold slot `index` from a child process, as another session's build would."""
+        lock = self.root / "verify-slots" / ("%s-%d.lock" % (self.module.slot_prefix(self.root), index))
+        lock.parent.mkdir(parents=True, exist_ok=True)
+        code = ("import fcntl, json, os, sys, time\n"
+                "h = open(sys.argv[1], 'a+'); fcntl.flock(h, fcntl.LOCK_EX)\n"
+                "h.seek(0); h.truncate(); h.write(json.dumps({'pid': os.getpid(), "
+                "'session': 'other-%d', 'since': time.time()})); h.flush()\n"
+                "print('held', flush=True); time.sleep(float(sys.argv[2]))\n" % index)
+        return code, lock
+
+    def start_holder(self, index, seconds):
+        code, lock = self.hold(index)
+        child = subprocess.Popen([sys.executable, "-c", code, str(lock), str(seconds)],
+                                 stdout=subprocess.PIPE, text=True)
+        self.addCleanup(child.kill)
+        self.assertEqual(child.stdout.readline().strip(), "held")
+        return child
+
+    def test_a_busy_pool_names_its_holders_and_gives_up_after_wait_seconds(self):
+        self.pool(1)
+        self.start_holder(0, 30)
+        started = time.time()
+        with self.assertRaises(self.module.Fail) as raised:
+            with self.module.verify_slot(self.root, self.root, lambda m: None,
+                                         session="me", wait_seconds=1):
+                self.fail("got a slot another process holds")
+        self.assertEqual(raised.exception.code, 7)
+        self.assertIn("other-0", str(raised.exception))
+        self.assertLess(time.time() - started, 10)
+        self.assertTrue(any("busy" in line and "other-0" in line for line in self.lines),
+                        self.lines)
+
+    def test_a_waiter_takes_whichever_slot_frees_first(self):
+        self.pool(2)
+        self.start_holder(0, 30)          # the warm one stays busy
+        self.start_holder(1, 1.5)         # this one frees first
+        with self.module.verify_slot(self.root, self.root, lambda m: None,
+                                     session="me", wait_seconds=20) as slot:
+            self.assertTrue(str(slot).endswith("-1"), slot)
+        self.assertTrue(any(line.startswith("verify: got build slot") for line in self.lines))
+
+
 class Gc(LandCase):
     """Card #SZHQ: nothing under the land root outlives its use."""
 
