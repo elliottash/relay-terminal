@@ -141,6 +141,9 @@ const QSet<QString> &writingActions() {
         QStringLiteral("tab.moveToNewWindow"), QStringLiteral("pane.moveToNewTab"),
         QStringLiteral("pane.moveLeft"), QStringLiteral("pane.moveRight"),
         QStringLiteral("pane.moveUp"), QStringLiteral("pane.moveDown"),
+        // An artifact's agent into its linked shell pane and back (card #2FQ9): a layout move
+        // Dock back undoes, the same agent and conversation either way.
+        QStringLiteral("agent.linkShell"),
         // The pane's own turn and its shell. These end work in flight, and three of them destroy
         // something outright — a compaction cannot be undone, a cleared queue was the person's own
         // typing, a cleared terminal was what they were reading. They are aimed (paneScopedActions)

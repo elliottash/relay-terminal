@@ -989,6 +989,26 @@ ArtifactDock::ArtifactDock(QWidget *parent) : QWidget(parent), m_context(new rel
                                               "Apply. Off: they land at once as undo steps. Remembered per project."));
     m_reviewToggle->setFocusPolicy(Qt::NoFocus);
     headRow->addWidget(m_reviewToggle, 0);
+    // ⤴ (card #2FQ9): this agent — the same conversation — into a shell pane beside the file,
+    // and ⤵ back. The window does the moving (ConsoleHandle::toggleLinked); the head row stays.
+    m_linkToggle = new QToolButton(m_body);
+    m_linkToggle->setObjectName(QStringLiteral("artifactLinkShell"));
+    m_linkToggle->setCursor(Qt::PointingHandCursor);
+    m_linkToggle->setFocusPolicy(Qt::NoFocus);
+    headRow->addWidget(m_linkToggle, 0);
+    const auto showLinked = [this](bool linked) {
+        m_linkToggle->setText(linked ? QStringLiteral("⤵ Dock") : QStringLiteral("⤴ Shell"));
+        m_linkToggle->setToolTip(linked ? QStringLiteral("Bring the agent back under the file and stop its shell. "
+                                                         "The conversation is kept.")
+                                        : QStringLiteral("Pop the agent out into a linked shell pane beside this file. "
+                                                         "Same conversation; ! runs a command there."));
+    };
+    showLinked(false);
+    m_context->onLinkChanged = showLinked;
+    connect(m_linkToggle, &QToolButton::clicked, this, [this] {
+        ensureConsole();
+        if (m_console.toggleLinked) m_console.toggleLinked();
+    });
     auto *foldButton = new QToolButton(m_body);
     foldButton->setObjectName(QStringLiteral("boardChatFold"));
     foldButton->setText(QStringLiteral("⌄"));

@@ -268,6 +268,16 @@ public:
         m_popOut->setFocusPolicy(Qt::NoFocus);
         m_popOut->hide();   // shown once the view says it can open a pane (setPopOutVisible)
         titleRow->addWidget(m_popOut, 0, Qt::AlignTop);
+        // Not the card: its **agent** (card #2FQ9) — the console on this page, with its
+        // conversation — into a linked shell pane beside this one, and back. Shown once the page
+        // has a console (setConsole).
+        m_linkAgent = new QToolButton(this);
+        m_linkAgent->setObjectName(QStringLiteral("boardCardLinkShell"));
+        m_linkAgent->setCursor(Qt::PointingHandCursor);
+        m_linkAgent->setFocusPolicy(Qt::NoFocus);
+        m_linkAgent->hide();
+        setAgentLinked(false);
+        titleRow->addWidget(m_linkAgent, 0, Qt::AlignTop);
         // The owner's delete (#CYM9): the one action that takes a card off the board rather
         // than closing it, so it asks first and its Undo window is the only soft landing.
         m_delete = new QToolButton(this);
@@ -671,6 +681,10 @@ public:
             if (onPopOut)
                 onPopOut();
         });
+        connect(m_linkAgent, &QToolButton::clicked, this, [this] {
+            if (onLinkAgent)
+                onLinkAgent();
+        });
         connect(m_delete, &QToolButton::clicked, this, [this] {
             if (onDeleteHint)
                 onDeleteHint();
@@ -778,6 +792,7 @@ public:
             return;
         m_consoleBox->addWidget(console);
         m_split->setAgentFolded(false);
+        m_linkAgent->show();   // card #2FQ9: there is an agent to pop out now
         // The console's pane header is not drawn here, and not because this page hides it: a
         // console draws none at all (`Pane::applyContextHeader`). Its transcript is hidden until
         // it has something to show, which `ensureCardConsole` asks for — so the page reads
@@ -885,6 +900,15 @@ public:
     std::function<void()> onClose, onCancel, onToPrompt, onEscape;
     std::function<void()> onPopOut;          // ⤴: this card in its own pane (#Y2BA)
     void setPopOutVisible(bool visible) { m_popOut->setVisible(visible); }
+    std::function<void()> onLinkAgent;       // this card's agent into a linked shell pane (#2FQ9)
+    void setAgentLinked(bool linked)
+    {
+        m_linkAgent->setText(linked ? QStringLiteral("⤵ Dock agent") : QStringLiteral("⤴ Agent + shell"));
+        m_linkAgent->setToolTip(linked ? QStringLiteral("Bring this card's agent back to the page and stop its shell. "
+                                                        "The conversation is kept.")
+                                       : QStringLiteral("Move this card's agent into a linked shell pane beside the card. "
+                                                        "Same conversation and thread; ! runs a command there."));
+    }
     std::function<void(const QString &what, const QString &value)> onMove;
     // One click on the card page's priority flag (#DPJB): +1 for a left click, −1 for a right
     // one, exactly as the row's flag reports it. The view clamps and writes `board_priority`.
@@ -3427,6 +3451,7 @@ private:
     QComboBox *m_status = nullptr, *m_tab = nullptr;
     QToolButton *m_close = nullptr, *m_toPrompt = nullptr, *m_openFile = nullptr, *m_edit = nullptr;
     QToolButton *m_popOut = nullptr;
+    QToolButton *m_linkAgent = nullptr;   // card #2FQ9
     QToolButton *m_done = nullptr;
     QToolButton *m_delete = nullptr;
     QTextBrowser *m_doc = nullptr;

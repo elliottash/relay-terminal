@@ -364,6 +364,9 @@ class Context {
     // attached to the tab. There is no signal because this library is QtCore-only and a context is
     // not a QObject; a `std::function` is what the rest of these surfaces already use.
     std::function<void()> onChanged;
+    // Set by a host that shows whether its console is popped out into a linked shell leaf (card
+    // #2FQ9); the window calls it on every pop-out and dock-back, with where the console now is.
+    std::function<void(bool linked)> onLinkChanged;
     void changed()
     {
         if (onChanged)
@@ -405,6 +408,10 @@ struct ConsoleHandle {
     // this console no longer holds, so the console cannot know; the host does, from the
     // board's per-card facts. Calling it for a surface with no turn running is a no-op.
     std::function<void()> turnRunning;
+    // Card #2FQ9: move this console into a linked shell pane beside its host, or dock it back —
+    // the same agent, conversation and context either way. `linked` answers where it is now.
+    std::function<void()> toggleLinked;
+    std::function<bool()> linked;
     explicit operator bool() const { return widget != nullptr; }
 };
 

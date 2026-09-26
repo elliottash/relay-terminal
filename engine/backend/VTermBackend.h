@@ -31,6 +31,7 @@ public:
     qint64 shellPid() const override;
     qint64 foregroundProcessId() const override;
     bool isRunning() const override;
+    void stopProgram() override;
     TermiosFlags termiosFlags() const override;
 
     void writeToDisplay(const QByteArray &bytes) override;

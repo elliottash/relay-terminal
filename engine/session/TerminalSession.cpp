@@ -144,10 +144,14 @@ QString TerminalSession::coreName() const
 
 bool TerminalSession::start(const StartOptions &o)
 {
-    if (m_pty) {
+    if (m_pty && m_pty->isRunning()) {
         m_error = QStringLiteral("session already started");
         return false;
     }
+    // A program that has ended may be followed by another on the same screen (card #2FQ9: an
+    // agent console's linked shell is started, stopped and started again). The finished pty's
+    // reader thread is joined here, before the next one exists.
+    m_pty.reset();
     m_pty = Pty::create();
     m_pty->onOutput = [this](const char *d, size_t n) { onPtyOutput(d, n); };
     m_pty->onFinished = [this](int code) {

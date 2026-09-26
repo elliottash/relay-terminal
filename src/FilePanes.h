@@ -255,6 +255,7 @@ private:
     relay::agent::ConsoleHandle m_console;
     QWidget *m_askRow = nullptr, *m_body = nullptr;
     QToolButton *m_ask = nullptr, *m_changesToggle = nullptr, *m_reviewToggle = nullptr;
+    QToolButton *m_linkToggle = nullptr;   // ⤴ into a linked shell pane, ⤵ back (card #2FQ9)
     QLabel *m_head = nullptr;
     QListWidget *m_changesList = nullptr;
     QString m_askKeys, m_askHintId, m_workspace;

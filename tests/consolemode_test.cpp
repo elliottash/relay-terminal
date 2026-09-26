@@ -2337,6 +2337,163 @@ void aPromptOnAWorkedCardWritesNothingToTheBoard()
         CHECK(!message.value("type").toString().startsWith(QStringLiteral("board_")));
     }
     }
+// ----- a console's linked shell (card #2FQ9) --------------------------------------------------
+//
+// Popped out of its artifact, a console runs a shell on the vterm that already draws its
+// transcript. What must hold is small: the pty starts on the same surface and the same shared
+// worker (no new transcript, no worker of its own); a line aimed at the shell (`!`, or Terminal
+// mode) goes to the pty and never to the context, while every other line still goes to the
+// context; off stops the pty, keeps the transcript and locks the line back to the agent; the same
+// console can link again (the engine session restarts); `exit` in the shell asks to dock back;
+// and the host folding its dock while the console is out does not hide it.
+
+static bool waitFor(const std::function<bool()> &done, int ms = 15000)
+{
+    QElapsedTimer clock;
+    clock.start();
+    while (!done() && clock.elapsed() < ms) {
+        QCoreApplication::processEvents(QEventLoop::AllEvents, 25);
+        QThread::msleep(10);
+    }
+    return done();
+}
+
+static QString transcriptOf(Pane &console)
+{
+    return console.paneFormattedTextLines(2000).join(QLatin1Char('\n')) + QLatin1Char('\n') + console.screenText();
+}
+
+static void submitLine(Pane &console, const QString &text, bool bang)
+{
+    auto *editor = console.findChild<QPlainTextEdit *>(QStringLiteral("composerEditor"));
+    CHECK(editor != nullptr);
+    if (editor == nullptr) return;
+    editor->setFocus();
+    if (bang) {
+        QKeyEvent key(QEvent::KeyPress, Qt::Key_Exclam, Qt::ShiftModifier, QStringLiteral("!"));
+        QCoreApplication::sendEvent(editor, &key);
+    }
+    editor->insertPlainText(text);
+    QKeyEvent enter(QEvent::KeyPress, Qt::Key_Return, Qt::NoModifier);
+    QCoreApplication::sendEvent(editor, &enter);
+}
+
+void aLinkedShellRunsOnTheConsolesOwnSurface()
+{
+    StubContext context;
+    context.workspace = home->path();
+    context.takeSubmit = true;
+    Pane console(context.workspace, context.workspace, false, relay::defaultEngineCore(), &context);
+    QList<QJsonObject> sent;
+    console.onWorkerLine = [&sent](const QJsonObject &message) { sent << message; };
+    console.deliverWorkerEvent({{"event", "ready"}});
+    console.deliverWorkerEvent({{"event", "configured"}, {"model", "test"}});
+    CHECK(waitFor([&console] { return console.hasTerminalSurface(); }));
+    CHECK(!console.hasShell());
+    CHECK_EQ(console.mode(), QStringLiteral("agent"));
+
+    int ended = 0;
+    console.onLinkedShellEnded = [&ended] { ++ended; };
+    CHECK(console.setLinkedShell(true, home->path()));
+    CHECK(console.linkedShell());
+    CHECK(console.hasShell());
+    CHECK(console.sharesWorker());                       // the tab's worker, still
+    CHECK_EQ(console.mode(), QStringLiteral("auto"));    // the chip is back; not locked to the agent
+    CHECK(waitFor([&console] { return console.shellPid() > 0; }));
+
+    // `!` aims the line at the pty: the context never sees it, the shell runs it.
+    submitLine(console, QStringLiteral("echo LINKED_$((6*7))"), true);
+    CHECK(waitFor([&console] { return transcriptOf(console).contains(QStringLiteral("LINKED_42")); }));
+    CHECK(context.submitted.isEmpty());
+
+    // Terminal mode does the same, and Enter in auto mode still goes to the context.
+    console.setMode(QStringLiteral("shell"));
+    submitLine(console, QStringLiteral("echo MODE_$((5*5))"), false);
+    CHECK(waitFor([&console] { return transcriptOf(console).contains(QStringLiteral("MODE_25")); }));
+    CHECK(context.submitted.isEmpty());
+    console.setMode(QStringLiteral("auto"));
+    submitLine(console, QStringLiteral("what does this card need?"), false);
+    CHECK_EQ(context.submitted, QStringList({QStringLiteral("auto|what does this card need?")}));
+    // A real context clears the box when it takes the line (CardContext); the stub does not.
+    if (auto *editor = console.findChild<QPlainTextEdit *>(QStringLiteral("composerEditor"))) editor->clear();
+
+    // Off: the pty stops, the transcript stays, the line is the agent's again.
+    CHECK(console.setLinkedShell(false));
+    CHECK(!console.linkedShell());
+    CHECK(!console.hasShell());
+    CHECK_EQ(console.mode(), QStringLiteral("agent"));
+    CHECK(console.hasTerminalSurface());
+    CHECK(waitFor([&console] { return console.shellPid() == 0; }));
+    CHECK(transcriptOf(console).contains(QStringLiteral("LINKED_42")));
+    CHECK_EQ(ended, 0);                                   // asked for, so not "ended by itself"
+
+    // Again, on the same surface: the engine session starts a second program.
+    CHECK(console.setLinkedShell(true, home->path()));
+    CHECK(waitFor([&console] { return console.shellPid() > 0; }));
+    submitLine(console, QStringLiteral("echo AGAIN_$((3*3))"), true);
+    CHECK(waitFor([&console] { return transcriptOf(console).contains(QStringLiteral("AGAIN_9")); }));
+    CHECK(transcriptOf(console).contains(QStringLiteral("LINKED_42")));
+
+    // `exit` ends the shell by itself: the pane asks to be docked back.
+    submitLine(console, QStringLiteral("exit"), true);
+    CHECK(waitFor([&ended] { return ended == 1; }));
+    CHECK(console.hasTerminalSurface());                  // the surface outlived the shell
+    CHECK(transcriptOf(console).contains(QStringLiteral("AGAIN_9")));
+    console.setLinkedShell(false);
+    CHECK(!console.hasShell());
+}
+
+void aHostFoldDoesNotHideALinkedConsole()
+{
+    StubContext context;
+    context.workspace = home->path();
+    Pane console(context.workspace, context.workspace, false, relay::defaultEngineCore(), &context);
+    console.onWorkerLine = [](const QJsonObject &) {};
+    CHECK(waitFor([&console] { return console.hasTerminalSurface(); }));
+    console.setCollapsed(true);
+    CHECK(console.collapsed());
+    CHECK(console.setLinkedShell(true, home->path()));
+    CHECK(!console.collapsed());                          // out in a leaf of its own: shown
+    console.setCollapsed(true);                           // the host folds its dock meanwhile
+    CHECK(!console.collapsed());
+    console.setCollapsed(false);
+    console.setCollapsed(true);                           // …and the last wish is the host's
+    CHECK(console.setLinkedShell(false));
+    CHECK(console.collapsed());                           // docked back into a folded dock
+}
+
+// A card page hides its console's transcript until something prints on it (`setTranscriptHidden
+// UntilUsed`). A linked shell prints its prompt there, so linking shows it, and docking back with
+// nothing else printed puts the host's rule back.
+void aLinkedShellShowsAnUnusedTranscript()
+{
+    StubContext context;
+    context.workspace = home->path();
+    Pane console(context.workspace, context.workspace, false, relay::defaultEngineCore(), &context);
+    console.onWorkerLine = [](const QJsonObject &) {};
+    CHECK(waitFor([&console] { return console.hasTerminalSurface(); }));
+    console.setTranscriptHiddenUntilUsed(true);
+    // The terminal host is the one item of the pane's column that stretches (src/PaneUi.cpp).
+    QWidget *host = nullptr;
+    if (auto *column = qobject_cast<QBoxLayout *>(console.layout()))
+        for (int i = 0; i < column->count() && !host; ++i)
+            if (column->stretch(i) == 1) host = column->itemAt(i)->widget();
+    CHECK(host != nullptr);
+    if (host == nullptr) return;
+    CHECK(host->isHidden());
+    CHECK(console.setLinkedShell(true, home->path()));
+    CHECK(!host->isHidden());
+    CHECK(console.setLinkedShell(false));
+}
+
+// A terminal pane has its shell already, and is never "linked".
+void aTerminalPaneIsNeverLinked()
+{
+    Pane pane(home->path(), home->path(), true);
+    CHECK(!pane.setLinkedShell(true, home->path()));
+    CHECK(!pane.linkedShell());
+}
+
 }  // namespace cases
 
 #include "pane_waits.h"
@@ -2491,6 +2648,14 @@ int main(int argc, char **argv)
             cases::enteringPlanSelectsHigh();
             cases::clickingPlanLeavesModeAndPreservesDraft();
             cases::planWhileConfiguringSelectsHighBeforeMode();
+        });
+    }
+    if (app.arguments().contains(QStringLiteral("--linkedshell-only"))) {
+        return runRepeated("linkedshell", "linkedshell: all cases passed", [] {
+            cases::aLinkedShellRunsOnTheConsolesOwnSurface();
+            cases::aHostFoldDoesNotHideALinkedConsole();
+            cases::aLinkedShellShowsAnUnusedTranscript();
+            cases::aTerminalPaneIsNeverLinked();
         });
     }
     if (app.arguments().contains(QStringLiteral("--activity-history-only"))) {

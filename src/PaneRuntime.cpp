@@ -1413,7 +1413,11 @@ void Pane::requestRoute(bool submit, const QString &overrideMode) {
         // answers true and nothing below runs. A terminal context answers false, which is why a
         // terminal pane is byte-for-byte what it was. The text is cleared and remembered here,
         // exactly as `submitAgent` would have done, so the composer behaves the same either way.
-        if (submit && m_context && !m_editor->toPlainText().trimmed().isEmpty()) {
+        // A console's linked shell (card #2FQ9) takes the line only when it was aimed there — a
+        // typed `!`, or Terminal on the mode chip. A card's three chords stay the card's.
+        const bool toLinkedShell = m_linkedShell && (m_prefixMode == QStringLiteral("shell")
+            || (overrideMode == QStringLiteral("auto") && m_modeValue == QStringLiteral("shell")));
+        if (submit && m_context && !toLinkedShell && !m_editor->toPlainText().trimmed().isEmpty()) {
             const QString typed = m_editor->toPlainText();
             // `overrideMode`, not the resolved `mode`: the raw route is which **key** was pressed
             // — "auto" for Enter, "agent" for Ctrl+Enter, "shell" for Ctrl+Shift+Enter — and a
@@ -1484,7 +1488,9 @@ void Pane::requestRoute(bool submit, const QString &overrideMode) {
         // agent to offer it to, the shell makes that judgement itself, exactly as it does for
         // anything typed natively. dispatch() then takes it down the ordinary terminal path —
         // login, queue, hand-off and all — so nothing else about the line changes.
-        if (submit && routerDown
+        // A console's linked shell (card #2FQ9) is the same case: its worker is the tab's, which
+        // answers the console's context, not this pty, and a line aimed at the shell was aimed.
+        if (submit && (routerDown || m_linkedShell)
             && relay::input::withoutRouter(mode) == relay::input::WithoutRouter::Shell) {
             const QString typed = m_editor->toPlainText();
             if (typed.trimmed().isEmpty()) return;

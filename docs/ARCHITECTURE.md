@@ -2171,6 +2171,47 @@ windowed digest of that agent's own turns, tool calls and timings, never the who
 answer "why was that turn slow" about a turn of its own — and each pane keeps its Ask row, which
 prefills the owning pane's composer and focuses it, the Check-finding draft pattern.
 
+**An artifact's agent can leave its artifact and come back: the linked shell** (card #2FQ9). The
+owner: *"you can pop out the artifact agent and it goes into a side-by-side separate connected shell
+pane. so that agent is working on the artifact but has access to the shell as well."* What moves is
+the console widget itself, never a copy. It stays in `RelayWindow::m_consoles`, attached to its tab's
+worker and wrapped around the same host context, so the conversation, a card's `board_ask` routing
+and its thread entries are the same before, during and after (the live drive's card thread carries
+one `turn=<conversation>/…` prefix across docked, linked and docked-again turns).
+
+- **Pane.** `Pane::setLinkedShell(on, cwd)` (src/PaneLinkedShell.cpp) starts a pty **on the backend
+  that already draws the transcript**: `startTerminal` built the surface and stopped before the pty,
+  and nothing about it is rebuilt. `hasShell()` is then true (so asks carry `terminalSnapshot`), the
+  mode chip comes back, and the transcript is shown even on a card page that hides an unused one.
+  No second worker starts. A line goes to the pty only when it was aimed there, with a typed `!` or
+  Terminal on the chip, and it is dispatched locally, because the tab's worker answers the
+  context and not this pty. Every other line and chord still reaches `Context::submit` first, so
+  Enter / Ctrl+Enter / Ctrl+Shift+Enter on a card mean what they meant. Off stops the pty with
+  `TerminalBackend::stopProgram()` and keeps the transcript. The engine's `TerminalSession` starts
+  a second program once the first has ended, and a link made while the last shell is still going
+  waits for it. The shell runs under memory isolation like any pane's, but never under the local
+  holder (#87HB): a tmux session the link left behind would be re-attached by nothing.
+- **Window.** `RelayWindow::popOutConsole` / `dockConsole` (src/RelayWindowLinkedAgent.cpp) work for
+  any hosted console. The console's slot in its host (a box layout, however nested, or a splitter)
+  is taken by a `relay::LinkedAgentPlaceholder` ("The agent is in its linked shell pane · Show ·
+  Dock back"), and the console goes into a `ToolPane::Kind::LinkedAgent` leaf docked beside the host
+  (src/LinkedAgent.h), whose bar names the card or file and holds Dock back. The host's size limits
+  on the console are saved and restored. Hosts learn where their console is through
+  `Context::onLinkChanged`, and the handle's `toggleLinked` / `linked` are what their buttons call.
+- **Closing and restoring.** Closing the linked leaf, typing `exit` in its shell, or Dock back all
+  dock the agent. A running command is asked about first. Closing the host docks the agent first
+  and closes both: the host owns the context the console is wrapped around, so the agent cannot
+  outlive it. The conversation is the worker's persisted one and returns with the artifact. A host
+  torn down any other way (a tab closing) takes the console with it synchronously, before the
+  context goes, and the linked leaf's destructor puts a console it still holds back into its slot.
+  The linked leaf saves nothing. The host's leaf saves `agent_linked: true`, and a restored host
+  links its agent again once it has one with a terminal surface. If that never happens within ten
+  seconds, the agent stays docked.
+- **Entry points.** "⤴ Agent + shell" on the card page's title row, deliberately separate from
+  "⤴ Own pane", which moves the *card* (#Y2BA). "⤴ Shell" in the file agent's head row beside fold.
+  The palette's `agent.linkShell`, with no default key, acts on the console that has the keyboard,
+  else the active leaf's artifact agent.
+
 ## 10b. The artifact workspace and its chain
 
 A tab can be an **artifact workspace** (#E85D, `src/ArtifactWorkspace.h`, `src/RelayWindowWorkspace.cpp`):

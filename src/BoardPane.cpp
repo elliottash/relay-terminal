@@ -3516,6 +3516,16 @@ void BoardView::ensureCardConsole()
     if (!handle)
         return;
     m_cardConsoleHandle = handle;   // the card page's half of `clearTranscript` (card #CTRN)
+    // Card #2FQ9: the page's "⤴ Agent + shell" moves this console into a linked shell pane, and
+    // the window says where it is after every move so the button reads right.
+    m_detail->onLinkAgent = [this] {
+        if (m_cardConsoleHandle.toggleLinked)
+            m_cardConsoleHandle.toggleLinked();
+    };
+    m_cardContext->onLinkChanged = [this](bool linked) {
+        if (m_detail != nullptr)
+            m_detail->setAgentLinked(linked);
+    };
     if (handle.setTranscriptHiddenUntilUsed) {
         if (auto *column = qobject_cast<QVBoxLayout *>(handle.widget->layout())) {
             if (auto *queue = handle.widget->findChild<QWidget *>(QStringLiteral("queueStrip"))) {

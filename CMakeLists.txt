@@ -1119,12 +1119,15 @@ if(BUILD_TESTING)
             RELAY_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}"
             RELAY_VERSION="${PROJECT_VERSION}")
     endforeach()
+    # A console popped out of its artifact into a linked shell leaf (card #2FQ9).
+    target_sources(relay PRIVATE src/PaneLinkedShell.cpp src/RelayWindowLinkedAgent.cpp src/LinkedAgent.h)
     # The headers are listed for the same reason the `relay` target lists them: AUTOMOC reads the
     # source list, and a header it meets only through an include is parsed by moc instead --
     # which trips over the raw string in src/Keymap.h ("Ctrl+Shift+(").
     foreach(console_target relay-consolemode-tests relay-console-harness relay-boardturnsurface-tests)
         target_sources(${console_target} PRIVATE
             src/Pane.cpp src/PaneEvents.cpp src/PaneSession.cpp src/PaneUi.cpp src/PaneRuntime.cpp
+            src/PaneLinkedShell.cpp
             src/AppPaths.h src/CopyOnSelect.h src/Keymap.h src/Isolation.h src/GuestBridge.h
             src/Pane.h src/CardDrawer.h src/ApprovalsPane.h src/AgentHost.h src/TranscriptReplay.h src/RelayMark.h
             src/Theme.cpp src/Theme.h src/AgentUi.cpp src/AgentUi.h
@@ -1141,6 +1144,7 @@ if(BUILD_TESTING)
     add_test(NAME boardturnsurface COMMAND relay-boardturnsurface-tests)
     set_tests_properties(boardturnsurface PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
     add_test(NAME consolemode COMMAND relay-consolemode-tests)
+    add_test(NAME linkedshell COMMAND relay-consolemode-tests --linkedshell-only)   # card #2FQ9
     set_tests_properties(consolemode PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
     add_test(NAME queuecontract COMMAND relay-consolemode-tests --xcxd-only)
     set_tests_properties(queuecontract PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")

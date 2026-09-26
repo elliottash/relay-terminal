@@ -373,6 +373,7 @@ void RelayWindow::runActionNow(const QString &id, Pane *target) {
         else if (id == QStringLiteral("review.open")) openReviewPane();
         else if (id == QStringLiteral("tests.open")) openTestSuitesPane();   // card #7BM4
         else if (id == QStringLiteral("helper.ask")) focusHelperOfActiveLeaf();
+        else if (id == QStringLiteral("agent.linkShell")) toggleLinkedConsoleOfActiveLeaf();   // #2FQ9
         else if (id == QStringLiteral("notifications.jump")) jumpToNotification();   // #NQP9
         // Sessions and Projects share a pane, with direct keys for their tabs.
         else if (id == QStringLiteral("sessions.open")) toggleSessionsPane(pane, QStringLiteral("sessions"));
@@ -1331,6 +1332,11 @@ void RelayWindow::wireAgentConsole(Pane *console) {
 QWidget *RelayWindow::buildNode(const QJsonObject &node) {
     QWidget *built = buildNodeWidget(node);
     if (!node.contains(QStringLiteral("split"))) tagWorkspaceMember(built, node);
+    // Card #2FQ9: an artifact whose agent was out in its linked shell pane gets it out again.
+    if (built && node.value(QStringLiteral("agent_linked")).toBool()) {
+        QPointer<QWidget> guard(built);
+        QTimer::singleShot(0, this, [this, guard] { if (guard) relinkRestoredConsole(guard); });
+    }
     return built;
 }
 
@@ -1802,6 +1808,10 @@ void RelayWindow::refreshPaneStatus() {
 
 void RelayWindow::closePane(QWidget *pane, bool record) {
         if (m_closePrompt) return;
+        // Card #2FQ9: closing a linked agent's leaf docks it back — the agent is its artifact's,
+        // not the leaf's — and closing its artifact docks it first, so the two close together.
+        if (Pane *linked = linkedConsoleOfLeaf(pane)) { dockConsole(linked); return; }
+        if (hostHasLinkedConsole(pane)) dockLinkedConsolesOf(pane);
         QWidget *page = pageOf(pane);
         if (!page) return;
         // Closing a chain's head asks about the rest (#R660): all of them, or just it. Answering

@@ -523,6 +523,7 @@ public:
         for (const ConsoleEntry &entry : consoles) {
             if (Pane *pane = entry.pane.data()) {
                 disconnect(pane, &QObject::destroyed, this, nullptr);
+                pane->onLinkedShellEnded = nullptr;   // card #2FQ9: no dock-back into this window
                 pane->forgetContext();
             }
         }
@@ -6107,6 +6108,7 @@ private:
         ~TabConsoleContext() override { if (m_host) m_host->onChanged = nullptr; }
 
         void setConsole(QWidget *console) { m_console = console; }
+        relay::agent::Context *host() const { return m_host; }   // card #2FQ9: onLinkChanged
 
         relay::agent::ContextSpec spec() const override {
             relay::agent::ContextSpec spec = m_host ? m_host->spec() : relay::agent::ContextSpec();
@@ -6222,8 +6224,37 @@ private:
         handle.setTranscriptHiddenUntilUsed = [guard](bool on) { if (guard) guard->setTranscriptHiddenUntilUsed(on); };
         handle.clearTranscript = [guard](const QString &surface) { if (guard) guard->clearTranscript(surface); };
         handle.turnRunning = [guard] { if (guard) guard->consoleTurnRunning(); };
+        handle.toggleLinked = [guard] { if (auto *w = windowOf(guard)) w->toggleLinkedConsole(guard); };
+        handle.linked = [guard] { return guard && guard->linkedShell(); };
         return handle;
     }
+
+    // ----- an artifact's agent in a linked shell pane (card #2FQ9, src/RelayWindowLinkedAgent.cpp)
+    //
+    // Pop-out moves the console widget itself — never a copy, never a new agent — out of its
+    // host's layout into a `ToolPane::Kind::LinkedAgent` leaf docked beside the host, and starts
+    // a pty on it (`Pane::setLinkedShell`). A placeholder holds its slot in the host. Dock back is
+    // the reverse. The console stays in `m_consoles`, attached to the same tab worker, with the
+    // same wrapped context, the whole time; that is what keeps the conversation and a card's
+    // thread provenance the same across both moves.
+    bool toggleLinkedConsole(Pane *console);
+    bool popOutConsole(Pane *console);
+    bool dockConsole(Pane *console);
+    // The linked leaf's console, or null when `leaf` is not a linked leaf.
+    Pane *linkedConsoleOfLeaf(QWidget *leaf) const;
+    // True when a console `host` embeds is out in a linked leaf (saved as `agent_linked`).
+    bool hostHasLinkedConsole(QWidget *host) const;
+    // Closing a host brings its agent home first, so it closes with its artifact (the host owns
+    // the context it is wrapped around) instead of being left in a leaf with nothing behind it.
+    void dockLinkedConsolesOf(QWidget *host);
+    // The console `leaf` embeds as its artifact's agent — a card page's, a file editor's —
+    // built when `create` says so and there is none yet; null for any other leaf.
+    Pane *artifactConsoleOf(QWidget *leaf, bool create);
+    // The palette's `agent.linkShell`: the console with the keyboard, else the active leaf's.
+    void toggleLinkedConsoleOfActiveLeaf();
+    // A restored host whose agent was linked when the layout was saved: link it again once the
+    // host has a console to link (a card's page is built when its rows arrive).
+    void relinkRestoredConsole(QWidget *host, int attempt = 0);
 
     // The callbacks a console shares with a terminal pane, and only those. A console is not in any
     // leaf list, so everything here reaches the window through `windowOf` exactly as `createPane`
@@ -6466,7 +6497,13 @@ private:
             return withWorkspaceMember(widget, {{"pane", leaf}});
         }
         // A leaf in an artifact workspace saves its member id beside its node (#E85D).
-        if (auto *tool = dynamic_cast<ToolPane *>(widget)) return withWorkspaceMember(widget, tool->node());
+        if (auto *tool = dynamic_cast<ToolPane *>(widget)) {
+            QJsonObject node = tool->node();
+            // Card #2FQ9: the linked leaf saves nothing (its console is the host's), and the host
+            // says its agent was out, so a restored layout links it again beside it.
+            if (!node.isEmpty() && hostHasLinkedConsole(tool)) node.insert(QStringLiteral("agent_linked"), true);
+            return withWorkspaceMember(widget, node);
+        }
         if (auto *splitter = dynamic_cast<QSplitter *>(widget)) {
             QJsonArray children, sizes;
             const QList<int> all = splitter->sizes();

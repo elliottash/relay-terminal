@@ -410,7 +410,8 @@ class ToolPane final : public QWidget {
 public:
     // `Card` (#Y2BA) is a Board view pinned to one card (BoardView::pinSolo): several of them make
     // several cards open at once in one tab. It is still `board()`, so the board plumbing reaches it.
-    enum class Kind { Explorer, Preview, Plan, Subagent, Turn, Board, Settings, Info, Sessions, Diff, Sharing, Internals, TestSuites, Profile, Models, Review, Card };
+    enum class Kind { Explorer, Preview, Plan, Subagent, Turn, Board, Settings, Info, Sessions, Diff, Sharing, Internals, TestSuites, Profile, Models, Review, Card,
+                      LinkedAgent };   // an artifact's agent popped out with a shell (#2FQ9, src/LinkedAgent.h)
 
     ToolPane(Kind kind, const QString &path, bool planActions = true) : m_kind(kind) {
         setObjectName(QStringLiteral("pane"));

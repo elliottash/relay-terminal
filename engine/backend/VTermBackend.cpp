@@ -135,6 +135,7 @@ void VTermBackend::sendText(const QString &text, bool asPaste)
 qint64 VTermBackend::shellPid() const { return m_session->shellPid(); }
 qint64 VTermBackend::foregroundProcessId() const { return m_session->foregroundPid(); }
 bool VTermBackend::isRunning() const { return m_session->isRunning(); }
+void VTermBackend::stopProgram() { m_session->terminate(); }
 
 TerminalBackend::TermiosFlags VTermBackend::termiosFlags() const
 {

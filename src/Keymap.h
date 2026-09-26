@@ -376,6 +376,10 @@ private:
         // the three panes it works in hold none — and the panes' own search boxes swallow letters.
         add("helper.ask", "agent", "Ask the agent about this pane (Options, Actions, Sessions)",
             {QStringLiteral("Alt+Q")});
+        // Card #2FQ9: the focused artifact's agent (a card page, a file editor) into a linked
+        // shell pane beside it, or back. No default key: the palette and the buttons on the card
+        // page and the file agent's head row are the ways in.
+        add("agent.linkShell", "agent", "Pop this artifact's agent out into a linked shell pane, or dock it back", {});
         // Direct keys for the Projects and Globals tabs of the shared pane (#P7SJ).
         // Plain Ctrl+P and Ctrl+G remain the editor/program's.
         add("projects.open", "pane", "Projects: manage projects and their active sessions", {QStringLiteral("Ctrl+Shift+P")});

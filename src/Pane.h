@@ -4834,7 +4834,7 @@ public:
     // surface does not follow its context.
     void contextChanged() {
         const relay::agent::ContextSpec spec = contextSpec();
-        m_hasShell = !m_context || spec.shell;
+        m_hasShell = !m_context || spec.shell || m_linkedShell;
         updateComposerDraftKey();
         applyContextRouting(spec);
         applyContextHeader();
@@ -4855,7 +4855,9 @@ public:
     // transcript and the §12 queue strip, and a context that one day wants a shell gets its
     // header back with it.
     void applyContextHeader() {
-        if (m_headerWidget) m_headerWidget->setVisible(hasShell());
+        // A console with a linked shell (card #2FQ9) still draws none: the linked leaf's own bar
+        // says whose agent it is and holds Dock back.
+        if (m_headerWidget) m_headerWidget->setVisible(hasShell() && !m_linkedShell);
     }
 
     // **A transcript that has printed nothing takes no room** — for the one host that asks.
@@ -4979,7 +4981,7 @@ public:
 
     void applyTranscriptVisibility() {
         if (!m_terminalHost) return;
-        const bool show = !m_hideEmptyTranscript || m_transcriptUsed;
+        const bool show = !m_hideEmptyTranscript || m_transcriptUsed || m_linkedShell;
         // isVisibleTo(this) is false while an embedding page is hidden, even when the
         // terminal host itself has not been hidden. Set its own visibility explicitly.
         if (m_terminalHost->isHidden() == !show) return;
@@ -4994,6 +4996,15 @@ public:
     // with no terminal is a promise the pane cannot keep. The chips are hidden rather than
     // disabled: nothing else in the pane ever shows them again.
     void applyContextRouting(const relay::agent::ContextSpec &spec) {
+        // A console with a linked shell (card #2FQ9) has somewhere else for a line to go: the
+        // chip comes back, and Terminal mode or a typed `!` sends the line to the pty. Everything
+        // else still reaches the context first (requestRoute), so a card's chords are unchanged.
+        if (m_linkedShell) {
+            if (m_modeValue == QStringLiteral("agent")) m_modeValue = QStringLiteral("auto");
+            if (m_modeChip) m_modeChip->show();
+            refreshPickers();   // the chip's text, which still said "agent"
+            return;
+        }
         if (!m_context || (spec.shell && spec.routing != QStringLiteral("agent"))) return;
         m_modeValue = QStringLiteral("agent");
         if (m_modeChip) m_modeChip->hide();
@@ -5142,7 +5153,25 @@ public:
     // host's — it is one line of that pane's own chrome — and all the pane needs is to be put away
     // and brought back with the keyboard in the right place.
     bool collapsed() const { return m_collapsed; }
+
+    // ----- a console's linked shell (card #2FQ9) ----------------------------------------------
+    //
+    // A console popped out of its artifact into a leaf of its own gets a pty: the same vterm that
+    // draws its transcript runs a shell under it, so the person has a terminal and the agent's
+    // asks carry what is on it (`terminalSnapshot`, which keys off `hasShell()`). Nothing else
+    // about the console moves: its context, its tab worker (no second worker starts — the pty is
+    // not a worker) and its conversation stay exactly as they were, so the card's `board_ask` and
+    // its thread provenance are the same before, during and after. `cwd` is where the shell
+    // starts. Off stops the pty and keeps the transcript; the console is shell-free again.
+    bool setLinkedShell(bool on, const QString &cwd = QString());
+    bool linkedShell() const { return m_linkedShell; }
+    bool hasTerminalSurface() const { return m_backend != nullptr; }
+    // The linked shell ended by itself (`exit`, a crash): the window docks the console back.
+    std::function<void()> onLinkedShellEnded;
     void setCollapsed(bool collapse) {
+        // A linked console (card #2FQ9) is a leaf of its own: folding the host's dock must not
+        // hide it. The host's wish is kept and applied when the console docks back.
+        if (m_linkedShell) { m_collapsedWhenDocked = collapse; return; }
         if (m_collapsed == collapse) return;
         m_collapsed = collapse;
         setVisible(!collapse);
@@ -11299,6 +11328,8 @@ private:
     void connectWorker();
 
     void startTerminal(bool cleanShell, const ConsoleProgram &program = ConsoleProgram());
+    bool startLinkedPty();          // card #2FQ9, src/PaneLinkedShell.cpp
+    void linkedPtyFinished(int code);
 
     // The console-pane handshake of #83YV (protocol 36). askForConsoleProgram sends
     // `workspace_activate {console: true}` for m_consolePluginRequest to this pane's own worker;
@@ -18492,6 +18523,13 @@ private:
     TerminalContext m_terminalContext{this};
     relay::agent::Context *m_context = nullptr;
     bool m_hasShell = true;
+    // Card #2FQ9: a console whose pty is running in its linked leaf, the stop the pane asked for
+    // (so its `onFinished` is not a shell that died), and the host's fold wish held meanwhile.
+    bool m_linkedShell = false;
+    bool m_linkedShellStopping = false;
+    bool m_collapsedWhenDocked = false;
+    bool m_linkedFinishHooked = false;
+    bool m_linkedStartPending = false;   // linked again before the last shell had gone
     // The action row above the busy line, and the letters it answers. Hidden and empty in a
     // terminal pane, which is every pane whose context supplies no actions.
     QWidget *m_actionRow = nullptr;

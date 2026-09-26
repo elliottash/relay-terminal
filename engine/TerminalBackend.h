@@ -280,6 +280,11 @@ public:
     virtual qint64 shellPid() const = 0;
     virtual qint64 foregroundProcessId() const = 0;
     virtual bool isRunning() const = 0;
+    // End the running program (SIGHUP to its process group on Unix) and keep everything drawn so
+    // far. `onFinished` still fires when it has gone. A backend that has ended its program may
+    // start another with `startProgram`: an agent console's linked shell (card #2FQ9) is started,
+    // stopped and started again on the one transcript surface.
+    virtual void stopProgram() {}
     // Needs the LineDiscipline capability. An engine that cannot ask its terminal
     // answers `valid = false`, and the host falls back to /proc/<pid>/fd/0.
     virtual TermiosFlags termiosFlags() const { return {}; }
